@@ -101,10 +101,26 @@ Exemples (bid 1,11498 / offer 1,11508, glissement 0,5 pip) :
 - Message plus ancien que la dernière cotation acceptée : rejeté (hors ordre). Ce plancher survit
   aux reconnexions : un instantané de reconnexion ne peut ni ramener une cotation plus ancienne
   ni rajeunir une cotation existante.
-- Déconnexion ou flux bloqué : état fusionné effacé, entrée bloquée. Mises à jour perdues :
-  bloqué jusqu'à une cotation plus récente.
+- Déconnexion ou flux bloqué : état fusionné effacé, entrée bloquée.
+- Mises à jour perdues : état fusionné effacé ; entrée bloquée jusqu'à une **resynchronisation
+  complète** (tous les champs requis reçus à nouveau, avec un `TIMESTAMP` strictement postérieur
+  au dernier reçu avant la perte). Un `TIMESTAMP` seul ou une mise à jour partielle ne suffit pas.
+  La resynchronisation restaure seulement la **cohérence du flux** : elle ne lève aucun autre
+  blocage. La cotation reste soumise à toutes les conditions d'entrée, notamment `DELAY` absent
+  (ASSUMP-013), `TIMESTAMP` périmé ou `DLG_FLAG` différent de `DEAL`.
+- `TIMESTAMP` invalide (non numérique ASCII, non représentable) ou hors plage (avant 2000, ou en
+  avance de plus de 2 s sur la réception locale) : mise à jour rejetée, sans exception, et jamais
+  retenue comme référence d'ordre.
 - `DLG_FLAG` autre que `DEAL` → non négociable (ASSUMP-012) ; `DELAY` = 1, absent ou inconnu →
   bloqué (ASSUMP-013).
-- Les seuils de 10 s (cotation), 60 s (vérification du contrat) et 5 min (fonds propres) sont des
-  **paramètres expérimentaux**, pas des exigences IG.
+- **Limites temporelles : paramètres propres au projet**, choisis par prudence, ni exigés ni
+  documentés par IG, ajustables après observation :
+
+  | Paramètre | Valeur | Code |
+  |---|---|---|
+  | Âge maximal d'une cotation (sur `TIMESTAMP`) | 10 s | `DEFAULT_MAX_QUOTE_AGE` (ASSUMP-009) |
+  | Âge maximal de la vérification du contrat | 60 s | `RiskConfig.max_contract_check_age` (ASSUMP-011) |
+  | Âge maximal des fonds propres | 5 min | `RiskConfig.max_equity_age` (ASSUMP-010) |
+  | Tolérance d'horloge (date dans le futur) | 2 s | `CLOCK_TOLERANCE`, `RiskConfig.clock_tolerance` |
+  | `TIMESTAMP` le plus ancien jugé plausible | 2000-01-01 UTC | `EARLIEST_PLAUSIBLE_TIMESTAMP` |
 - Garantie : `src/forex_bot/streaming.py` (`PriceTracker`), `src/forex_bot/market.py`.

@@ -162,12 +162,83 @@ def test_malformed_values_are_dropped() -> None:
     assert tracker.blockers(NOW) == []
 
 
-def test_lost_updates_block_until_newer_quote() -> None:
+LOST = "mises à jour PRICE perdues : resynchronisation complète requise"
+
+
+def test_lost_updates_require_complete_resynchronisation() -> None:
+    tracker = connected()
+    before = NOW - timedelta(seconds=2)
+    tracker.on_update(full(before), NOW)
+    tracker.on_lost_updates()
+    assert tracker.quote() is None  # merged values after a loss are not trusted
+    assert tracker.blockers(NOW) == [LOST]
+    # a newer TIMESTAMP alone does NOT resynchronise
+    tracker.on_update({"TIMESTAMP": ms(NOW - timedelta(seconds=1))}, NOW)
+    assert tracker.blockers(NOW) == [LOST]
+    # nor a partial update
+    tracker.on_update({"BIDPRICE1": "1.11500", "ASKPRICE1": "1.11510"}, NOW)
+    assert tracker.blockers(NOW) == [LOST]
+    # the missing required field completes the set, with a TIMESTAMP newer than before the loss
+    tracker.on_update({"DLG_FLAG": "DEAL", "DELAY": "0"}, NOW)
+    assert tracker.blockers(NOW) == []
+    quote = tracker.quote()
+    assert quote is not None and quote.bid == D("1.11500")
+
+
+def test_resynchronisation_does_not_lift_other_blockers() -> None:
     tracker = connected()
     tracker.on_update(full(NOW - timedelta(seconds=2)), NOW)
     tracker.on_lost_updates()
-    assert "mises à jour PRICE perdues, en attente d'une cotation plus récente" in tracker.blockers(NOW)
-    tracker.on_update({"TIMESTAMP": ms(NOW - timedelta(seconds=1))}, NOW)
+    # complete resynchronisation, but DELAY absent as observed on the demo
+    tracker.on_update({k: v for k, v in full(NOW - timedelta(seconds=1)).items() if k != "DELAY"}, NOW)
+    assert tracker.blockers(NOW) == ["indicateur de cotation différée inconnu"]
+
+
+def test_resynchronisation_needs_timestamp_strictly_newer_than_the_loss() -> None:
+    tracker = connected()
+    tracker.on_update(full(NOW - timedelta(seconds=2)), NOW)
+    tracker.on_lost_updates()
+    # complete snapshot, but carrying the same IG time as before the loss
+    assert tracker.on_update(full(NOW - timedelta(seconds=2)), NOW) is UpdateOutcome.ACCEPTED
+    assert tracker.blockers(NOW) == [LOST]
+    tracker.on_update(full(NOW - timedelta(seconds=1)), NOW)
+    assert tracker.blockers(NOW) == []
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "99999999999999999999",  # numeric, beyond what datetime can represent
+        "253402300800000",  # 10000-01-01: numeric, just past datetime's maximum
+        "١٧٩٢٩٢٩٦٠٠١٢٣",  # non-ASCII digits
+        "-1",
+        "",
+    ],
+)
+def test_unrepresentable_timestamp_is_rejected_without_exception(raw: str) -> None:
+    assert parse_ig_timestamp(raw) is None
+    tracker = connected()
+    tracker.on_update(full(NOW), NOW)
+    assert tracker.on_update({"TIMESTAMP": raw, "BIDPRICE1": "1.20000"}, NOW) is UpdateOutcome.MALFORMED
+    quote = tracker.quote()
+    assert quote is not None and quote.bid == D("1.11498") and quote.quote_time_utc == NOW
+
+
+@pytest.mark.parametrize(
+    "ig_time",
+    [
+        datetime(1999, 12, 31, 23, 59, 59, tzinfo=UTC),  # numeric but implausibly old
+        NOW + timedelta(days=365),  # numeric, representable, far ahead of the receipt time
+        NOW + timedelta(seconds=3),  # just beyond the 2 s clock tolerance
+    ],
+)
+def test_out_of_range_numeric_timestamp_never_becomes_the_ordering_floor(ig_time: datetime) -> None:
+    tracker = connected()
+    assert tracker.on_update(full(ig_time), NOW) is UpdateOutcome.OUT_OF_RANGE
+    assert tracker.dropped_out_of_range == 1
+    assert tracker.quote() is None
+    # a genuine quote is still accepted afterwards (not rejected as out of order)
+    assert tracker.on_update(full(NOW - timedelta(seconds=1)), NOW) is UpdateOutcome.ACCEPTED
     assert tracker.blockers(NOW) == []
 
 

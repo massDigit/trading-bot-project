@@ -252,7 +252,8 @@ def _report(listener: ProbeListener, lines: list[str], out: Callable[[str], None
     out(
         f"Mises à jour : {total} (instantanés {listener.snapshots}) ; acceptées "
         f"{listener.outcomes[UpdateOutcome.ACCEPTED]}, hors ordre {listener.outcomes[UpdateOutcome.OUT_OF_ORDER]}, "
-        f"malformées {listener.outcomes[UpdateOutcome.MALFORMED]}, hors connexion "
+        f"malformées {listener.outcomes[UpdateOutcome.MALFORMED]}, "
+        f"hors plage {listener.outcomes[UpdateOutcome.OUT_OF_RANGE]}, hors connexion "
         f"{listener.outcomes[UpdateOutcome.NOT_CONNECTED]}, pertes signalées {listener.lost_updates}"
     )
     out(f"Champs reçus avec une valeur : {', '.join(sorted(listener.fields_seen)) or 'aucun'}")

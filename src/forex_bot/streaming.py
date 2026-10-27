@@ -21,21 +21,34 @@ Rules
   look fresh.
 - On disconnection or stall the merged fields are cleared: values received
   before and after a gap are never combined.
-- Lost updates (Lightstreamer `onItemLostUpdates`) block until an update with
-  a strictly newer TIMESTAMP arrives.
+- Lost updates (Lightstreamer `onItemLostUpdates`) make the merged state
+  unreliable: it is cleared and the entry stays blocked until a complete
+  resynchronisation, i.e. every required field received again after the loss
+  with a TIMESTAMP strictly newer than the last one before the loss. A
+  TIMESTAMP alone, or a partial update, is not enough (in MERGE mode unchanged
+  fields are not resent: a new subscription snapshot is usually needed).
+  Resynchronisation only restores the consistency of the stream: the quote is
+  then evaluated like any other and stays blocked by any remaining condition
+  (e.g. DELAY absent, stale TIMESTAMP, DLG_FLAG other than DEAL).
+- TIMESTAMP must be ASCII digits within a plausible range (not before
+  2000-01-01, not ahead of the local receipt time by more than the clock
+  tolerance); otherwise the update is dropped, so an aberrant value can never
+  become the ordering floor. These bounds are project parameters, not IG
+  requirements.
 - Only DLG_FLAG = DEAL is treated as tradeable (ASSUMP-012, not confirmed by IG).
 - A missing or unknown DELAY value blocks the entry ("indicateur différé inconnu").
 """
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from enum import StrEnum
 
 from forex_bot.instruments import TRADEABLE, to_decimal
-from forex_bot.market import DEFAULT_MAX_QUOTE_AGE, Quote, is_aware, quote_blockers
+from forex_bot.market import CLOCK_TOLERANCE, DEFAULT_MAX_QUOTE_AGE, Quote, is_aware, quote_blockers
 
 PRICE_ADAPTER = "Pricing"
 PRICE_MODE = "MERGE"
@@ -45,6 +58,9 @@ PRICE_FIELDS = ("BIDPRICE1", "ASKPRICE1", "TIMESTAMP", "DLG_FLAG", "DELAY")
 REQUIRED_PRICE_FIELDS = ("BIDPRICE1", "ASKPRICE1", "TIMESTAMP", "DLG_FLAG")
 PRICE_SOURCE = "flux IG PRICE"
 DEALABLE_FLAG = "DEAL"  # ASSUMP-012
+# Project parameter (not an IG requirement): older TIMESTAMP values are treated as aberrant.
+EARLIEST_PLAUSIBLE_TIMESTAMP = datetime(2000, 1, 1, tzinfo=UTC)
+_ASCII_DIGITS = re.compile(r"[0-9]{1,20}")
 
 
 def price_item(account_id: str, epic: str) -> str:
@@ -73,15 +89,19 @@ class UpdateOutcome(StrEnum):
     ACCEPTED = "ACCEPTED"
     OUT_OF_ORDER = "OUT_OF_ORDER"
     MALFORMED = "MALFORMED"
+    OUT_OF_RANGE = "OUT_OF_RANGE"
     NOT_CONNECTED = "NOT_CONNECTED"
 
 
 def parse_ig_timestamp(raw: str | None) -> datetime | None:
-    """TIMESTAMP in UTC milliseconds since the epoch -> aware datetime; None if invalid."""
-    if raw is None or not raw.strip().isdigit():
+    """TIMESTAMP in UTC milliseconds since the epoch -> aware datetime; None if not representable."""
+    if raw is None or not _ASCII_DIGITS.fullmatch(raw.strip()):
         return None
     millis = int(raw.strip())
-    return datetime.fromtimestamp(millis // 1000, UTC) + timedelta(milliseconds=millis % 1000)
+    try:
+        return datetime.fromtimestamp(millis // 1000, UTC) + timedelta(milliseconds=millis % 1000)
+    except (OverflowError, OSError, ValueError):
+        return None
 
 
 class PriceTracker:
@@ -92,10 +112,11 @@ class PriceTracker:
         self._fields: dict[str, str | None] = {}
         self._newest_ig_time: datetime | None = None  # ordering floor, kept across reconnections
         self._ig_time_received_at: datetime | None = None
-        self._lost_updates_at: datetime | None = None  # newest IG time when updates were lost
+        self._resync_after: datetime | None = None  # set on lost updates: newest IG time before the loss
         self.accepted = 0
         self.dropped_out_of_order = 0
         self.dropped_malformed = 0
+        self.dropped_out_of_range = 0
 
     def on_connection(self, state: ConnectionState) -> None:
         if state is not ConnectionState.CONNECTED:
@@ -104,7 +125,10 @@ class PriceTracker:
         self.connection = state
 
     def on_lost_updates(self) -> None:
-        self._lost_updates_at = self._newest_ig_time or datetime.min.replace(tzinfo=UTC)
+        """Merged values may be stale: forget them and require a complete resynchronisation."""
+        self._resync_after = self._newest_ig_time or EARLIEST_PLAUSIBLE_TIMESTAMP
+        self._fields.clear()
+        self._ig_time_received_at = None
 
     def on_update(self, changed: Mapping[str, str | None], received_at_utc: datetime) -> UpdateOutcome:
         """Apply the CHANGED fields of one update (Lightstreamer `getChangedFields()`)."""
@@ -122,16 +146,24 @@ class PriceTracker:
             if ig_time is None:
                 self.dropped_malformed += 1
                 return UpdateOutcome.MALFORMED
+            if ig_time < EARLIEST_PLAUSIBLE_TIMESTAMP or ig_time - received_at_utc > CLOCK_TOLERANCE:
+                self.dropped_out_of_range += 1
+                return UpdateOutcome.OUT_OF_RANGE
             if self._newest_ig_time is not None and ig_time < self._newest_ig_time:
                 self.dropped_out_of_order += 1
                 return UpdateOutcome.OUT_OF_ORDER
 
         self._fields.update({k: v for k, v in changed.items() if k in PRICE_FIELDS})
         if ig_time is not None:
-            if self._lost_updates_at is not None and ig_time > self._lost_updates_at:
-                self._lost_updates_at = None
             self._newest_ig_time = ig_time
             self._ig_time_received_at = received_at_utc
+        if (
+            self._resync_after is not None
+            and not self.missing_fields()
+            and self._newest_ig_time is not None
+            and self._newest_ig_time > self._resync_after
+        ):
+            self._resync_after = None
         self.accepted += 1
         return UpdateOutcome.ACCEPTED
 
@@ -167,11 +199,10 @@ class PriceTracker:
         """Reasons forbidding an entry on the streamed quote. Empty list = usable."""
         if self.connection is not ConnectionState.CONNECTED:
             return [f"flux PRICE non connecté ({self.connection})"]
-        blockers = []
-        if self._lost_updates_at is not None:
-            blockers.append("mises à jour PRICE perdues, en attente d'une cotation plus récente")
+        if self._resync_after is not None:
+            return ["mises à jour PRICE perdues : resynchronisation complète requise"]
         quote = self.quote()
         if quote is None:
             missing = ", ".join(self.missing_fields()) or "valeurs illisibles"
-            return [*blockers, f"cotation PRICE incomplète ({missing})"]
-        return blockers + quote_blockers(quote, now_utc, max_age)
+            return [f"cotation PRICE incomplète ({missing})"]
+        return quote_blockers(quote, now_utc, max_age)
