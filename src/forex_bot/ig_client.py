@@ -172,6 +172,14 @@ class IGDemoReadOnlyClient:
         body: dict[str, Any] = response.json()
         return body
 
+    def lightstreamer_password(self) -> str:
+        """Streaming password documented by IG: "CST-<CST>|XST-<X-SECURITY-TOKEN>" (masked in outputs)."""
+        if self._cst is None or self._security_token is None:
+            raise RuntimeError("Session IG non ouverte.")
+        password = f"CST-{self._cst}|XST-{self._security_token}"
+        self._redactor.register("mot de passe Lightstreamer", password)
+        return password
+
     def switch_account(self, account_id: str) -> dict[str, Any]:
         """PUT /session v1 without `defaultAccount`: the default account is left unchanged."""
         body: dict[str, Any] = self._request("PUT", "/session", 1, json={"accountId": account_id}).json()

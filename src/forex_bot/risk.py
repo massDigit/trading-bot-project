@@ -13,6 +13,9 @@ Price convention (explicit, see ASSUMP-008)
   unfavourable side. No separate spread term is added.
 - A LONG stop must be strictly below the current bid, a SHORT stop strictly
   above the current offer (otherwise it would trigger immediately).
+- This trigger side and the price from which IG measures minimum stop distances
+  are NOT confirmed: sizing is blocked until `BrokerConventions` holds a
+  confirmation for them (separately for normal and guaranteed stops).
 
 Other principles
 ----------------
@@ -30,13 +33,21 @@ All amounts use Decimal. Nothing in this module talks to the broker.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from decimal import ROUND_DOWN, Decimal
 from enum import StrEnum
 
-from forex_bot.instruments import BrokerConventions, ContractCheck, ContractSpec
-from forex_bot.market import DEFAULT_MAX_QUOTE_AGE, Quote, quote_blockers
+from forex_bot.instruments import (
+    IMPLEMENTED_STOP_TRIGGER_SIDE,
+    TRADEABLE,
+    BrokerConventions,
+    ContractCheck,
+    ContractSpec,
+    DistanceReference,
+)
+from forex_bot.market import CLOCK_TOLERANCE, DEFAULT_MAX_QUOTE_AGE, Quote, is_aware, quote_blockers
 
 ESTIMATE_NOTICE = (
     "Perte ESTIMÉE au stop, hors gaps, glissement supérieur à la provision, rejet ou panne : "
@@ -92,8 +103,23 @@ class PortfolioEquity:
 
     value: Decimal
     currency: str
-    as_of_utc: datetime
+    as_of_utc: datetime  # timezone-aware UTC
     source: str
+
+
+class EventKind(StrEnum):
+    POSITION = "POSITION"  # opening, closing, partial fill, stop or limit hit
+    FEE = "FEE"  # commission, financing, conversion, guaranteed-stop premium
+    CASH_FLOW = "CASH_FLOW"  # deposit to or withdrawal from the robot portfolio
+
+
+@dataclass(frozen=True)
+class PortfolioEvent:
+    """An event that changes the equity and is not yet integrated into `PortfolioEquity`."""
+
+    kind: EventKind
+    occurred_at_utc: datetime | None
+    reference: str
 
 
 @dataclass(frozen=True)
@@ -103,8 +129,11 @@ class RiskConfig:
     initial_allocation: Decimal = Decimal("2000")  # starting capital, NOT the sizing base
     account_currency: str = "EUR"
     risk_fraction_per_trade: Decimal = Decimal("0.0025")  # 0,25 % of up-to-date equity
+    # Experimental parameters, not IG requirements.
     max_equity_age: timedelta = timedelta(minutes=5)  # ASSUMP-010
     max_quote_age: timedelta = DEFAULT_MAX_QUOTE_AGE  # ASSUMP-009
+    max_contract_check_age: timedelta = timedelta(seconds=60)  # ASSUMP-011
+    clock_tolerance: timedelta = CLOCK_TOLERANCE
 
 
 @dataclass(frozen=True)
@@ -246,16 +275,73 @@ def estimate_loss_per_contract(
     )
 
 
-def equity_blockers(equity: PortfolioEquity | None, risk: RiskConfig, now_utc: datetime) -> list[str]:
+def stop_distance_from_reference(
+    side: Side, stop_price: Decimal, quote: Quote, reference: DistanceReference
+) -> Decimal:
+    """Price distance between the stop and the reference price IG uses for minimum distances."""
+    if reference is DistanceReference.MID:
+        ref_price = (quote.bid + quote.offer) / 2
+    elif (reference is DistanceReference.EXIT_SIDE) == (side is Side.LONG):
+        ref_price = quote.bid
+    else:
+        ref_price = quote.offer
+    return ref_price - stop_price if side is Side.LONG else stop_price - ref_price
+
+
+def equity_blockers(
+    equity: PortfolioEquity | None,
+    risk: RiskConfig,
+    now_utc: datetime,
+    unintegrated_events: Sequence[PortfolioEvent],
+) -> list[str]:
+    """`now_utc` must be timezone-aware (checked by `entry_blockers`)."""
+    blockers = [
+        f"événement non intégré aux fonds propres : {event.kind} ({event.reference})" for event in unintegrated_events
+    ]
     if equity is None:
-        return ["fonds propres actualisés du portefeuille du robot indisponibles"]
-    blockers = []
+        return ["fonds propres actualisés du portefeuille du robot indisponibles", *blockers]
     if equity.currency != risk.account_currency:
         blockers.append(f"fonds propres en {equity.currency}, attendu {risk.account_currency}")
     if equity.value <= 0:
         blockers.append("fonds propres nuls ou négatifs")
-    if now_utc - equity.as_of_utc > risk.max_equity_age:
+    if not is_aware(equity.as_of_utc):
+        blockers.append("date des fonds propres sans fuseau")
+    elif equity.as_of_utc - now_utc > risk.clock_tolerance:
+        blockers.append("date des fonds propres dans le futur")
+    elif now_utc - equity.as_of_utc > risk.max_equity_age:
         blockers.append("fonds propres périmés")
+    return blockers
+
+
+def market_state_blockers(
+    contract_check: ContractCheck | None, quote: Quote | None, now_utc: datetime, risk: RiskConfig
+) -> list[str]:
+    """Contract check (REST, local receipt time) and quote (stream, IG time) must both say TRADEABLE.
+
+    No source overrides the other: a contradiction blocks the entry until a new,
+    fresh contract check agrees with a fresh quote.
+    """
+    if contract_check is None:
+        return ["contrat non vérifié"]
+    blockers = []
+    if not contract_check.characteristics_ok:
+        blockers.append("caractéristiques du contrat différentes de la référence")
+    if not contract_check.tradeable_now:
+        blockers.append(f"marché non négociable lors de la vérification du contrat ({contract_check.market_status})")
+    checked_at = contract_check.checked_at_utc
+    if checked_at is None:
+        blockers.append("date de vérification du contrat inconnue")
+    elif not is_aware(checked_at):
+        blockers.append("date de vérification du contrat sans fuseau")
+    elif checked_at - now_utc > risk.clock_tolerance:
+        blockers.append("date de vérification du contrat dans le futur")
+    elif now_utc - checked_at > risk.max_contract_check_age:
+        blockers.append("vérification du contrat périmée")
+    if quote is not None and contract_check.tradeable_now != (quote.market_status == TRADEABLE):
+        blockers.append(
+            f"état du marché contradictoire : {contract_check.source} -> {contract_check.market_status}, "
+            f"{quote.source} -> {quote.market_status}"
+        )
     return blockers
 
 
@@ -263,22 +349,26 @@ def entry_blockers(
     *,
     quote: Quote | None,
     now_utc: datetime,
+    spec: ContractSpec,
     contract_check: ContractCheck | None,
     conventions: BrokerConventions,
     equity: PortfolioEquity | None,
+    unintegrated_events: Sequence[PortfolioEvent],
     costs: CostModel,
     holding: Holding,
     guaranteed_stop: bool,
     risk: RiskConfig,
 ) -> list[str]:
     """Every reason that currently forbids a future entry. Empty list = entry may be sized."""
+    if not is_aware(now_utc):
+        return ["horloge locale sans fuseau"]
     blockers = ["cotation indisponible"] if quote is None else quote_blockers(quote, now_utc, risk.max_quote_age)
-    if contract_check is None:
-        blockers.append("contrat non vérifié")
-    elif not contract_check.characteristics_ok:
-        blockers.append("caractéristiques du contrat différentes de la référence")
-    blockers += equity_blockers(equity, risk, now_utc)
-    blockers += [f"convention non confirmée : {name}" for name in conventions.missing()]
+    blockers += market_state_blockers(contract_check, quote, now_utc, risk)
+    blockers += equity_blockers(equity, risk, now_utc, unintegrated_events)
+    blockers += [f"convention non confirmée : {name}" for name in conventions.missing(spec.epic, guaranteed_stop)]
+    trigger = conventions.get(conventions.stop_trigger_side, spec.epic)
+    if trigger is not None and trigger is not IMPLEMENTED_STOP_TRIGGER_SIDE:
+        blockers.append(f"côté de déclenchement confirmé {trigger} non pris en charge par le calcul")
     blockers += [
         f"coût inconnu : {name} ({cost.source})"
         for name, cost in applicable_costs(costs, holding, guaranteed_stop).items()
@@ -298,6 +388,7 @@ def size_position(
     conventions: BrokerConventions,
     conversion: ConversionRate,
     equity: PortfolioEquity | None,
+    unintegrated_events: Sequence[PortfolioEvent],
     holding: Holding,
     nights: int = 0,
     guaranteed_stop: bool = False,
@@ -346,23 +437,34 @@ def size_position(
     except ValueError as exc:
         return result(SizingStatus.REJECTED_INVALID_INPUT, [str(exc)])
 
-    # Broker minimum stop distance: refuse, never move the stop. Only checkable
-    # once the IG point / pip ratio is confirmed.
-    if conventions.points_per_pip is not None:
-        stop_points = estimate.stop_distance_pips * conventions.points_per_pip
-        if stop_points < spec.min_normal_stop_raw_points:
+    # Broker minimum stop distance, specific to the stop type: refuse, never move
+    # the stop. Only checkable once the point / pip ratio AND the distance
+    # reference of this stop type are confirmed; otherwise sizing stays blocked.
+    if guaranteed_stop:
+        kind, min_points = "garanti", spec.min_guaranteed_stop_raw_points
+        reference = conventions.get(conventions.guaranteed_stop_distance_reference, spec.epic)
+    else:
+        kind, min_points = "normal", spec.min_normal_stop_raw_points
+        reference = conventions.get(conventions.normal_stop_distance_reference, spec.epic)
+    points_per_pip = conventions.decimal("points_per_pip", spec.epic)
+    if points_per_pip is not None and reference is not None:
+        distance = stop_distance_from_reference(side, stop_price, quote, reference)
+        stop_points = distance / spec.pip_size * points_per_pip
+        if stop_points < min_points:
             return result(
                 SizingStatus.REJECTED_STOP_BELOW_BROKER_MINIMUM,
-                [f"stop à {stop_points} points < minimum courtier {spec.min_normal_stop_raw_points}"],
+                [f"stop {kind} à {stop_points} points < minimum courtier {min_points} ({reference})"],
                 estimate=estimate,
             )
 
     blockers = entry_blockers(
         quote=quote,
         now_utc=now_utc,
+        spec=spec,
         contract_check=contract_check,
         conventions=conventions,
         equity=equity,
+        unintegrated_events=unintegrated_events,
         costs=costs,
         holding=holding,
         guaranteed_stop=guaranteed_stop,
@@ -373,24 +475,22 @@ def size_position(
     if blockers:
         return result(SizingStatus.BLOCKED, blockers, estimate=estimate, budget=budget)
 
-    # Everything confirmed: these asserts only narrow types for mypy.
-    if (
-        budget is None
-        or conventions.contracts_per_size_unit is None
-        or conventions.min_size is None
-        or conventions.size_increment is None
-    ):
+    contracts_per_size_unit = conventions.decimal("contracts_per_size_unit", spec.epic)
+    min_size = conventions.decimal("min_size", spec.epic)
+    size_increment = conventions.decimal("size_increment", spec.epic)
+    # Everything confirmed: this check only narrows types for mypy.
+    if budget is None or contracts_per_size_unit is None or min_size is None or size_increment is None:
         raise RuntimeError("état incohérent : aucun blocage mais données manquantes")
 
-    loss_per_size_unit = estimate.loss_account_per_contract * conventions.contracts_per_size_unit
-    steps = (budget / loss_per_size_unit / conventions.size_increment).to_integral_value(rounding=ROUND_DOWN)
-    size = steps * conventions.size_increment
-    if size < conventions.min_size:
+    loss_per_size_unit = estimate.loss_account_per_contract * contracts_per_size_unit
+    steps = (budget / loss_per_size_unit / size_increment).to_integral_value(rounding=ROUND_DOWN)
+    size = steps * size_increment
+    if size < min_size:
         return result(
             SizingStatus.REJECTED_MIN_SIZE_EXCEEDS_BUDGET,
             [
-                f"taille minimale {conventions.min_size} : perte estimée "
-                f"{conventions.min_size * loss_per_size_unit:.2f} {risk.account_currency} > budget {budget:.2f}"
+                f"taille minimale {min_size} : perte estimée "
+                f"{min_size * loss_per_size_unit:.2f} {risk.account_currency} > budget {budget:.2f}"
             ],
             estimate=estimate,
             budget=budget,

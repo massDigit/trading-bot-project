@@ -7,8 +7,9 @@ bid 1.11498 / offer 1.11508 -> spread 0.00010 (1 pip).
 from __future__ import annotations
 
 import copy
+import dataclasses
 import inspect
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal as D
 
 import pytest
@@ -17,8 +18,12 @@ from ig_fixtures import MARKET_DETAILS
 from forex_bot.instruments import (
     EURUSD_MINI,
     EURUSD_MINI_CONVENTIONS,
+    EURUSD_MINI_EPIC,
     BrokerConventions,
+    Confirmation,
     ContractCheck,
+    DistanceReference,
+    StopTriggerSide,
     is_excluded_market,
     pip_size_from_one_pip_means,
     verify_contract,
@@ -30,12 +35,17 @@ from forex_bot.risk import (
     Cost,
     CostModel,
     CostStatus,
+    EventKind,
     Holding,
     LossEstimate,
     PortfolioEquity,
+    PortfolioEvent,
+    RiskConfig,
     Side,
     SizingResult,
     SizingStatus,
+    entry_blockers,
+    equity_blockers,
     estimate_loss_per_contract,
     size_position,
     usd_to_eur_from_eurusd_bid,
@@ -43,14 +53,31 @@ from forex_bot.risk import (
 
 NOW = datetime(2026, 10, 27, 12, 0, 0, tzinfo=UTC)
 BID, OFFER = D("1.11498"), D("1.11508")
-QUOTE = Quote(BID, OFFER, "TRADEABLE", NOW - timedelta(seconds=1))
+QUOTE = Quote(BID, OFFER, "TRADEABLE", NOW - timedelta(seconds=1), delayed=False, source="test PRICE")
 USD_EUR = usd_to_eur_from_eurusd_bid(BID)
-CHECK_OK = ContractCheck(characteristics_ok=True, tradeable_now=True)
+CHECK_OK = ContractCheck(
+    characteristics_ok=True, tradeable_now=True, market_status="TRADEABLE", checked_at_utc=NOW - timedelta(seconds=5)
+)
 EQUITY_2000 = PortfolioEquity(D("2000"), "EUR", NOW - timedelta(minutes=1), "test")
 
+
+def q(status: str | None, quote_time: datetime | None, delayed: bool | None = False) -> Quote:
+    return Quote(BID, OFFER, status, quote_time, delayed=delayed, source="test PRICE")
+
+
 # ---- TEST-ONLY values. They are NOT confirmed IG values; they only exercise the arithmetic.
+def fake_confirmation[T](value: T, epic: str = EURUSD_MINI_EPIC) -> Confirmation[T]:
+    return Confirmation(value, "TEST-ONLY, non confirmé par IG", date(2026, 10, 27), epic)
+
+
 TEST_CONVENTIONS = BrokerConventions(
-    points_per_pip=D("1"), contracts_per_size_unit=D("1"), min_size=D("0.1"), size_increment=D("0.1")
+    points_per_pip=fake_confirmation(D("1")),
+    contracts_per_size_unit=fake_confirmation(D("1")),
+    min_size=fake_confirmation(D("0.1")),
+    size_increment=fake_confirmation(D("0.1")),
+    stop_trigger_side=fake_confirmation(StopTriggerSide.EXIT_SIDE),
+    normal_stop_distance_reference=fake_confirmation(DistanceReference.EXIT_SIDE),
+    guaranteed_stop_distance_reference=fake_confirmation(DistanceReference.EXIT_SIDE),
 )
 TEST_COSTS = CostModel(
     slippage_pips=Cost(CostStatus.ASSUMED, D("0.5"), "test"),
@@ -94,18 +121,23 @@ def size(
     equity: PortfolioEquity | None = EQUITY_2000,
     check: ContractCheck | None = CHECK_OK,
     conversion: ConversionRate = USD_EUR,
+    events: tuple[PortfolioEvent, ...] = (),
+    guaranteed_stop: bool = False,
+    now: datetime = NOW,
 ) -> SizingResult:
     return size_position(
         side=side,
         stop_price=D(stop),
         quote=quote,
-        now_utc=NOW,
+        now_utc=now,
         spec=EURUSD_MINI,
         contract_check=check,
         conventions=conventions,
         conversion=conversion,
         equity=equity,
+        unintegrated_events=events,
         holding=Holding.INTRADAY,
+        guaranteed_stop=guaranteed_stop,
         costs=costs,
     )
 
@@ -142,7 +174,7 @@ def test_spread_is_counted_exactly_once(side: Side, stop: str) -> None:
     # Same stop; zero-spread quote at the exit-side price vs the 1-pip spread quote.
     # The difference must be exactly one spread: 0.0001 x 10 000 = 1.00 USD.
     exit_price = BID if side is Side.LONG else OFFER
-    no_spread = Quote(exit_price, exit_price, "TRADEABLE", QUOTE.quote_time_utc)
+    no_spread = Quote(exit_price, exit_price, "TRADEABLE", QUOTE.quote_time_utc, delayed=False)
     with_spread = estimate(side, stop).loss_quote_per_contract
     assert with_spread - estimate(side, stop, quote=no_spread).loss_quote_per_contract == D("1.00")
 
@@ -176,16 +208,18 @@ def test_pip_and_contract_units_from_api_fields() -> None:
 
 
 def test_unconfirmed_conventions_are_none_and_block() -> None:
-    assert EURUSD_MINI_CONVENTIONS.missing() == [
+    assert EURUSD_MINI_CONVENTIONS.missing(EURUSD_MINI_EPIC) == [
         "points_per_pip",
         "contracts_per_size_unit",
         "min_size",
         "size_increment",
+        "stop_trigger_side",
+        "normal_stop_distance_reference",
     ]
     r = size(Side.LONG, "1.11200", conventions=EURUSD_MINI_CONVENTIONS)
     assert r.status is SizingStatus.BLOCKED
     assert r.executable_size is None
-    for name in EURUSD_MINI_CONVENTIONS.missing():
+    for name in EURUSD_MINI_CONVENTIONS.missing(EURUSD_MINI_EPIC):
         assert f"convention non confirmée : {name}" in r.reasons
 
 
@@ -329,12 +363,12 @@ def test_invalid_equity_blocks(equity: PortfolioEquity, reason: str) -> None:
 @pytest.mark.parametrize(
     ("quote", "reason"),
     [
-        (Quote(BID, OFFER, "CLOSED", NOW), "marché non négociable (CLOSED)"),
-        (Quote(BID, OFFER, "EDITS_ONLY", NOW), "marché non négociable (EDITS_ONLY)"),
-        (Quote(BID, OFFER, "TRADEABLE", None), "horodatage de la cotation inconnu"),
-        (Quote(BID, OFFER, "TRADEABLE", NOW - timedelta(seconds=30)), "cotation périmée (30 s > 10 s)"),
-        (Quote(BID, OFFER, "TRADEABLE", NOW + timedelta(seconds=10)), "horodatage de la cotation dans le futur"),
-        (Quote(BID, OFFER, "TRADEABLE", datetime(2026, 10, 27, 12, 0)), "horodatage de la cotation sans fuseau"),
+        (q("CLOSED", NOW), "marché non négociable (CLOSED)"),
+        (q("EDITS_ONLY", NOW), "marché non négociable (EDITS_ONLY)"),
+        (q("TRADEABLE", None), "horodatage de la cotation inconnu"),
+        (q("TRADEABLE", NOW - timedelta(seconds=30)), "cotation périmée (30 s > 10 s)"),
+        (q("TRADEABLE", NOW + timedelta(seconds=10)), "horodatage de la cotation dans le futur"),
+        (q("TRADEABLE", datetime(2026, 10, 27, 12, 0)), "horodatage de la cotation sans fuseau"),
     ],
 )
 def test_closed_market_or_stale_quote_blocks_entry(quote: Quote, reason: str) -> None:
@@ -380,3 +414,165 @@ def test_weekend_market_is_excluded() -> None:
     weekend = copy.deepcopy(MARKET_DETAILS)
     weekend["instrument"].update(epic="IX.D.SUNEURUSD.CEF.IP", name="Weekend EUR/USD", onePipMeans="1 Index Point")
     assert not verify_contract(weekend).usable
+
+
+# ---------------------------------------------------------------- review of cedbfb5: regressions
+
+
+def conventions_with(**changes: object) -> BrokerConventions:
+    return dataclasses.replace(TEST_CONVENTIONS, **changes)  # type: ignore[arg-type]
+
+
+def test_guaranteed_stop_uses_its_own_minimum() -> None:
+    # stop 3 pips under the bid (1.11498 - 0.00030 = 1.11468); TEST-ONLY 1 point = 1 pip.
+    # normal minimum 2 points -> accepted ; guaranteed minimum 5 points -> refused, stop untouched.
+    stop = "1.11468"
+    assert size(Side.LONG, stop).status is SizingStatus.SIZED
+    r = size(Side.LONG, stop, guaranteed_stop=True)
+    assert r.status is SizingStatus.REJECTED_STOP_BELOW_BROKER_MINIMUM
+    assert r.stop_price == D(stop)
+    assert r.reasons == ("stop garanti à 3.0 points < minimum courtier 5.0 (EXIT_SIDE)",)
+    # 6 pips (1.11438) satisfies the guaranteed minimum
+    assert size(Side.LONG, "1.11438", guaranteed_stop=True).status is SizingStatus.SIZED
+
+
+def test_unknown_guaranteed_stop_constraint_blocks_without_moving_stop() -> None:
+    conventions = conventions_with(guaranteed_stop_distance_reference=None)
+    assert size(Side.LONG, "1.11468", conventions=conventions).status is SizingStatus.SIZED  # normal: not needed
+    r = size(Side.LONG, "1.11468", conventions=conventions, guaranteed_stop=True)
+    assert r.status is SizingStatus.BLOCKED
+    assert "convention non confirmée : guaranteed_stop_distance_reference" in r.reasons
+    assert r.stop_price == D("1.11468") and r.executable_size is None
+
+
+def test_minimum_distance_measured_from_confirmed_reference() -> None:
+    # stop 1.11483: 1.5 pip from the bid (exit side), 2.5 pips from the offer (entry side); minimum 2.
+    stop = "1.11483"
+    assert size(Side.LONG, stop).status is SizingStatus.REJECTED_STOP_BELOW_BROKER_MINIMUM
+    entry_ref = conventions_with(normal_stop_distance_reference=fake_confirmation(DistanceReference.ENTRY_SIDE))
+    assert size(Side.LONG, stop, conventions=entry_ref).status is SizingStatus.SIZED
+
+
+def test_unconfirmed_trigger_convention_blocks_explicitly() -> None:
+    r = size(Side.LONG, "1.11200", conventions=conventions_with(stop_trigger_side=None))
+    assert r.status is SizingStatus.BLOCKED
+    assert "convention non confirmée : stop_trigger_side" in r.reasons
+    r = size(Side.LONG, "1.11200", conventions=conventions_with(normal_stop_distance_reference=None))
+    assert r.status is SizingStatus.BLOCKED
+    assert "convention non confirmée : normal_stop_distance_reference" in r.reasons
+
+
+def test_trigger_side_confirmed_differently_from_the_model_blocks() -> None:
+    r = size(
+        Side.LONG, "1.11200", conventions=conventions_with(stop_trigger_side=fake_confirmation(StopTriggerSide.MID))
+    )
+    assert r.status is SizingStatus.BLOCKED
+    assert "côté de déclenchement confirmé MID non pris en charge par le calcul" in r.reasons
+
+
+def test_confirmation_for_another_contract_is_ignored() -> None:
+    other = conventions_with(points_per_pip=fake_confirmation(D("1"), epic="CS.D.EURUSD.CEF.IP"))
+    r = size(Side.LONG, "1.11200", conventions=other)
+    assert r.status is SizingStatus.BLOCKED
+    assert "convention non confirmée : points_per_pip" in r.reasons
+    with pytest.raises(ValueError):
+        Confirmation(D("1"), " ", date(2026, 10, 27), EURUSD_MINI_EPIC)
+
+
+@pytest.mark.parametrize(
+    ("as_of", "reason"),
+    [
+        (datetime(2026, 10, 27, 11, 59), "date des fonds propres sans fuseau"),
+        (NOW + timedelta(seconds=10), "date des fonds propres dans le futur"),
+    ],
+)
+def test_equity_bad_timestamp_is_refused_without_type_error(as_of: datetime, reason: str) -> None:
+    equity = PortfolioEquity(D("2000"), "EUR", as_of, "t")
+    assert reason in equity_blockers(equity, RiskConfig(), NOW, ())
+    r = size(Side.LONG, "1.11200", equity=equity)
+    assert r.status is SizingStatus.BLOCKED
+    assert reason in r.reasons
+
+
+def test_equity_slightly_ahead_within_tolerance_is_accepted() -> None:
+    equity = PortfolioEquity(D("2000"), "EUR", NOW + timedelta(seconds=1), "t")
+    assert equity_blockers(equity, RiskConfig(), NOW, ()) == []
+
+
+@pytest.mark.parametrize("kind", list(EventKind))
+def test_unintegrated_event_invalidates_recent_equity(kind: EventKind) -> None:
+    fresh = PortfolioEquity(D("2000"), "EUR", NOW, "t")
+    event = PortfolioEvent(kind, NOW - timedelta(minutes=30), "evt-1")  # even older than the equity
+    r = size(Side.LONG, "1.11200", equity=fresh, events=(event,))
+    assert r.status is SizingStatus.BLOCKED
+    assert f"événement non intégré aux fonds propres : {kind} (evt-1)" in r.reasons
+
+
+def test_naive_local_clock_is_blocked_not_raised() -> None:
+    r = size(Side.LONG, "1.11200", now=datetime(2026, 10, 27, 12, 0))
+    assert r.status is SizingStatus.BLOCKED
+    assert r.reasons == ("horloge locale sans fuseau",)
+
+
+@pytest.mark.parametrize(
+    ("check", "quote", "expected"),
+    [
+        (
+            dataclasses.replace(CHECK_OK, tradeable_now=False, market_status="EDITS_ONLY"),
+            QUOTE,
+            [
+                "marché non négociable lors de la vérification du contrat (EDITS_ONLY)",
+                "état du marché contradictoire : REST GET /markets/{epic} v3 -> EDITS_ONLY, test PRICE -> TRADEABLE",
+            ],
+        ),
+        (
+            CHECK_OK,
+            q("CLOSED", NOW),
+            [
+                "marché non négociable (CLOSED)",
+                "état du marché contradictoire : REST GET /markets/{epic} v3 -> TRADEABLE, test PRICE -> CLOSED",
+            ],
+        ),
+        (
+            dataclasses.replace(CHECK_OK, checked_at_utc=NOW - timedelta(minutes=2)),
+            QUOTE,
+            ["vérification du contrat périmée"],
+        ),
+        (dataclasses.replace(CHECK_OK, checked_at_utc=None), QUOTE, ["date de vérification du contrat inconnue"]),
+        (
+            dataclasses.replace(CHECK_OK, checked_at_utc=datetime(2026, 10, 27, 12, 0)),
+            QUOTE,
+            ["date de vérification du contrat sans fuseau"],
+        ),
+    ],
+)
+def test_contract_check_and_quote_must_agree(check: ContractCheck, quote: Quote, expected: list[str]) -> None:
+    blockers = entry_blockers(
+        quote=quote,
+        now_utc=NOW,
+        spec=EURUSD_MINI,
+        contract_check=check,
+        conventions=TEST_CONVENTIONS,
+        equity=EQUITY_2000,
+        unintegrated_events=(),
+        costs=TEST_COSTS,
+        holding=Holding.INTRADAY,
+        guaranteed_stop=False,
+        risk=RiskConfig(),
+    )
+    assert blockers == expected
+
+
+@pytest.mark.parametrize(
+    ("quote", "reason"),
+    [
+        (q("TRADEABLE", NOW, delayed=None), "indicateur de cotation différée inconnu"),
+        (q("TRADEABLE", NOW, delayed=True), "cotation différée (DELAY=1)"),
+        (
+            dataclasses.replace(QUOTE, received_at_utc=NOW - timedelta(seconds=10)),
+            "horodatage IG postérieur à la réception locale (horloges désynchronisées)",
+        ),
+    ],
+)
+def test_delayed_or_inconsistent_quote_blocks(quote: Quote, reason: str) -> None:
+    assert reason in quote_blockers(quote, NOW)

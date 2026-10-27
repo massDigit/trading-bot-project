@@ -64,14 +64,36 @@ Tout élément figurant ici est une **PROPOSITION** et ne doit pas être consid�
 - **Sujet** : Côté de déclenchement des stops et référence de la distance minimale
 - **Proposition** : un stop d'achat est un niveau bid, un stop de vente un niveau offer ; la distance minimale du courtier se mesure depuis le prix de sortie courant (bid pour un achat, offer pour une vente).
 - **Raisonnement** : convention usuelle des CFD, non confirmée dans la référence IG consultée. Elle détermine que le spread est compté une seule fois, via l'entrée.
-- **Statut** : `PROPOSED`
+- **Garde dans le code** : `BrokerConventions.stop_trigger_side`, `normal_stop_distance_reference` et `guaranteed_stop_distance_reference` sont vides ; le dimensionnement est bloqué tant qu'ils ne portent pas une `Confirmation` (source, date, epic). Une confirmation différente de la convention implémentée bloque aussi.
+- **Statut** : `PROPOSED` — question posée dans `docs/IG_SUPPORT_REQUEST.md`
 
 - **ID** : `ASSUMP-009`
 - **Sujet** : Âge maximal d'une cotation pour une entrée
-- **Proposition** : 10 secondes, mesuré sur l'horodatage du courtier (UTC). Source d'horodatage fiable à choisir (flux Lightstreamer ou `snapshot.updateTimestampUTC` de `GET /markets/{epic}` v4).
+- **Proposition** : 10 secondes, mesuré sur le champ `TIMESTAMP` (UTC, millisecondes) du flux `PRICE`, jamais sur l'heure de réception locale. **Paramètre expérimental**, pas une exigence IG.
 - **Statut** : `PROPOSED`
 
 - **ID** : `ASSUMP-010`
 - **Sujet** : Âge maximal des fonds propres du robot
-- **Proposition** : 5 minutes. Le suivi des fonds propres (réalisé, latent, frais, flux) reste à construire.
+- **Proposition** : 5 minutes. **Paramètre expérimental**, pas une exigence IG. Tout événement de position, de frais ou de flux non intégré invalide les fonds propres, quelle que soit leur date. Le suivi des fonds propres reste à construire.
+- **Statut** : `PROPOSED`
+
+- **ID** : `ASSUMP-011`
+- **Sujet** : Âge maximal de la vérification du contrat
+- **Proposition** : 60 secondes, mesuré sur l'heure de réception locale de `GET /markets/{epic}` v3 (aucun horodatage IG exploitable). Paramètre expérimental. Toute contradiction entre l'état du contrat (REST) et l'état de la cotation (flux `PRICE`) bloque l'entrée ; aucune source ne l'emporte : il faut une nouvelle vérification récente concordante.
+- **Statut** : `PROPOSED`
+
+- **ID** : `ASSUMP-012`
+- **Sujet** : Interprétation de `DLG_FLAG` (flux `PRICE`)
+- **Proposition** : seule la valeur `DEAL` est considérée comme négociable ; toutes les autres (`CLOSED`, `CALL`, `EDIT`, `CLOSINGSONLY`, `DEALNOEDIT`, `AUCTION`, `AUCTIONNOEDIT`, `SUSPEND`) bloquent. Les espaces de remplissage observés sur la démo (`"DEAL         "`) sont ignorés.
+- **Raisonnement** : la référence IG liste les valeurs sans les définir. Choix restrictif, à confirmer.
+- **Statut** : `PROPOSED` — question posée dans `docs/IG_SUPPORT_REQUEST.md`
+
+- **ID** : `ASSUMP-013`
+- **Sujet** : Champ `DELAY` absent sur la démo
+- **Proposition** : `DELAY` a été demandé mais n'a jamais été reçu avec une valeur sur la démo (2026-10-27). Une valeur absente ou inconnue bloque l'entrée (« indicateur de cotation différée inconnu »), elle n'est pas lue comme « non différé ».
+- **Statut** : `PROPOSED` — question posée dans `docs/IG_SUPPORT_REQUEST.md`
+
+- **ID** : `ASSUMP-014`
+- **Sujet** : Verrouillage du flux sur la démo
+- **Proposition** : `reroutingEnvironment` est renvoyé vide par la démo ; la sonde refuse toute valeur autre que vide ou `DEMO` et exige un hôte Lightstreamer de la liste démo (`demo-apd.marketdatasystems.com`, observé le 2026-10-27). Un nouvel hôte arrête la sonde jusqu'à revue (la documentation IG indique que l'adresse peut changer).
 - **Statut** : `PROPOSED`

@@ -22,6 +22,7 @@ import httpx
 from forex_bot.config import IG_DEMO_BASE_URL, ConfigError, Settings, load_settings
 from forex_bot.ig_client import IGApiError, IGDemoReadOnlyClient, ReadOnlyViolation
 from forex_bot.instruments import (
+    EURUSD_MINI,
     EURUSD_MINI_CONVENTIONS,
     EURUSD_MINI_EPIC,
     ContractCheck,
@@ -281,6 +282,7 @@ def _diagnose(
     quote: Quote | None = None
     try:
         details = client.get_market(EURUSD_MINI_EPIC)
+        received_at = datetime.now(UTC)
     except (IGApiError, httpx.HTTPError) as exc:
         report.add(CHECK_RULES, "ÉCHEC", explain(exc))
         report.add(CHECK_CONTRACT, "NON EXÉCUTÉ", "détails du contrat indisponibles")
@@ -291,8 +293,8 @@ def _diagnose(
             "AVERTISSEMENT" if missing else "OK",
             "contraintes incomplètes" if missing else "contraintes reçues",
         )
-        check = verify_contract(details)
-        quote = quote_from_market_details(details)
+        check = verify_contract(details, received_at_utc=received_at)
+        quote = quote_from_market_details(details, received_at_utc=received_at)
         for issue in check.issues:
             out(f"  ! {issue}")
         if not check.characteristics_ok:
@@ -317,9 +319,11 @@ def _diagnose(
     blockers = entry_blockers(
         quote=quote,
         now_utc=datetime.now(UTC),
+        spec=EURUSD_MINI,
         contract_check=check,
         conventions=EURUSD_MINI_CONVENTIONS,
         equity=None,  # robot portfolio equity tracking does not exist yet
+        unintegrated_events=(),  # no event ledger yet; equity=None blocks anyway
         costs=CostModel(),
         holding=Holding.INTRADAY,
         guaranteed_stop=False,

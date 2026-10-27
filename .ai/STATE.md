@@ -29,13 +29,18 @@ Contrat EUR/USD Mini et garde de dimensionnement (branche `feat/eurusd-mini-risk
 - [x] PR #1 (`feat/ig-demo-diagnostic`) ouverte, non fusionnée
 - [x] Contrat Mini explicite + vérification + garde de dimensionnement (branche `feat/eurusd-mini-risk-guard`), diagnostic réel OK
 
+- [x] Corrections de revue du commit cedbfb5 (stop garanti, convention de déclenchement, horodatage des fonds propres, état du marché) + 111 tests
+- [x] Flux `PRICE` vérifié sur la démo le 2026-10-27 : `TIMESTAMP` reçu, `DLG_FLAG` = DEAL (avec espaces), `DELAY` jamais renseigné
+
 ## 🔄 En Cours
-- [ ] PR brouillon `feat/eurusd-mini-risk-guard` (dépend de la PR #1), en revue
+- [ ] PR #2 brouillon `feat/eurusd-mini-risk-guard` (dépend de la PR #1), en revue
+- [ ] Demande au support IG préparée, non envoyée (`docs/IG_SUPPORT_REQUEST.md`)
 
 ## ⚠️ Problèmes Connus / Points de Vigilance
 - Unités IG non confirmées (point/pip, unité de taille/contrat, minimum, incrément) : ASSUMP-005.
 - Coûts IG inconnus (commission, conversion, financement, stop garanti) : ASSUMP-006.
-- Pas encore de suivi des fonds propres du robot ni d'horodatage fiable des cotations.
+- Pas encore de suivi des fonds propres du robot ; flux `PRICE` validé par sonde seulement (pas de service permanent avec reconnexion et réauthentification).
+- Conventions de stop (côté de déclenchement, référence des distances) non confirmées : ASSUMP-008.
 - Incrément de taille : pas de champ dédié documenté par IG (`ASSUMP-004`).
 - Mot de passe chiffré non géré si IG l'exige.
 

@@ -16,6 +16,12 @@ Le format suit [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/) et le pr
 - Estimation de la perte au stop (`risk.py`) : convention de prix explicite (spread compté une fois), conversion USD→EUR, coûts `CONFIRMED` / `ASSUMED` / `UNKNOWN` (un coût inconnu bloque, jamais compté zéro), financement swing, frais de conversion et prime de stop garanti.
 - Dimensionnement sur les fonds propres actualisés du robot, distincts de l'allocation initiale de 2 000 EUR ; stop jamais modifié ; résultat présenté comme une estimation, pas une garantie.
 - Blocage des entrées (`market.py`, `risk.py`) : marché fermé, cotation périmée ou sans horodatage, contrat non vérifié, fonds propres indisponibles, unités non confirmées, coûts inconnus.
+- Contraintes distinctes stop normal / stop garanti ; conventions courtier sous forme de `Confirmation` (source, date, epic) ; blocage explicite tant que le côté de déclenchement et la référence des distances minimales ne sont pas confirmés.
+- Fonds propres : refus des dates sans fuseau ou dans le futur, invalidation par tout événement de position, de frais ou de flux non intégré.
+- État du marché : provenance et fraîcheur de la vérification du contrat ; contradiction contrat / cotation bloquante.
+- Suivi du flux IG `PRICE` (`streaming.py`) : `TIMESTAMP` UTC, messages partiels, hors ordre, reconnexion, mises à jour perdues, `DLG_FLAG`, `DELAY`.
+- Sonde `ig-price-probe` (lecture seule, démo) ; dépendance `lightstreamer-client-lib`.
+- `docs/IG_SUPPORT_REQUEST.md` (brouillon non envoyé) et `docs/CONFIRMATIONS.md` (registre source/date/contrat).
 
 ### Changed
 - `.env.example` (valeurs fictives IG), `.gitignore` (environnement Python, journaux), `.editorconfig` (Python).

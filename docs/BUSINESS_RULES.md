@@ -66,6 +66,12 @@ Exemples (bid 1,11498 / offer 1,11508, glissement 0,5 pip) :
 - Si la position ne tient pas dans le budget : taille réduite (arrondi **vers le bas** à
   l'incrément) ou signal **refusé**. Le stop n'est jamais rapproché pour faire entrer la position.
 - Stop plus proche que le minimum courtier : signal refusé (le stop n'est pas non plus élargi).
+- Le minimum dépend du type de stop : `minNormalStopOrLimitDistance` (2 points) pour un stop
+  normal, `minControlledRiskStopDistance` (5 points) pour un stop garanti. Il est mesuré depuis le
+  prix de référence **confirmé** pour ce type de stop. Si le rapport point/pip, la référence ou le
+  côté de déclenchement ne sont pas confirmés, le dimensionnement est **bloqué** (ASSUMP-008).
+- Une convention n'est utilisée que sous forme de `Confirmation` (source, date, epic) ; une
+  confirmation pour un autre epic est ignorée (`docs/CONFIRMATIONS.md`).
 
 ## 📌 Règle 8 : Une estimation, pas une garantie
 - Le résultat est une **perte estimée au stop**. Gaps, glissement supérieur à la provision, rejet
@@ -73,10 +79,32 @@ Exemples (bid 1,11498 / offer 1,11508, glissement 0,5 pip) :
 
 ## 📌 Règle 9 : Blocage des entrées
 - Toute future entrée est bloquée si le marché n'est pas `TRADEABLE`, si la cotation est
-  incohérente, périmée, sans horodatage ou sans fuseau, si le contrat n'est pas vérifié, si les
-  fonds propres sont indisponibles, si une convention d'unité n'est pas confirmée ou si un coût
+  incohérente, périmée, différée, sans horodatage ou sans fuseau, si le contrat n'est pas vérifié,
+  si les fonds propres sont indisponibles, si une convention n'est pas confirmée ou si un coût
   applicable est inconnu.
+- **Fonds propres** : date sans fuseau ou dans le futur (au-delà de 2 s de tolérance) → bloqué ;
+  tout événement de position, de frais ou de flux non encore intégré → bloqué, même si la date
+  des fonds propres est récente. L'horloge locale sans fuseau bloque aussi (jamais de `TypeError`).
+- **État du marché** : la vérification du contrat (`GET /markets/{epic}` v3, datée à la réception
+  locale, valable 60 s — ASSUMP-011) et la cotation (flux `PRICE`, datée par `TIMESTAMP` IG)
+  doivent toutes deux indiquer un marché négociable. Une contradiction bloque ; aucune source ne
+  l'emporte : il faut une nouvelle vérification récente et concordante.
 - L'horodatage `updateTime` de `GET /markets/{epic}` v3 (heure sans date ni fuseau documenté)
   n'est pas converti : la cotation correspondante est considérée sans horodatage.
 - Garantie : `src/forex_bot/market.py` (`quote_blockers`), `src/forex_bot/risk.py`
   (`entry_blockers`, `size_position`).
+
+## 📌 Règle 10 : Cotations horodatées (flux `PRICE`)
+- Trois informations distinctes : heure de la cotation chez IG (`TIMESTAMP`, UTC), heure de
+  réception locale, état de la connexion. La fraîcheur se mesure **uniquement** sur `TIMESTAMP`.
+- Messages partiels (`MERGE`) fusionnés ; cotation absente tant qu'un champ requis manque.
+- Message plus ancien que la dernière cotation acceptée : rejeté (hors ordre). Ce plancher survit
+  aux reconnexions : un instantané de reconnexion ne peut ni ramener une cotation plus ancienne
+  ni rajeunir une cotation existante.
+- Déconnexion ou flux bloqué : état fusionné effacé, entrée bloquée. Mises à jour perdues :
+  bloqué jusqu'à une cotation plus récente.
+- `DLG_FLAG` autre que `DEAL` → non négociable (ASSUMP-012) ; `DELAY` = 1, absent ou inconnu →
+  bloqué (ASSUMP-013).
+- Les seuils de 10 s (cotation), 60 s (vérification du contrat) et 5 min (fonds propres) sont des
+  **paramètres expérimentaux**, pas des exigences IG.
+- Garantie : `src/forex_bot/streaming.py` (`PriceTracker`), `src/forex_bot/market.py`.

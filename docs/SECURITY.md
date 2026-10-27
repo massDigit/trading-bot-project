@@ -17,7 +17,13 @@
    `clientId` sont remplacés par `[MASQUÉ:…]` dans toute sortie et tout message d'erreur.
    Les en-têtes HTTP ne sont jamais affichés. Les redirections HTTP sont désactivées pour ne
    pas transmettre les en-têtes d'authentification à un autre hôte.
-5. **Journaux** : aucun fichier de journal n'est écrit à ce stade ; `logs/`, `reports/` et `*.log`
+5. **Flux de prix** : la sonde `ig-price-probe` échange avec IG uniquement `POST /session` et
+   `DELETE /session` (REST, liste blanche) et, côté Lightstreamer, les requêtes de contrôle de la
+   bibliothèque cliente (ouverture de session, abonnement à `PRICE`, désabonnement, déconnexion).
+   Elle n'appelle jamais `sendMessage` : aucun ordre ne peut être transmis. Elle refuse une session marquée autre que `DEMO` et un hôte
+   Lightstreamer hors liste démo (ASSUMP-014). Le mot de passe Lightstreamer
+   (`CST-…|XST-…`) et le compte de l'item `PRICE:{compte}:{epic}` sont masqués.
+6. **Journaux** : aucun fichier de journal n'est écrit à ce stade ; `logs/`, `reports/` et `*.log`
    sont exclus du Git par précaution.
-6. **Réel** : aucun accès au réel tant que les conditions du cahier des charges (§11, §14) ne sont
+7. **Réel** : aucun accès au réel tant que les conditions du cahier des charges (§11, §14) ne sont
    pas remplies et qu'une décision explicite du propriétaire n'a pas été prise.
