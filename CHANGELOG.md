@@ -6,6 +6,17 @@ Le format suit [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/) et le pr
 
 ## [Unreleased]
 
+### Added
+- Projet Python 3.12 géré par `uv` (`pyproject.toml`, `uv.lock`, `.python-version`), paquet `forex_bot`.
+- Client IG REST lecture seule verrouillé sur `https://demo-api.ig.com/gateway/deal` (liste blanche d'endpoints).
+- Script `ig-demo-diagnostic` : authentification, comptes, solde, recherche EUR/USD, contraintes de marché.
+- Masquage des secrets, jetons et identifiants de compte dans toutes les sorties.
+- Tests hors ligne (`pytest`, API IG simulée), `ruff`, `mypy --strict`.
+
+### Changed
+- `.env.example` (valeurs fictives IG), `.gitignore` (environnement Python, journaux), `.editorconfig` (Python).
+- Documentation adaptée au projet Robot Forex : `README.md`, `docs/`, `.ai/`.
+
 ## [0.2.0] - 2026-10-05
 
 ### Added
