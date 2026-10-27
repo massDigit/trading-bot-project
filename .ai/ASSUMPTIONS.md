@@ -43,3 +43,35 @@ Tout élément figurant ici est une **PROPOSITION** et ne doit pas être consid�
 - **Raisonnement** : la référence IG ne documente aucun champ d'incrément de taille et décrit `minStepDistance` seulement comme « Dealing rule ».
 - **Observation 2026-10-27 (démo)** : sur `CS.D.EURUSD.CEF.IP` et `CS.D.EURUSD.CEFM.IP`, `minDealSize` = 0,1 et `minStepDistance` = 5,0. Un pas de 5 avec un minimum de 0,1 est incohérent pour une taille : `minStepDistance` n'est donc vraisemblablement pas l'incrément de taille. Incrément toujours inconnu.
 - **Statut** : `PROPOSED`
+
+- **ID** : `ASSUMP-005`
+- **Sujet** : Unités IG pour EUR/USD Mini
+- **Proposition** : à confirmer — rapport point IG / pip, rapport unité de taille / contrat, taille minimale et incrément.
+- **Raisonnement** : `minDealSize` et les distances de `dealingRules` sont renvoyés en « POINTS », ce qui ne permet pas de conclure. Ces valeurs restent vides dans `EURUSD_MINI_CONVENTIONS` ; aucune n'est supposée implicitement (pas de 1 point = 1 pip, pas de 1 unité = 1 contrat). Les vérifications qui en dépendent sont bloquées.
+- **Statut** : `PROPOSED`
+
+- **ID** : `ASSUMP-006`
+- **Sujet** : Statut des coûts
+- **Proposition** : glissement `ASSUMED` à 0,5 pip ; commission, frais de conversion, financement overnight et prime de stop garanti `UNKNOWN` jusqu'à vérification sur la grille IG. Un coût inconnu bloque le dimensionnement et n'est jamais compté comme zéro.
+- **Statut** : `PROPOSED`
+
+- **ID** : `ASSUMP-007`
+- **Sujet** : Taux de conversion USD → EUR
+- **Proposition** : 1 / bid EUR/USD au moment du calcul (côté qui maximise la perte en EUR). Les frais de conversion IG sont traités séparément (ASSUMP-006).
+- **Statut** : `PROPOSED`
+
+- **ID** : `ASSUMP-008`
+- **Sujet** : Côté de déclenchement des stops et référence de la distance minimale
+- **Proposition** : un stop d'achat est un niveau bid, un stop de vente un niveau offer ; la distance minimale du courtier se mesure depuis le prix de sortie courant (bid pour un achat, offer pour une vente).
+- **Raisonnement** : convention usuelle des CFD, non confirmée dans la référence IG consultée. Elle détermine que le spread est compté une seule fois, via l'entrée.
+- **Statut** : `PROPOSED`
+
+- **ID** : `ASSUMP-009`
+- **Sujet** : Âge maximal d'une cotation pour une entrée
+- **Proposition** : 10 secondes, mesuré sur l'horodatage du courtier (UTC). Source d'horodatage fiable à choisir (flux Lightstreamer ou `snapshot.updateTimestampUTC` de `GET /markets/{epic}` v4).
+- **Statut** : `PROPOSED`
+
+- **ID** : `ASSUMP-010`
+- **Sujet** : Âge maximal des fonds propres du robot
+- **Proposition** : 5 minutes. Le suivi des fonds propres (réalisé, latent, frais, flux) reste à construire.
+- **Statut** : `PROPOSED`

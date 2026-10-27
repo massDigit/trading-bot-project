@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import io
 import json
 from pathlib import Path
@@ -9,6 +10,7 @@ from typing import Any
 
 import httpx
 import pytest
+from ig_fixtures import MARKET_DETAILS
 
 from forex_bot import diagnostic
 from forex_bot.config import IG_DEMO_BASE_URL, ConfigError, Settings, load_settings
@@ -37,40 +39,28 @@ def settings(account_id: str | None = None) -> Settings:
     )
 
 
-MARKET_DETAILS: dict[str, Any] = {
-    "instrument": {
-        "epic": "CS.D.EURUSD.MINI.IP",
-        "name": "EUR/USD Mini",
-        "type": "CURRENCIES",
-        "unit": "CONTRACTS",
-        "lotSize": 1.0,
-        "contractSize": "10000",
-        "onePipMeans": "0.0001 USD/EUR",
-        "valueOfOnePip": "1.00",
-        "currencies": [{"code": "USD", "isDefault": True}],
-        "marginFactor": 3.33,
-        "marginFactorUnit": "PERCENTAGE",
-        "stopsLimitsAllowed": True,
-        "forceOpenAllowed": True,
-    },
-    "dealingRules": {
-        "minDealSize": {"unit": "POINTS", "value": 0.5},
-        "minStepDistance": {"unit": "POINTS", "value": 0.1},
-        "minNormalStopOrLimitDistance": {"unit": "POINTS", "value": 2.0},
-        "minControlledRiskStopDistance": {"unit": "POINTS", "value": 10.0},
-        "maxStopOrLimitDistance": {"unit": "PERCENTAGE", "value": 75.0},
-        "marketOrderPreference": "AVAILABLE_DEFAULT_ON",
-        "trailingStopsPreference": "AVAILABLE",
-    },
-    "snapshot": {"marketStatus": "TRADEABLE", "bid": 1.08, "offer": 1.0801},
-}
+def search_result(epic: str, name: str, status: str = "TRADEABLE") -> dict[str, Any]:
+    return {"epic": epic, "instrumentName": name, "instrumentType": "CURRENCIES", "expiry": "-", "marketStatus": status}
+
+
+SEARCH_RESULTS = [
+    search_result("CS.D.EURUSD.CEF.IP", "EUR/USD"),
+    search_result("CS.D.EURUSD.CEFM.IP", "EUR/USD Mini"),
+    search_result("IX.D.SUNEURUSD.CEF.IP", "Weekend EUR/USD", "EDITS_ONLY"),
+]
 
 
 class FakeIG:
     """Records requests and answers like the documented IG endpoints."""
 
-    def __init__(self, login_status: int = 200, login_error: str | None = None) -> None:
+    def __init__(
+        self,
+        login_status: int = 200,
+        login_error: str | None = None,
+        market_details: dict[str, Any] | None = None,
+    ) -> None:
         self.requests: list[httpx.Request] = []
+        self.market_details = market_details if market_details is not None else MARKET_DETAILS
         self.login_status = login_status
         self.login_error = login_error
 
@@ -117,8 +107,8 @@ class FakeIG:
                             "status": "ENABLED",
                             "preferred": True,
                             "balance": {
-                                "balance": 2000.0,
-                                "available": 2000.0,
+                                "balance": 10000.0,
+                                "available": 10000.0,
                                 "deposit": 0.0,
                                 "profitLoss": 0.0,
                             },
@@ -141,30 +131,12 @@ class FakeIG:
                 },
             )
         if method == "GET" and path == "/markets" and "searchTerm" in request.url.params:
-            return httpx.Response(
-                200,
-                json={
-                    "markets": [
-                        {
-                            "epic": "CS.D.EURUSD.MINI.IP",
-                            "instrumentName": "EUR/USD Mini",
-                            "instrumentType": "CURRENCIES",
-                            "expiry": "-",
-                            "marketStatus": "TRADEABLE",
-                        },
-                        {
-                            "epic": "CS.D.EURUSD.FWD.IP",
-                            "instrumentName": "EUR/USD forward",
-                            "instrumentType": "CURRENCIES",
-                            "expiry": "DEC-26",
-                            "marketStatus": "TRADEABLE",
-                        },
-                    ]
-                },
-            )
-        if method == "GET" and path == "/markets/CS.D.EURUSD.MINI.IP":
+            return httpx.Response(200, json={"markets": SEARCH_RESULTS})
+        if method == "GET" and path.startswith("/markets/"):
             assert request.headers["Version"] == "3"
-            return httpx.Response(200, json=MARKET_DETAILS)
+            epic = path.removeprefix("/markets/")
+            if epic == "CS.D.EURUSD.CEFM.IP":
+                return httpx.Response(200, json=self.market_details)
         return httpx.Response(404, json={"errorCode": "invalid.url"})
 
 
@@ -179,16 +151,43 @@ def test_full_diagnostic_success_and_no_secret_leak() -> None:
     code, output = run_diag(fake, settings())
 
     assert code == diagnostic.EXIT_OK, output
-    assert "balance    : 2000.0" in output
-    assert "0.5 POINTS" in output and "minDealSize" in output
+    assert "balance    : 10000.0" in output
+    assert "0.1 POINTS" in output and "minDealSize" in output
     assert "2.0 POINTS" in output
     for secret in ALL_SECRETS:
         assert secret not in output
     methods = [(r.method, r.url.path.removeprefix("/gateway/deal")) for r in fake.requests]
     assert methods[0] == ("POST", "/session")
     assert methods[-1] == ("DELETE", "/session")
-    # forward market (with expiry) is not detailed
-    assert ("GET", "/markets/CS.D.EURUSD.FWD.IP") not in methods
+    # only the explicitly selected contract is queried; Weekend is excluded
+    market_calls = [p for m, p in methods if p.startswith("/markets/")]
+    assert market_calls == ["/markets/CS.D.EURUSD.CEFM.IP"]
+    assert "IX.D.SUNEURUSD.CEF.IP | Weekend EUR/USD" in output and "[EXCLU]" in output
+    # reference allocation, independent from the 10 000 EUR demo balance
+    assert "Allocation initiale : 2000 EUR" in output
+    assert "Budget indicatif sur l'allocation initiale : 5.00 EUR (information seulement)" in output
+    assert "[BLOQUÉ] Entrée / dimensionnement exécutable" in output
+    assert "- horodatage de la cotation inconnu" in output
+    assert "- fonds propres actualisés du portefeuille du robot indisponibles" in output
+    assert "- coût inconnu : commission" in output
+    assert "[OK] Vérification du contrat EUR/USD Mini" in output
+
+
+def test_contract_drift_is_a_failure() -> None:
+    drifted = copy.deepcopy(MARKET_DETAILS)
+    drifted["instrument"]["contractSize"] = "100000"
+    code, output = run_diag(FakeIG(market_details=drifted), settings())
+    assert code == diagnostic.EXIT_PARTIAL
+    assert "contractSize : attendu 10000, observé 100000" in output
+    assert "[ÉCHEC] Vérification du contrat EUR/USD Mini" in output
+
+
+def test_closed_market_is_a_warning() -> None:
+    closed = copy.deepcopy(MARKET_DETAILS)
+    closed["snapshot"]["marketStatus"] = "CLOSED"
+    code, output = run_diag(FakeIG(market_details=closed), settings())
+    assert code == diagnostic.EXIT_PARTIAL
+    assert "[AVERTISSEMENT] Vérification du contrat EUR/USD Mini" in output
 
 
 def test_account_switch_uses_rotated_token() -> None:

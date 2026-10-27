@@ -9,7 +9,7 @@
 Lot 0/5 préparatoire : socle Python et vérification de l'accès à l'API IG démo en lecture seule.
 
 ## 🎯 Focus Courant
-Diagnostic de connexion démo reproductible (`uv run ig-demo-diagnostic`), branche `feat/ig-demo-diagnostic`.
+Contrat EUR/USD Mini et garde de dimensionnement (branche `feat/eurusd-mini-risk-guard`, basée sur PR #1).
 
 ## ✅ Réalisé
 - [x] Structure IA-Native (template v0.2.0)
@@ -26,11 +26,16 @@ Diagnostic de connexion démo reproductible (`uv run ig-demo-diagnostic`), branc
   Mini (contrat 10 000, 1 USD/pip/contrat) ; `minDealSize` 0,1 ; stop normal min 2 points ;
   stop garanti min 5 points ; marge 3,33 %. Le marché « Weekend EUR/USD » ressort aussi du filtre.
 
+- [x] PR #1 (`feat/ig-demo-diagnostic`) ouverte, non fusionnée
+- [x] Contrat Mini explicite + vérification + garde de dimensionnement (branche `feat/eurusd-mini-risk-guard`), diagnostic réel OK
+
 ## 🔄 En Cours
-- [ ] Validation opérateur, puis commit/PR de `feat/ig-demo-diagnostic`
+- [ ] PR brouillon `feat/eurusd-mini-risk-guard` (dépend de la PR #1), en revue
 
 ## ⚠️ Problèmes Connus / Points de Vigilance
-- Unité de `minDealSize` renvoyée en « POINTS » : lecture en contrats à confirmer.
+- Unités IG non confirmées (point/pip, unité de taille/contrat, minimum, incrément) : ASSUMP-005.
+- Coûts IG inconnus (commission, conversion, financement, stop garanti) : ASSUMP-006.
+- Pas encore de suivi des fonds propres du robot ni d'horodatage fiable des cotations.
 - Incrément de taille : pas de champ dédié documenté par IG (`ASSUMP-004`).
 - Mot de passe chiffré non géré si IG l'exige.
 

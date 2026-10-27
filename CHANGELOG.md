@@ -12,6 +12,10 @@ Le format suit [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/) et le pr
 - Script `ig-demo-diagnostic` : authentification, comptes, solde, recherche EUR/USD, contraintes de marché.
 - Masquage des secrets, jetons et identifiants de compte dans toutes les sorties.
 - Tests hors ligne (`pytest`, API IG simulée), `ruff`, `mypy --strict`.
+- Sélection explicite du contrat EUR/USD Mini `CS.D.EURUSD.CEFM.IP`, exclusion du marché Weekend, vérification des caractéristiques et de l'état du contrat (`instruments.py`).
+- Estimation de la perte au stop (`risk.py`) : convention de prix explicite (spread compté une fois), conversion USD→EUR, coûts `CONFIRMED` / `ASSUMED` / `UNKNOWN` (un coût inconnu bloque, jamais compté zéro), financement swing, frais de conversion et prime de stop garanti.
+- Dimensionnement sur les fonds propres actualisés du robot, distincts de l'allocation initiale de 2 000 EUR ; stop jamais modifié ; résultat présenté comme une estimation, pas une garantie.
+- Blocage des entrées (`market.py`, `risk.py`) : marché fermé, cotation périmée ou sans horodatage, contrat non vérifié, fonds propres indisponibles, unités non confirmées, coûts inconnus.
 
 ### Changed
 - `.env.example` (valeurs fictives IG), `.gitignore` (environnement Python, journaux), `.editorconfig` (Python).
