@@ -43,7 +43,7 @@ Lightstreamer et renvoie aux pages IG Labs pour le détail.
   Bibliothèque : client officiel `lightstreamer-client-lib` (2.2.3). La page IG de téléchargement
   ne précise pas de version recommandée.
 - Abonnement utilisé : `PRICE:{compte}:CS.D.EURUSD.CEFM.IP`, mode `MERGE`, adaptateur `Pricing`,
-  champs `BIDPRICE1`, `ASKPRICE1`, `TIMESTAMP` (« Update time in UTC milliseconds »), `DLG_FLAG`
+  champs `BIDPRICE1`, `ASKPRICE1`, `TIMESTAMP` (« The timestamp in UTC millis »), `DLG_FLAG`
   (CLOSED, CALL, DEAL, EDIT, CLOSINGSONLY, DEALNOEDIT, AUCTION, AUCTIONNOEDIT, SUSPEND), `DELAY` (0/1).
 - `MARKET:{epic}` (heure `UPDATE_TIME` en heure locale UK) : fin de vie annoncée par IG, **non utilisé**.
 - Limite : 40 abonnements simultanés par connexion ; ouvrir des connexions supplémentaires pour
@@ -59,7 +59,7 @@ Lightstreamer et renvoie aux pages IG Labs pour le détail.
 Observé sur la démo le 2026-10-27 (sonde `ig-price-probe`, 3 exécutions de 15 à 20 s) : connexion
 `CONNECTED:WS-STREAMING` ; 52, 43 puis 20 mises à jour, dont un instantané par exécution, aucune
 hors ordre ni malformée ; `TIMESTAMP`, `BIDPRICE1`, `ASKPRICE1`, `DLG_FLAG` reçus ; `DLG_FLAG` =
-`"DEAL"` complété d'espaces ; `DELAY` jamais renseigné. `reroutingEnvironment` présent mais vide
+`"DEAL"` complété d'espaces (valeurs documentées elles aussi avec des espaces finaux) ; `DELAY` jamais renseigné. `reroutingEnvironment` présent mais vide
 dans `POST /session`.
 
 Écart apparent « réception locale − `TIMESTAMP` » : médiane +0,005 à +0,010 s, maximum +1,3 à

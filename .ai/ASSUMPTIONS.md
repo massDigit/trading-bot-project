@@ -84,7 +84,7 @@ Tout élément figurant ici est une **PROPOSITION** et ne doit pas être consid�
 
 - **ID** : `ASSUMP-012`
 - **Sujet** : Interprétation de `DLG_FLAG` (flux `PRICE`)
-- **Proposition** : seule la valeur `DEAL` est considérée comme négociable ; toutes les autres (`CLOSED`, `CALL`, `EDIT`, `CLOSINGSONLY`, `DEALNOEDIT`, `AUCTION`, `AUCTIONNOEDIT`, `SUSPEND`) bloquent. Les espaces de remplissage observés sur la démo (`"DEAL         "`) sont ignorés.
+- **Proposition** : seule la valeur `DEAL` est considérée comme négociable ; toutes les autres (`CLOSED`, `CALL`, `EDIT`, `CLOSINGSONLY`, `DEALNOEDIT`, `AUCTION`, `AUCTIONNOEDIT`, `SUSPEND`) bloquent. Les espaces finaux (présents dans la liste documentée par IG et observés sur la démo) sont ignorés.
 - **Raisonnement** : la référence IG liste les valeurs sans les définir. Choix restrictif, à confirmer.
 - **Statut** : `PROPOSED` — question posée dans `docs/IG_SUPPORT_REQUEST.md`
 

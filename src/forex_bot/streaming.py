@@ -3,10 +3,11 @@
 Source: IG Labs Streaming API reference, `PRICE:{account identifier}:{epic}`,
 mode MERGE, data adapter `Pricing`. Fields used:
 - BIDPRICE1 / ASKPRICE1 : top tier of the ladder (bid / ask);
-- TIMESTAMP             : "Update time in UTC milliseconds";
-- DLG_FLAG              : dealing status (CLOSED, CALL, DEAL, EDIT, CLOSINGSONLY, DEALNOEDIT,
-                          AUCTION, AUCTIONNOEDIT, SUSPEND);
-- DELAY                 : delayed price flag (0 = false, 1 = true).
+- TIMESTAMP             : "The timestamp in UTC millis";
+- DLG_FLAG              : "CLOSED " / "CALL " / "DEAL " / "EDIT " / "CLOSINGSONLY " /
+                          "DEALNOEDIT " / "AUCTION " / "AUCTIONNOEDIT" / "SUSPEND " (values
+                          documented with trailing spaces, also padded on the demo);
+- DELAY                 : "Delayed price flag (0=false, 1=true)".
 The legacy `MARKET:{epic}` subscription (end of life announced by IG) is not used.
 
 Rules
@@ -183,7 +184,7 @@ class PriceTracker:
         ig_time = parse_ig_timestamp(self._fields["TIMESTAMP"])
         if bid is None or offer is None or ig_time is None:
             return None
-        flag = (self._fields["DLG_FLAG"] or "").strip()  # observed padded with spaces on the demo
+        flag = (self._fields["DLG_FLAG"] or "").strip()  # documented and observed with trailing spaces
         delay = self._fields.get("DELAY")
         return Quote(
             bid=Decimal(bid),
