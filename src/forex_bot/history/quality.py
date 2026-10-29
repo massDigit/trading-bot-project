@@ -8,15 +8,13 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from forex_bot.history.bars import DEFAULT_GAP_THRESHOLD, TickSummary
+from forex_bot.history.bars import DEFAULT_GAP_THRESHOLD, TickSummary, expected_weekly_closes
 from forex_bot.history.calendar import (
     NEW_YORK,
     MarketState,
     Timeframe,
     expected_open_hours,
     market_state,
-    trading_day,
-    trading_day_start_utc,
 )
 from forex_bot.history.store import HistoryStore
 
@@ -57,29 +55,20 @@ def weekly_transitions(summary: TickSummary) -> list[dict[str, Any]]:
     It does not prove the time zone: that must come from the documentation of the interface used.
     """
     result = []
-    for c_start, c_end in summary.coverage:
-        day = trading_day(c_start)
-        last_day = trading_day(c_end)
-        while day <= last_day:
-            if day.weekday() == 4:  # Friday trading day closes at 17:00 New York
-                close = trading_day_start_utc(day + timedelta(days=1))
-                reopen = trading_day_start_utc(day + timedelta(days=3))
-                if c_start < close and reopen < c_end:
-                    before = max((t for t in summary.valid_times if t < close), default=None)
-                    after = min((t for t in summary.valid_times if t >= close), default=None)
-                    result.append(
-                        {
-                            "expected_close_utc": close.isoformat(),
-                            "expected_reopen_utc": reopen.isoformat(),
-                            "new_york_close": close.astimezone(NEW_YORK).isoformat(),
-                            "last_tick_before_close_utc": _fmt(before),
-                            "first_tick_after_close_utc": _fmt(after),
-                            "first_tick_minus_expected_reopen_min": (
-                                round((after - reopen).total_seconds() / 60, 1) if after else None
-                            ),
-                        }
-                    )
-            day += timedelta(days=1)
+    for close, reopen in expected_weekly_closes(summary.coverage):
+        before, after = summary.closure_neighbours.get(close, (None, None))
+        result.append(
+            {
+                "expected_close_utc": close.isoformat(),
+                "expected_reopen_utc": reopen.isoformat(),
+                "new_york_close": close.astimezone(NEW_YORK).isoformat(),
+                "last_tick_before_close_utc": _fmt(before),
+                "first_tick_after_close_utc": _fmt(after),
+                "first_tick_minus_expected_reopen_min": (
+                    round((after - reopen).total_seconds() / 60, 1) if after else None
+                ),
+            }
+        )
     return result
 
 

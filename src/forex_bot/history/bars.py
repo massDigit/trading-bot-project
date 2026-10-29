@@ -19,7 +19,6 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
-from itertools import pairwise
 from pathlib import Path
 from typing import Any
 
@@ -35,6 +34,8 @@ from forex_bot.history.calendar import (
     candle_start,
     expected_open_hours,
     market_state,
+    trading_day,
+    trading_day_start_utc,
 )
 from forex_bot.history.store import PRICE_TYPE, HistoryStore
 
@@ -86,11 +87,12 @@ class TickSummary:
     last_tick_utc: datetime | None = None
     coverage: list[tuple[datetime, datetime]] = field(default_factory=list)
     gaps: list[Gap] = field(default_factory=list)
-    valid_times: list[datetime] = field(default_factory=list, repr=False)
+    # expected weekly close (UTC) -> (last valid tick before it, first valid tick at or after it)
+    closure_neighbours: dict[datetime, tuple[datetime | None, datetime | None]] = field(default_factory=dict)
 
 
-def _one(con: duckdb.DuckDBPyConnection, sql: str) -> tuple[Any, ...]:
-    row = con.execute(sql).fetchone()
+def _one(con: duckdb.DuckDBPyConnection, sql: str, params: list[Any] | None = None) -> tuple[Any, ...]:
+    row = con.execute(sql, params).fetchone()
     if row is None:
         raise RuntimeError("requête d'agrégat sans résultat")
     return row
@@ -102,6 +104,11 @@ def _connect(store: HistoryStore, source: str, instrument: str) -> duckdb.DuckDB
         raise FileNotFoundError("aucun fichier de ticks normalisé")
     con = duckdb.connect()
     con.execute("SET TimeZone = 'UTC'")
+    # Years of ticks do not fit in memory: bounded memory, spill to the data directory.
+    con.execute(f"SET memory_limit = '{DUCKDB_MEMORY_LIMIT}'")
+    spill = store.data_dir / "tmp" / "duckdb"
+    spill.mkdir(parents=True, exist_ok=True)
+    con.execute(f"SET temp_directory = '{spill.as_posix()}'")
     con.read_parquet([p.as_posix() for p in files]).create_view("raw_ticks")
     con.execute(
         """CREATE VIEW ticks AS
@@ -110,6 +117,28 @@ def _connect(store: HistoryStore, source: str, instrument: str) -> duckdb.DuckDB
         FROM raw_ticks"""
     )
     return con
+
+
+DUCKDB_MEMORY_LIMIT = "6GB"
+
+
+def expected_weekly_closes(coverage: list[tuple[datetime, datetime]]) -> list[tuple[datetime, datetime]]:
+    """(close, reopen) in UTC of every weekly closure lying inside one coverage interval."""
+    result = []
+    for c_start, c_end in coverage:
+        day, last_day = trading_day(c_start), trading_day(c_end)
+        while day <= last_day:
+            if day.weekday() == 4:  # Friday trading day closes at 17:00 New York
+                close = trading_day_start_utc(day + timedelta(days=1))
+                reopen = trading_day_start_utc(day + timedelta(days=3))
+                if c_start < close and reopen < c_end:
+                    result.append((close, reopen))
+            day += timedelta(days=1)
+    return result
+
+
+def _us(moment: datetime) -> int:
+    return round((moment - datetime(1970, 1, 1, tzinfo=UTC)).total_seconds() * 1_000_000)
 
 
 def _utc(epoch_us: int) -> datetime:
@@ -180,16 +209,59 @@ def summarize_ticks(
     )
     summary.simultaneous_groups, summary.simultaneous_ticks = int(simultaneous[0]), int(simultaneous[1])
 
-    times = [_utc(v) for (v,) in con.execute("SELECT ts_us FROM ticks WHERE valid ORDER BY ts_us").fetchall()]
-    summary.valid_times = times
-    summary.during_weekly_closure = sum(1 for t in times if market_state(t) is MarketState.WEEKLY_CLOSURE)
+    # Weekly closure boundaries fall on whole UTC hours (17:00 New York): the state of a tick is the
+    # state of its hour, so ticks are counted per hour instead of being loaded one by one.
+    hourly = con.execute("SELECT ts_us // 3600000000, count(*) FROM ticks WHERE valid GROUP BY 1").fetchall()
+    summary.during_weekly_closure = sum(
+        int(n) for hour, n in hourly if market_state(_utc(int(hour) * 3_600_000_000)) is MarketState.WEEKLY_CLOSURE
+    )
+
+    threshold_us = int(gap_threshold.total_seconds() * 1_000_000)
     for c_start, c_end in summary.coverage:
-        inside = [t for t in times if c_start <= t < c_end]
-        points = [c_start, *inside, c_end]
-        for before, after in pairwise(points):
+        lo, hi = _us(c_start), _us(c_end)
+        bounds = _one(
+            con, "SELECT min(ts_us), max(ts_us) FROM ticks WHERE valid AND ts_us >= $1 AND ts_us < $2", [lo, hi]
+        )
+        if bounds[0] is None:
+            pairs = [(c_start, c_end)]
+        else:
+            inner = con.execute(
+                """SELECT prev, ts_us FROM (
+                        SELECT ts_us, lag(ts_us) OVER (ORDER BY ts_us) AS prev
+                        FROM ticks WHERE valid AND ts_us >= $1 AND ts_us < $2)
+                    WHERE ts_us - prev > $3 ORDER BY ts_us""",
+                [lo, hi, threshold_us],
+            ).fetchall()
+            pairs = [
+                (c_start, _utc(int(bounds[0]))),
+                *((_utc(a), _utc(b)) for a, b in inner),
+                (_utc(int(bounds[1])), c_end),
+            ]
+        for before, after in pairs:
             if after - before > gap_threshold:
-                minutes = _open_minutes(before, after)
-                summary.gaps.append(Gap(before, after, minutes))
+                summary.gaps.append(Gap(before, after, _open_minutes(before, after)))
+
+    closes = expected_weekly_closes(summary.coverage)
+    if closes:
+        con.execute("CREATE TEMP TABLE closes (close_us BIGINT)")
+        con.executemany("INSERT INTO closes VALUES (?)", [(_us(close),) for close, _ in closes])
+        con.execute("CREATE TEMP VIEW valid_ts AS SELECT ts_us FROM ticks WHERE valid")
+        last_before = dict(
+            con.execute(
+                "SELECT c.close_us, v.ts_us FROM closes c ASOF LEFT JOIN valid_ts v ON c.close_us > v.ts_us"
+            ).fetchall()
+        )
+        first_after = dict(
+            con.execute(
+                "SELECT c.close_us, v.ts_us FROM closes c ASOF LEFT JOIN valid_ts v ON c.close_us <= v.ts_us"
+            ).fetchall()
+        )
+        for close, _ in closes:
+            b, a = last_before.get(_us(close)), first_after.get(_us(close))
+            summary.closure_neighbours[close] = (
+                _utc(int(b)) if b is not None else None,
+                _utc(int(a)) if a is not None else None,
+            )
     con.close()
     return summary
 
