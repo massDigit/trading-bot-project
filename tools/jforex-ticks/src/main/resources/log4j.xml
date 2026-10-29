@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE log4j:configuration SYSTEM "log4j.dtd">
+<!-- Overrides the SDK's bundled log4j.xml (target/classes comes first on the classpath):
+     SDK warnings and errors only, to stderr, masked by TickExport. -->
+<log4j:configuration xmlns:log4j="http://jakarta.apache.org/log4j/">
+  <appender name="stderr" class="org.apache.log4j.ConsoleAppender">
+    <param name="Target" value="System.err"/>
+    <layout class="org.apache.log4j.PatternLayout">
+      <param name="ConversionPattern" value="%d{ISO8601} %-5p %c{1} - %m%n"/>
+    </layout>
+  </appender>
+  <root>
+    <priority value="WARN"/>
+    <appender-ref ref="stderr"/>
+  </root>
+</log4j:configuration>

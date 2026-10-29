@@ -1,0 +1,12 @@
+# Versioned sample definition. Chosen BEFORE looking at any data (2026-10-27).
+[sample]
+id = "eurusd-2019-03-w10"
+source = "dukascopy"
+instrument = "EURUSD"
+format = "jforex-sdk-ticks-csv-v1"  # tools/jforex-ticks (demo SDK)
+period_start_utc = "2019-03-07T00:00:00+00:00"   # Thursday
+period_end_utc = "2019-03-13T00:00:00+00:00"     # Wednesday 00:00, exclusive
+rationale = """Six jours UTC dans la partition de développement (2015-2021) : sessions Asie, Londres et \
+New York sur plusieurs jours, clôture du vendredi 8 mars, réouverture du dimanche 10 mars, passage à \
+l'heure d'été américaine le 10 mars 2019 (02:00 New York, pendant la fermeture), heure d'hiver encore \
+en vigueur en Europe (changement le 31 mars). Aucun jour férié attendu. Aucune donnée 2022-2025."""

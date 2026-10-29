@@ -2,14 +2,15 @@
 
 > **Ce fichier donne à l'agent une image précise de l'état du projet en temps réel à chaque début de session.**
 
-**Dernière mise à jour** : 2026-10-27
+**Dernière mise à jour** : 2026-10-28
 **Version** : 0.2.0 (template) — socle Python non encore publié
 
 ## 🚀 Phase Actuelle
 Lot 0/5 préparatoire : socle Python et vérification de l'accès à l'API IG démo en lecture seule.
 
 ## 🎯 Focus Courant
-Contrat EUR/USD Mini et garde de dimensionnement (branche `feat/eurusd-mini-risk-guard`, basée sur PR #1).
+Historiques EUR/USD et fiche S1 (branche `feat/eurusd-history-s1`, worktree séparé, basée sur `af29912`
+de la PR #2).
 
 ## ✅ Réalisé
 - [x] Structure IA-Native (template v0.2.0)
@@ -32,6 +33,10 @@ Contrat EUR/USD Mini et garde de dimensionnement (branche `feat/eurusd-mini-risk
 - [x] Corrections de revue du commit cedbfb5 (stop garanti, convention de déclenchement, horodatage des fonds propres, état du marché) + 111 tests
 - [x] Flux `PRICE` vérifié sur la démo le 2026-10-27 : `TIMESTAMP` reçu, `DLG_FLAG` = DEAL (avec espaces), `DELAY` jamais renseigné
 
+- [x] Importeur historique reproductible (brut immuable, manifeste, empreinte, reprise, idempotence), bougies H1/H4/D1 bid/ask, rapport qualité, tests synthétiques
+- [x] Fiche exécutable S1 (brouillon, paramètres proposés)
+- [x] Adaptateur JForex SDK (Java, démo, lecture seule) ; échantillon 2019-03 acquis : 530 478 ticks, aucune anomalie, 97 H1 complètes (2026-10-28)
+
 ## 🔄 En Cours
 - [ ] PR #2 brouillon `feat/eurusd-mini-risk-guard` (dépend de la PR #1), en revue
 - [ ] Demande au support IG préparée, non envoyée (`docs/IG_SUPPORT_REQUEST.md`)
@@ -43,6 +48,8 @@ Contrat EUR/USD Mini et garde de dimensionnement (branche `feat/eurusd-mini-risk
 - Conventions de stop (côté de déclenchement, référence des distances) non confirmées : ASSUMP-008.
 - Incrément de taille : pas de champ dédié documenté par IG (`ASSUMP-004`).
 - Mot de passe chiffré non géré si IG l'exige.
+- Dukascopy : licence ambiguë pour la conservation locale et la conversion ; l'opérateur a décidé d'acquérir quand même (usage personnel, arrêt en cas d'avertissement) ; convention temporelle non documentée, cohérente sur l'échantillon (ASSUMP-018, ASSUMP-019).
+- SDK JForex : une réponse HTTP 503 devient une heure vide mise en cache, sans erreur ; détecté et relancé par l'adaptateur (ASSUMP-022). Compte démo valable 14 jours.
 
 ## 🏁 Prochaine Étape / Milestone
 Résultat réel du diagnostic → confirmer epic EUR/USD, taille minimale et distances de stop,

@@ -23,6 +23,14 @@ Le format suit [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/) et le pr
 - Sonde `ig-price-probe` (lecture seule, démo) ; dépendance `lightstreamer-client-lib`.
 - `docs/IG_SUPPORT_REQUEST.md` (brouillon non envoyé) et `docs/CONFIRMATIONS.md` (registre source/date/contrat).
 
+- Importeur historique (`forex_bot.history`, commande `forex-history`) : fichiers exportés manuellement, copie brute immuable, manifeste et empreinte SHA-256, reprise après interruption, import idempotent, Parquet UTC, bid et ask séparés.
+- Bougies H1/H4/D1 bid/ask (ancrage clôture New York), rapport qualité (trous, fermetures, ticks simultanés, contrôle du fuseau), sans comblement.
+- `docs/DATA.md` (étude Dukascopy par canal d'accès : export web, JForex SDK ; conditions d'utilisation, schéma, conventions), `docs/DUKASCOPY_REQUEST.md` (brouillon non envoyé) et fiche exécutable `docs/strategies/S1_DONCHIAN.md`.
+- Règle de découpage des requêtes JForex (bornes inclusives, sans doublon ni perte aux frontières).
+- Adaptateur Java `tools/jforex-ticks` (SDK JForex, serveur démo, lecture seule, période 2015-2023 seulement) : un CSV par jour UTC, reprise, relance des heures vides dues aux réponses 503 du SDK, masquage des identifiants.
+- Format `jforex-sdk-ticks-csv-v1` et commande `forex-history ingest-jforex`.
+- Commande `forex-history purge-dukascopy` : liste puis, avec `--confirm`, supprime toutes les données dérivées de Dukascopy, le cache du SDK et `~/Library/Application Support/JForex`.
+
 ### Changed
 - `.env.example` (valeurs fictives IG), `.gitignore` (environnement Python, journaux), `.editorconfig` (Python).
 - Documentation adaptée au projet Robot Forex : `README.md`, `docs/`, `.ai/`.

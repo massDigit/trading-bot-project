@@ -97,3 +97,44 @@ Tout élément figurant ici est une **PROPOSITION** et ne doit pas être consid�
 - **Sujet** : Verrouillage du flux sur la démo
 - **Proposition** : `reroutingEnvironment` est renvoyé vide par la démo ; la sonde refuse toute valeur autre que vide ou `DEMO` et exige un hôte Lightstreamer de la liste démo (`demo-apd.marketdatasystems.com`, observé le 2026-10-27). Un nouvel hôte arrête la sonde jusqu'à revue (la documentation IG indique que l'adresse peut changer).
 - **Statut** : `PROPOSED`
+
+- **ID** : `ASSUMP-015`
+- **Sujet** : Ancrage des bougies H4 et D1
+- **Proposition** : clôture de New York (journée 17:00 → 17:00 America/New_York ; H4 à 17, 21, 01, 05, 09, 13 h New York) ; H1 sur l'heure UTC. Le dimanche soir appartient au lundi.
+- **Raisonnement** : convention Forex courante ; 5 bougies D1 par semaine ; les changements d'heure américains tombent pendant la fermeture. L'ancrage des graphiques IG reste à comparer avant le direct.
+- **Statut** : `PROPOSED` (configuration de travail)
+
+- **ID** : `ASSUMP-016`
+- **Sujet** : Horaire de fermeture hebdomadaire et jours fériés
+- **Proposition** : fermeture du vendredi 17:00 au dimanche 17:00 New York ; 25 décembre et 1er janvier marqués « jour férié probable » (bougies incomplètes), jamais classés silencieusement comme fermeture normale.
+- **Statut** : `PROPOSED` — à confronter à l'échantillon et aux horaires IG
+
+- **ID** : `ASSUMP-017`
+- **Sujet** : Seuil de trou de cotation
+- **Proposition** : un intervalle sans tick valide de plus de 10 minutes pendant l'ouverture prévue rend les bougies concernées incomplètes. Paramètre propre au projet.
+- **Statut** : `PROPOSED`
+
+- **ID** : `ASSUMP-018`
+- **Sujet** : Canal et conditions d'accès aux données Dukascopy
+- **Proposition** : canal privilégié : JForex SDK (`IHistory`), sous la licence de l'API JForex (usage personnel, non commercial). Aucune acquisition tant que restent ambigus : conservation persistante hors cache (« temporary use »), conversion en Parquet et bougies (« adapt, modify »), usage pour un compte chez un autre courtier, apprentissage, conditions du compte démo. Question préparée : `docs/DUKASCOPY_REQUEST.md` (non envoyée). Pas de téléchargement automatisé depuis le site (CGU du site, section 3).
+- **Statut** : `PROPOSED` — l'opérateur a décidé le 2026-10-28 d'acquérir par le SDK malgré les ambiguïtés, pour un usage personnel non commercial, sans envoyer la question, avec arrêt et purge en cas d'avertissement de Dukascopy (`docs/DATA.md` §1.3)
+
+- **ID** : `ASSUMP-019`
+- **Sujet** : Format et convention temporelle des données Dukascopy
+- **Proposition** : export CSV : en-tête `Gmt time,Ask,Bid,AskVolume,BidVolume`, date `dd.MM.yyyy HH:mm:ss.SSS`, 5 décimales, temps **déclaré** GMT/UTC (non documenté). JForex : `getTime()` sans unité ni fuseau documentés (millisecondes GMT selon le forum seulement). La fermeture et la réouverture hebdomadaires ne sont que des contrôles de cohérence.
+- **Statut** : `PROPOSED` — JForex : lecture en millisecondes UTC cohérente sur l'échantillon 2019-03 (clôture et réouverture à moins de 0,1 min de l'horaire attendu) ; toujours non documentée
+
+- **ID** : `ASSUMP-020`
+- **Sujet** : Paramètres de la fiche S1
+- **Proposition** : N = 20, M = 10, ATR 14, k = 2, filtre D1 au milieu du canal 55 jours, signal sur la série bid (voir `docs/strategies/S1_DONCHIAN.md`). Aucun réglage ni résultat.
+- **Statut** : `PROPOSED`
+
+- **ID** : `ASSUMP-021`
+- **Sujet** : Découpage des requêtes JForex
+- **Proposition** : fenêtres d'une heure ; demander `[début − 1 ms, fin − 1 ms]` (borne `to` inclusive selon la Javadoc, `from` incertain) puis garder `début ≤ t < fin`, filtrage sur le temps uniquement. Aucun tick dupliqué ni supprimé aux frontières ; ticks simultanés conservés (`src/forex_bot/history/jforex.py`).
+- **Statut** : `PROPOSED`
+
+- **ID** : `ASSUMP-022`
+- **Sujet** : Heures vides renvoyées par le SDK JForex
+- **Proposition** : une heure sans tick alors que le marché est attendu ouvert est traitée comme un échec de téléchargement, pas comme une absence de cotation : suppression du fichier de cache de 0 octet de cette heure, jusqu'à 5 tentatives, puis jour non écrit (`<jour>.incomplete.json`). Fondé sur l'observation du 2026-10-28 (réponse HTTP 503 transformée en liste vide et mise en cache). La structure du cache est observée, non documentée. Les heures des jours fériés probables (25 décembre, 1er janvier, ASSUMP-016) ne sont pas relancées.
+- **Statut** : `PROPOSED`
