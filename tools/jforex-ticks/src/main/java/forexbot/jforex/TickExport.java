@@ -63,6 +63,15 @@ public final class TickExport {
     static final ZoneId NEW_YORK = ZoneId.of("America/New_York");
     static final int MAX_ATTEMPTS = 5;
     static final long RETRY_BASE_MS = 5_000L; // 5, 10, 20, 40 s
+    /*
+     * Closed list of UTC hours (yyyy-mm-ddTHH) accepted EMPTY although the market is expected open
+     * (operator decision of 2026-10-30, docs/DATA.md §1.4). Each one answered HTTP 503 on every
+     * attempt over 4 runs spread across ~36 h while its neighbouring hours loaded: probably a file
+     * missing or damaged at the source. They are still requested and retried; if they stay empty
+     * the day is written WITHOUT filling them and the sidecar lists them, so the quality report shows
+     * a gap and flags the candles. Any other empty open hour still blocks its day.
+     */
+    static final Set<String> ACCEPTED_EMPTY_HOURS = Set.of("2016-09-02T18", "2019-05-26T21", "2019-05-26T22");
     // Session tokens that appear in SDK log URLs.
     static final java.util.regex.Pattern URL_TOKEN = java.util.regex.Pattern.compile("(check|token|session)=[^&\\s]+");
 
@@ -165,6 +174,7 @@ public final class TickExport {
         int[] perHour = new int[24];
         int[] retries = new int[24];
         List<Integer> emptyOpenHours = new ArrayList<>();
+        List<Integer> acceptedEmptyHours = new ArrayList<>();
         int discarded = 0;
         long started = System.nanoTime();
         for (int hour = 0; hour < 24; hour++) {
@@ -193,7 +203,11 @@ public final class TickExport {
                 Thread.sleep(RETRY_BASE_MS << (attempt - 1));
             }
             if (inWindow.isEmpty() && expectedOpen(start)) {
-                emptyOpenHours.add(hour);
+                if (ACCEPTED_EMPTY_HOURS.contains(String.format("%sT%02d", day, hour))) {
+                    acceptedEmptyHours.add(hour);
+                } else {
+                    emptyOpenHours.add(hour);
+                }
             }
             kept.addAll(inWindow);
             perHour[hour] = inWindow.size();
@@ -244,6 +258,7 @@ public final class TickExport {
                 + "  \"discarded_outside_window\": " + discarded + ",\n"
                 + "  \"out_of_order\": " + outOfOrder + ",\n"
                 + "  \"retries_per_hour\": " + java.util.Arrays.toString(retries) + ",\n"
+                + "  \"accepted_empty_hours_utc\": " + acceptedEmptyHours + ",\n"
                 + "  \"elapsed_ms\": " + elapsedMs + "\n"
                 + "}\n";
         Path sidecarTmp = outDir.resolve(day + ".json.tmp-" + ProcessHandle.current().pid());
@@ -253,7 +268,9 @@ public final class TickExport {
         // The CSV is the completion marker: it is moved last.
         Files.move(tmp, csv, StandardCopyOption.ATOMIC_MOVE);
         System.out.println(day + " : " + kept.size() + " ticks, " + discarded + " hors fenêtre, "
-                + outOfOrder + " hors ordre, " + retryTotal + " nouvelle(s) tentative(s), " + elapsedMs + " ms");
+                + outOfOrder + " hors ordre, " + retryTotal + " nouvelle(s) tentative(s), " + elapsedMs + " ms"
+                + (acceptedEmptyHours.isEmpty() ? "" : " ; heures UTC acceptées vides (décision opérateur) : "
+                        + acceptedEmptyHours));
         return true;
     }
 

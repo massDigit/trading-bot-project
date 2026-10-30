@@ -29,6 +29,7 @@ Le format suit [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/) et le pr
 - Règle de découpage des requêtes JForex (bornes inclusives, sans doublon ni perte aux frontières).
 - Adaptateur Java `tools/jforex-ticks` (SDK JForex, serveur démo, lecture seule, période 2015-2023 seulement) : un CSV par jour UTC, reprise, relance des heures vides dues aux réponses 503 du SDK, masquage des identifiants.
 - Format `jforex-sdk-ticks-csv-v1` et commande `forex-history ingest-jforex`.
+- Adaptateur JForex : liste fermée d'heures acceptées vides sur décision de l'opérateur (2016-09-02 18h, 2019-05-26 21h-22h UTC, 503 persistants à la source) ; jours écrits sans combler ces heures, signalées dans le JSON compagnon et le rapport qualité.
 - Construction des bougies et du rapport qualité en mémoire bornée (DuckDB, 6 Go, débordement sur disque dans `data/tmp`) : trous, ticks en fermeture et transitions hebdomadaires calculés en SQL ; résultats identiques sur 2015-2020, 47 s au lieu de 22 min.
 - Commande `forex-history purge-dukascopy` : liste puis, avec `--confirm`, supprime toutes les données dérivées de Dukascopy, le cache du SDK et `~/Library/Application Support/JForex`.
 

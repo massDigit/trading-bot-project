@@ -7,6 +7,7 @@ New York 17:00 = 22:00 UTC before the change, 21:00 UTC after.
 from __future__ import annotations
 
 import os
+import re
 import stat
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal as D
@@ -387,6 +388,16 @@ def test_java_adapter_is_read_only_and_demo_only() -> None:
     assert 'DEMO_JNLP = "https://platform.dukascopy.com/demo/jforex.jnlp"' in source
     assert source.count("client.connect(") == 1 and "client.connect(DEMO_JNLP, username, password)" in source
     assert "ALLOWED_TO = LocalDate.of(2024, 1, 1)" in source
+
+
+def test_java_adapter_accepts_only_the_operator_listed_empty_hours() -> None:
+    """Empty open hours are accepted only from the closed list decided by the operator (2026-10-30)."""
+    source = JAVA_SOURCE.read_text(encoding="utf-8")
+    declaration = re.search(r"ACCEPTED_EMPTY_HOURS = Set\.of\(([^)]*)\);", source)
+    assert declaration is not None
+    assert re.findall(r'"([^"]+)"', declaration.group(1)) == ["2016-09-02T18", "2019-05-26T21", "2019-05-26T22"]
+    assert source.count("ACCEPTED_EMPTY_HOURS") == 2  # declaration and a single lookup
+    assert '"  \\"accepted_empty_hours_utc\\": "' in source
 
 
 # ---------------------------------------------------------------- purge
