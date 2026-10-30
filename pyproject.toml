@@ -7,8 +7,10 @@ authors = [
 ]
 requires-python = ">=3.12"
 dependencies = [
+    "duckdb>=1.3,<2",
     "httpx>=0.28,<0.29",
     "lightstreamer-client-lib>=2.2,<3",
+    "pyarrow>=21,<23",
     "python-dotenv>=1.1,<2",
 ]
 
@@ -26,6 +28,7 @@ dev = [
 [project.scripts]
 ig-demo-diagnostic = "forex_bot.diagnostic:main"
 ig-price-probe = "forex_bot.price_probe:main"
+forex-history = "forex_bot.history.cli:main"
 
 [tool.ruff]
 line-length = 120
@@ -43,7 +46,7 @@ strict = true
 python_version = "3.12"
 
 [[tool.mypy.overrides]]
-module = ["lightstreamer.*"]
+module = ["lightstreamer.*", "pyarrow.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

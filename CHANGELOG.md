@@ -23,6 +23,21 @@ Le format suit [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/) et le pr
 - Sonde `ig-price-probe` (lecture seule, démo) ; dépendance `lightstreamer-client-lib`.
 - `docs/IG_SUPPORT_REQUEST.md` (brouillon non envoyé) et `docs/CONFIRMATIONS.md` (registre source/date/contrat).
 
+- Importeur historique (`forex_bot.history`, commande `forex-history`) : fichiers exportés manuellement, copie brute immuable, manifeste et empreinte SHA-256, reprise après interruption, import idempotent, Parquet UTC, bid et ask séparés.
+- Bougies H1/H4/D1 bid/ask (ancrage clôture New York), rapport qualité (trous, fermetures, ticks simultanés, contrôle du fuseau), sans comblement.
+- `docs/DATA.md` (étude Dukascopy par canal d'accès : export web, JForex SDK ; conditions d'utilisation, schéma, conventions), `docs/DUKASCOPY_REQUEST.md` (brouillon non envoyé) et fiche exécutable `docs/strategies/S1_DONCHIAN.md`.
+- Règle de découpage des requêtes JForex (bornes inclusives, sans doublon ni perte aux frontières).
+- Adaptateur Java `tools/jforex-ticks` (SDK JForex, serveur démo, lecture seule, période 2015-2023 seulement) : un CSV par jour UTC, reprise, relance des heures vides dues aux réponses 503 du SDK, masquage des identifiants.
+- Format `jforex-sdk-ticks-csv-v1` et commande `forex-history ingest-jforex`.
+- Mémoire `.ai/` remise en ordre : suppositions classées par nature (choix du projet, fait extérieur, observation), décisions de l'opérateur consignées (ADR-003 à ADR-008, dont la validation expérimentale des règles de S1 et l'approbation des choix du projet ASSUMP-001 à 022), tâches et état actualisés, vérifications adaptées au type de changement, normes par langage, PR empilées ; fiche S1 harmonisée (état `OK` sur `complete_at_close`, chronologie avec latence, sortie stratégique distincte d'une liquidation de sécurité, prime du stop garanti comptée à part).
+- Bougies : état de qualité connaissable à la clôture (`complete_at_close`, `flags_at_close`, construit sans ticks postérieurs) distinct de l'audit rétrospectif (`complete`, `flags`) ; un tick invalide exclu rend la bougie incomplète ; `overlaps_gap(..., known_until=)` pour l'information disponible à un instant donné ; tests sur l'invariance aux ticks futurs.
+- Rapport qualité : classement des interruptions corrigé (jour férié détecté à l'intérieur de l'interruption, réouverture tardive après un jour férié classée en trou), totaux par classe en durée brute et en minutes d'ouverture prévue, rapprochement des clôtures hebdomadaires, état du marché à la réouverture attendue ; bougies inchangées.
+- Purge Dukascopy : le dossier `~/Library/Application Support/JForex` n'est supprimé que s'il se réduit au squelette créé par nos lancements du SDK ; sinon il est laissé en place et signalé.
+- Fiche S1 : règles de données proposées après revue externe (états de bougie, ATR indisponible puis réamorcé sur 14 true ranges valides, canal D1 strict retenu par l'opérateur, positions pendant une interruption en scénarios propagés, disponibilité des bougies et ordre de traitement).
+- Adaptateur JForex : liste fermée d'heures acceptées vides sur décision de l'opérateur (2016-09-02 18h, 2019-05-26 21h-22h UTC, 503 persistants à la source) ; jours écrits sans combler ces heures, signalées dans le JSON compagnon et le rapport qualité.
+- Construction des bougies et du rapport qualité en mémoire bornée (DuckDB, 6 Go, débordement sur disque dans `data/tmp`) : trous, ticks en fermeture et transitions hebdomadaires calculés en SQL ; résultats identiques sur 2015-2020, 47 s au lieu de 22 min.
+- Commande `forex-history purge-dukascopy` : liste puis, avec `--confirm`, supprime toutes les données dérivées de Dukascopy, le cache du SDK et `~/Library/Application Support/JForex`.
+
 ### Changed
 - `.env.example` (valeurs fictives IG), `.gitignore` (environnement Python, journaux), `.editorconfig` (Python).
 - Documentation adaptée au projet Robot Forex : `README.md`, `docs/`, `.ai/`.

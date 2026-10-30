@@ -20,6 +20,9 @@ open -e .env.demo     # or any editor: IG_API_KEY, IG_USERNAME, IG_PASSWORD
 # 3. Run the diagnostic
 uv run ig-demo-diagnostic
 uv run ig-price-probe --seconds 20   # PRICE stream probe, read-only
+uv run forex-history plan --sample config/history/sample_eurusd_2019_03.toml   # see docs/DATA.md
+tools/jforex-ticks/run.sh --env-file <env file> --from 2019-03-07 --to 2019-03-13   # Dukascopy demo, read-only
+uv run forex-history ingest-jforex --dir data/dukascopy-sdk/ticks/EURUSD && uv run forex-history build
 echo "exit code: $?"
 ```
 

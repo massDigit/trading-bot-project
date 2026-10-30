@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>forexbot</groupId>
+  <artifactId>jforex-ticks</artifactId>
+  <version>0.1.0</version>
+  <packaging>jar</packaging>
+  <description>Read-only EUR/USD tick history export through the Dukascopy JForex SDK (demo only).</description>
+
+  <properties>
+    <maven.compiler.release>21</maven.compiler.release>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+  </properties>
+
+  <repositories>
+    <repository>
+      <id>dukascopy-public</id>
+      <url>https://www.dukascopy.com/client/jforexlib/publicrepo/</url>
+    </repository>
+  </repositories>
+
+  <dependencies>
+    <dependency>
+      <groupId>com.dukascopy.dds2</groupId>
+      <artifactId>DDS2-jClient-JForex</artifactId>
+      <version>3.6.51</version>
+    </dependency>
+  </dependencies>
+</project>
