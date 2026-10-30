@@ -28,7 +28,7 @@ from forex_bot.history.calendar import (
     trading_day,
 )
 from forex_bot.history.formats import FormatError
-from forex_bot.history.quality import build_report
+from forex_bot.history.quality import build_report, classify_gap
 from forex_bot.history.store import HistoryStore, IngestError, IngestRequest
 
 HEADER = "Gmt time,Ask,Bid,AskVolume,BidVolume\n"
@@ -403,6 +403,22 @@ def test_java_adapter_accepts_only_the_operator_listed_empty_hours() -> None:
 # ---------------------------------------------------------------- purge
 
 
+def test_gap_classification_looks_inside_the_gap_and_never_hides_open_time() -> None:
+    ten = timedelta(minutes=10)
+    # 31 Dec 21:59 -> 1 Jan 22:01 UTC: open only at both ends, the holiday lies in between.
+    assert classify_gap(utc(2019, 12, 31, 21, 59), utc(2020, 1, 1, 22, 1), 2.0, ten) == "jour férié probable"
+    # Late reopening after Christmas: 32 min of expected-open time without quotes is a gap.
+    assert classify_gap(utc(2017, 12, 25, 7, 59), utc(2017, 12, 25, 22, 32), 32.2, ten) == (
+        "TROU pendant l'ouverture prévue (contigu à un jour férié probable)"
+    )
+    assert classify_gap(utc(2019, 3, 8, 21, 59), utc(2019, 3, 10, 21, 0), 0.1, ten) == (
+        "fermeture normale (horaire prévu)"
+    )
+    assert classify_gap(utc(2023, 3, 15, 21, 15), utc(2023, 3, 15, 21, 30), 14.6, ten) == (
+        "TROU pendant l'ouverture prévue"
+    )
+
+
 def test_purge_lists_then_deletes_only_dukascopy_files(tmp_path: Path) -> None:
     from forex_bot.history.purge import purge, purge_targets
 
@@ -429,6 +445,25 @@ def test_purge_lists_then_deletes_only_dukascopy_files(tmp_path: Path) -> None:
     purge(targets, confirm=True)
     assert purge_targets(tmp_path / "data", app) == []
     assert other.exists() and (tmp_path / "data/reports/quality_other_EURUSD.md").exists()
+
+
+def test_purge_leaves_a_jforex_folder_that_holds_anything_else(tmp_path: Path) -> None:
+    """Only the empty skeleton created by our SDK runs is purged outside the project."""
+    from forex_bot.history.purge import is_sdk_skeleton, jforex_dir_left_in_place, purge_targets
+
+    app = tmp_path / "JForex"
+    (app / "Strategies/files").mkdir(parents=True)
+    assert is_sdk_skeleton(app) and jforex_dir_left_in_place(app) is None
+    assert [t.path for t in purge_targets(tmp_path / "data", app)] == [app]
+
+    (app / "Strategies/files/MyStrategy.jfx").write_text("someone else's work")
+    assert not is_sdk_skeleton(app) and jforex_dir_left_in_place(app) == app
+    assert purge_targets(tmp_path / "data", app) == []
+
+    (app / "Strategies/files/MyStrategy.jfx").unlink()
+    (app / "workspace").mkdir()  # an unknown empty folder is not ours either
+    assert not is_sdk_skeleton(app)
+    assert jforex_dir_left_in_place(tmp_path / "absent") is None
 
 
 def test_identical_files_without_ticks_cover_each_declared_period(tmp_path: Path) -> None:

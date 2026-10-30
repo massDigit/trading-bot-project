@@ -131,10 +131,15 @@ Tout élément figurant ici est une **PROPOSITION** et ne doit pas être consid�
 
 - **ID** : `ASSUMP-021`
 - **Sujet** : Découpage des requêtes JForex
-- **Proposition** : fenêtres d'une heure ; demander `[début − 1 ms, fin − 1 ms]` (borne `to` inclusive selon la Javadoc, `from` incertain) puis garder `début ≤ t < fin`, filtrage sur le temps uniquement. Aucun tick dupliqué ni supprimé aux frontières ; ticks simultanés conservés (`src/forex_bot/history/jforex.py`).
+- **Proposition** : fenêtres d'une heure ; demander `[début − 1 ms, fin − 1 ms]` puis garder `début ≤ t < fin`, filtrage sur le temps uniquement. Aucun tick dupliqué ni supprimé aux frontières ; ticks simultanés conservés (`src/forex_bot/history/jforex.py`). Sources : le wiki officiel (« History ticks ») indique que `from` et `to` sont **tous deux inclusifs** ; la Javadoc ne le précise que pour `to`. La règle reste correcte dans les deux cas.
 - **Statut** : `PROPOSED`
 
 - **ID** : `ASSUMP-022`
 - **Sujet** : Heures vides renvoyées par le SDK JForex
 - **Proposition** : une heure sans tick alors que le marché est attendu ouvert est traitée comme un échec de téléchargement, pas comme une absence de cotation : suppression du fichier de cache de 0 octet de cette heure, jusqu'à 5 tentatives, puis jour non écrit (`<jour>.incomplete.json`). Fondé sur l'observation du 2026-10-28 (réponse HTTP 503 transformée en liste vide et mise en cache). La structure du cache est observée, non documentée. Les heures des jours fériés probables (25 décembre, 1er janvier, ASSUMP-016) ne sont pas relancées.
 - **Statut** : `PROPOSED`
+
+- **ID** : `ASSUMP-023`
+- **Sujet** : Règles de données de S1 (bougies non utilisables, ATR, canal D1, positions pendant une interruption, disponibilité des bougies)
+- **Proposition** : `docs/strategies/S1_DONCHIAN.md` §5 et §10. États `OK` / `FERMETURE_DOCUMENTÉE` (fermeture particulière établie par une source citée ; un jour férié probable ne suffit pas ; aucune bougie dans cet état aujourd'hui) / `COUVERTURE_PARTIELLE` / `INTERRUPTION_INEXPLIQUÉE`. Pas d'entrée si le signal n'est pas `OK`, si une bougie des canaux H4 n'est pas utilisable, si l'ATR est indisponible ou si la règle D1 stricte échoue. ATR **indisponible** (pas nul) après une bougie non utilisable, réamorcé par 14 true ranges valides (clôture précédente utilisable) : 15 bougies utilisables nécessaires, 21 pour une entrée compte tenu du canal. Positions pendant une interruption : franchissement observé, franchissement possible non observable, prix de déclenchement et prix d'exécution simulé distingués ; stop garanti et stop normal simulés séparément avec leurs coûts ; transactions INDÉTERMINÉES suivies en scénarios propagés aux fonds propres et aux décisions suivantes, jamais supprimées, jamais présentés comme des bornes garanties. Bougies lues selon `available_at_utc` ; ordre déterministe clôture → indicateurs → sortie → entrée → exécution au premier tick suivant.
+- **Statut** : `PROPOSED` — canal D1 : règle **stricte** retenue par l'opérateur comme référence le 2026-10-30 (règle ciblée écartée) ; variante sans filtre D1 conservée comme expérience distincte, sans sélection sur 2022-2023 ; le reste est à valider avant l'écriture du moteur

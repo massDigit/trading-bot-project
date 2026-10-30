@@ -11,9 +11,11 @@ from typing import Any
 from forex_bot.history.bars import DEFAULT_GAP_THRESHOLD, TickSummary, expected_weekly_closes
 from forex_bot.history.calendar import (
     NEW_YORK,
+    ONE_HOUR,
     MarketState,
     Timeframe,
     expected_open_hours,
+    floor_hour,
     market_state,
 )
 from forex_bot.history.store import HistoryStore
@@ -44,6 +46,36 @@ DECISIONS = [
 ]
 
 
+HOLIDAY = "jour férié probable"
+OPEN_GAP = "TROU pendant l'ouverture prévue"
+OPEN_GAP_NEXT_TO_HOLIDAY = "TROU pendant l'ouverture prévue (contigu à un jour férié probable)"
+WEEKLY_CLOSURE = "fermeture normale (horaire prévu)"
+
+
+def _touches_holiday(start: datetime, end: datetime) -> bool:
+    """True if any instant of [start, end] falls on a probable holiday (endpoints and every hour between)."""
+    moments = [start, end]
+    hour = floor_hour(start) + ONE_HOUR
+    while hour < end:
+        moments.append(hour)
+        hour += ONE_HOUR
+    return any(market_state(t) is MarketState.PROBABLE_HOLIDAY for t in moments)
+
+
+def classify_gap(start: datetime, end: datetime, open_minutes: float, threshold: timedelta) -> str:
+    """Class of an interruption longer than the threshold.
+
+    More than `threshold` of expected-open time without quotes is a gap whatever surrounds it, so a
+    late reopening after a holiday is not hidden as a holiday. Otherwise the interruption is
+    explained by the schedule: a probable holiday if it touches one anywhere (not only at its ends),
+    else the weekly closure.
+    """
+    holiday = _touches_holiday(start, end)
+    if open_minutes * 60 > threshold.total_seconds():
+        return OPEN_GAP_NEXT_TO_HOLIDAY if holiday else OPEN_GAP
+    return HOLIDAY if holiday else WEEKLY_CLOSURE
+
+
 def _fmt(moment: datetime | None) -> str:
     return moment.isoformat(timespec="milliseconds") if moment else "—"
 
@@ -67,6 +99,8 @@ def weekly_transitions(summary: TickSummary) -> list[dict[str, Any]]:
                 "first_tick_minus_expected_reopen_min": (
                     round((after - reopen).total_seconds() / 60, 1) if after else None
                 ),
+                # A reopening on a probable holiday (e.g. Sunday 31 December) is expected late.
+                "reopen_market_state": market_state(reopen).value,
             }
         )
     return result
@@ -87,14 +121,9 @@ def build_report(
         for h in expected_open_hours(c_start, c_end)
         if h not in present_hours
     ]
-    gaps = []
+    gaps: list[dict[str, Any]] = []
     for gap in summary.gaps:
-        if any(market_state(t) is MarketState.PROBABLE_HOLIDAY for t in (gap.start_utc, gap.end_utc)):
-            kind = "jour férié probable"
-        elif gap.open_minutes * 60 > gap_threshold.total_seconds():
-            kind = "TROU pendant l'ouverture prévue"
-        else:  # longer than the threshold, but at most the threshold while open: it spans the closure
-            kind = "fermeture normale (horaire prévu)"
+        kind = classify_gap(gap.start_utc, gap.end_utc, gap.open_minutes, gap_threshold)
         gaps.append(
             {
                 "start_utc": gap.start_utc.isoformat(),
@@ -104,6 +133,26 @@ def build_report(
                 "classification": kind,
             }
         )
+    gap_totals: dict[str, dict[str, float]] = {}
+    for g in gaps:
+        total = gap_totals.setdefault(g["classification"], {"count": 0, "raw_minutes": 0.0, "open_minutes": 0.0})
+        total["count"] += 1
+        total["raw_minutes"] = round(total["raw_minutes"] + g["duration_min"], 1)
+        total["open_minutes"] = round(total["open_minutes"] + g["open_minutes"], 1)
+    transitions = weekly_transitions(summary)
+    # Each expected weekly close, by the class of the interruption that contains it.
+    closure_reconciliation: dict[str, int] = {}
+    for w in transitions:
+        close = datetime.fromisoformat(w["expected_close_utc"])
+        kind = next(
+            (
+                g["classification"]
+                for g in gaps
+                if datetime.fromisoformat(g["start_utc"]) <= close <= datetime.fromisoformat(g["end_utc"])
+            ),
+            "aucune interruption ne contient la clôture",
+        )
+        closure_reconciliation[kind] = closure_reconciliation.get(kind, 0) + 1
     candles = {}
     for timeframe, rows in bars.items():
         flags: dict[str, int] = {}
@@ -142,8 +191,10 @@ def build_report(
         },
         "gap_threshold_min": gap_threshold.total_seconds() / 60,
         "gaps": gaps,
+        "gap_totals": gap_totals,
         "missing_open_hours": missing_hours,
-        "weekly_transitions": weekly_transitions(summary),
+        "weekly_transitions": transitions,
+        "weekly_closure_reconciliation": closure_reconciliation,
         "candles": candles,
         "decisions": [{"anomaly": a, "treatment": t, "justification": j} for a, t, j in DECISIONS],
     }
@@ -161,7 +212,9 @@ def to_markdown(report: dict[str, Any]) -> str:
         f"- Fichiers : {len(report['files'])}",
         "",
         "## Ticks",
-        f"- Total {t['total']}, valides {t['valid']} ; premier {t['first_tick_utc']}, dernier {t['last_tick_utc']}",
+        f"- Total {t['total']}, conformes aux contrôles implémentés {t['valid']} (ce n'est pas une preuve "
+        f"d'exactitude ni d'absence de données manquantes) ; premier {t['first_tick_utc']}, "
+        f"dernier {t['last_tick_utc']}",
         f"- Prix nuls/négatifs {t['non_positive_price']} ; bid > ask {t['crossed_bid_above_ask']}",
         f"- Désordre chronologique dans un fichier : {t['out_of_order_within_file']}",
         f"- Horodatages partagés : {t['simultaneous_timestamps']} ({t['simultaneous_ticks']} ticks, conservés)",
@@ -176,6 +229,13 @@ def to_markdown(report: dict[str, Any]) -> str:
             for g in report["gaps"]
         ],
         "",
+        "| Classement | Nombre | Durée brute (min) | dont ouverture prévue (min) |",
+        "|---|---|---|---|",
+        *[
+            f"| {k} | {v['count']} | {v['raw_minutes']} | {v['open_minutes']} |"
+            for k, v in report["gap_totals"].items()
+        ],
+        "",
         f"## Heures d'ouverture prévue sans tick : {len(report['missing_open_hours'])}",
         *[f"- {h}" for h in report["missing_open_hours"][:50]],
         "",
@@ -188,6 +248,9 @@ def to_markdown(report: dict[str, Any]) -> str:
             f"{w['first_tick_after_close_utc']} | {w['first_tick_minus_expected_reopen_min']} |"
             for w in report["weekly_transitions"]
         ],
+        "",
+        "Clôtures hebdomadaires attendues, selon l'interruption qui les contient : "
+        + "; ".join(f"{k} ({v})" for k, v in report["weekly_closure_reconciliation"].items()),
         "",
         "## Bougies",
         "| Unité | Total | Complètes | Incomplètes | Motifs |",

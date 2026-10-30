@@ -31,10 +31,11 @@
 - Canal de sortie : `LL_M(t)`, `HH_M(t)` sur les M bougies précédentes, signal exclu. M = 10
   (PROPOSITION).
 - ATR : moyenne de Wilder sur 14 bougies H4 (PROPOSITION) du true range bid, calculée jusqu'à `t`
-  inclus.
-- Contexte D1 : dernière bougie D1 **clôturée** au moment de la décision (`end_utc ≤ fin de t`) ;
-  haussier si `bid_close_D1 > milieu du canal D1 sur 55 jours`, baissier si inférieur
-  (PROPOSITION ; 55 jours, milieu du canal).
+  inclus ; disponibilité et réamorçage après une bougie non utilisable : §10.3.
+- Contexte D1 : dernière bougie D1 **disponible** au moment de la décision (`available_at_utc ≤
+  end_utc(t)`, §5) ; haussier si `bid_close_D1 > milieu du canal D1 sur 55 jours`, baissier si
+  inférieur (PROPOSITION ; 55 jours, milieu du canal). Jamais de jointure par date civile : elle
+  peut introduire la clôture du soir dans une décision du matin.
 
 ## 4. Règles d'entrée
 
@@ -59,6 +60,21 @@ exécution: premier prix admissible APRÈS end_utc(t) :
 En simulation par bougies sans ticks : `ask_open[t+1]` (achat) ou `bid_open[t+1]` (vente), avec
 latence simulée à définir. Si `t+1` commence après une fermeture, le prix d'exécution est celui
 de la réouverture (gap inclus).
+
+**Disponibilité des bougies (PROPOSITION, revue externe du 2026-10-30).** Chaque bougie porte
+`start_utc`, `end_utc` et `available_at_utc`. En recherche, `available_at_utc = end_utc + L`, avec
+une latence de publication `L` paramétrée (0 par défaut, puisque les bougies sont reconstruites
+à partir des ticks) ; en fonctionnement, l'instant où la bougie est effectivement finalisée.
+Une bougie n'est lisible que si `available_at_utc ≤ instant de décision`. Le prix de clôture
+n'est jamais une exécution obtenue.
+
+**Ordre déterministe à un instant `E` (frontière commune H1/H4/D1, par exemple 17:00 New York).**
+1. Clôturer toutes les bougies dont `end_utc ≤ E` : H1, puis H4, puis D1. La D1 qui se termine
+   à `E` est donc disponible pour la décision H4 prise à `E` (si `L = 0`).
+2. Mettre à jour les indicateurs (canaux, ATR, contexte D1) et l'état de qualité des données.
+3. Évaluer d'abord la sortie de la position ouverte, puis une éventuelle entrée.
+4. Exécuter au premier tick strictement postérieur à `E` (`ts > E`) : achat à l'ask, vente au
+   bid. Une sortie et une nouvelle entrée au même instant sont deux exécutions distinctes.
 
 ## 6. Stop initial, sorties et invalidation
 
@@ -120,13 +136,127 @@ Règles du contrôleur de risque existant (`risk.py`, `docs/BUSINESS_RULES.md`) 
 Tant qu'un coût est inconnu, aucun résultat « net » n'est revendiqué ; les résultats de
 recherche indiquent les scénarios de coûts utilisés.
 
-## 10. Données manquantes
+## 10. Qualité des données, bougies non utilisables et positions pendant une interruption
 
-- Abstention (journalisée) si la bougie `t`, l'une des N bougies du canal, l'une des bougies de la
-  fenêtre ATR ou la bougie D1 de contexte est **incomplète** (`complete = false`).
-- Aucune bougie manquante n'est interpolée ; une fenêtre qui en contient une n'est pas « raccourcie ».
-- Trou de données pendant une position : la position reste gérée par son stop ; la sortie au canal
-  attend la prochaine bougie complète.
+> PROPOSITION (revue externe du 2026-10-30, précisée par l'opérateur le même jour), à valider
+> avant l'écriture du moteur S1. Les règles s'appuient sur les motifs que portent les bougies
+> (`complete`, `flags`) ; aucune bougie n'est supprimée, comblée ou retirée pour « compresser » le
+> temps. Seule la règle stricte du canal D1 (§10.4) est **retenue par l'opérateur** comme
+> référence.
+
+### 10.1 État de qualité d'une bougie
+
+| État | Définition | Utilisable |
+|---|---|---|
+| `OK` | `complete = true` | oui |
+| `FERMETURE_DOCUMENTÉE` | incomplète **uniquement** à cause d'une fermeture particulière **établie par une source documentée et citée** pour cette date (calendrier publié du courtier ou du fournisseur). Un « jour férié probable » de notre calendrier de travail ne suffit pas. **Aucune bougie n'est dans cet état aujourd'hui** : aucune source de ce type n'est encore enregistrée | oui, sauf comme bougie de signal |
+| `COUVERTURE_PARTIELLE` | la bougie dépasse la couverture déclarée des données (début ou fin de l'historique) : cause connue, contenu partiel | non |
+| `INTERRUPTION_INEXPLIQUÉE` | trou de plus de 10 min pendant l'ouverture prévue, heures manquantes (y compris les heures absentes à la source acceptées par l'opérateur), ticks pendant la fermeture prévue, ticks invalides exclus, **jour férié probable non documenté** : le parcours du prix est inconnu sur une partie de la bougie, son extrême, sa clôture ou son true range peuvent être faux | non |
+
+Une interruption inexpliquée n'est jamais traitée comme une fermeture connue. La fermeture
+hebdomadaire (vendredi 17:00 - dimanche 17:00 New York) ne rend aucune bougie incomplète : les
+bougies H4 et D1 ne la chevauchent pas.
+
+### 10.2 Nouvelles entrées
+
+Une entrée à la clôture de la bougie H4 `t` n'est permise que si :
+1. la bougie de signal `t` est `OK` ;
+2. les bougies des canaux d'entrée (`t-N .. t-1`) et de sortie (`t-M .. t-1`) sont toutes
+   utilisables (`OK` ou `FERMETURE_DOCUMENTÉE`) ;
+3. l'ATR est **disponible** (§10.3) ;
+4. la D1 de contexte, dernière disponible au sens du §5, est utilisable ;
+5. le canal D1 de 55 jours satisfait la règle stricte (§10.4).
+
+Chaque abstention est journalisée avec la première règle qui l'a provoquée.
+
+### 10.3 ATR de Wilder : disponibilité et réamorçage
+
+- True range de la bougie `t` (série bid) : `TR(t) = max(H(t) − L(t), |H(t) − C(t−1)|,
+  |L(t) − C(t−1)|)`. `TR(t)` est **valide** seulement si `t` **et** `t−1` sont utilisables : la
+  clôture précédente doit être utilisable. Entre la dernière H4 du vendredi et la première du
+  dimanche, la clôture du vendredi est utilisable (fermeture hebdomadaire prévue, écart inclus).
+- L'état de l'ATR est **INDISPONIBLE** (et non nul) au début de l'historique et après toute
+  bougie non utilisable `d`.
+- Réamorçage : `TR(d)` et `TR(d+1)` sont invalides (`d+1` n'a pas de clôture précédente
+  utilisable) ; le premier true range valide est `TR(d+2)`. L'ATR redevient disponible à la
+  clôture de `d+15`, amorcé par la moyenne simple des 14 true ranges valides `TR(d+2) ..
+  TR(d+15)`, puis suit la récurrence de Wilder `ATR(t) = (13 × ATR(t−1) + TR(t)) / 14`.
+  Toute bougie non utilisable pendant le réamorçage le recommence.
+- **Nombre de bougies réellement nécessaire** : 15 bougies utilisables consécutives après la
+  dernière bougie non utilisable (`d+1 .. d+15`) ; en début d'historique, l'ATR est disponible à
+  la clôture de la 15e bougie. Le canal d'entrée est plus exigeant (20 bougies utilisables puis
+  une bougie de signal `OK`) : après une bougie non utilisable `d`, la première entrée possible
+  est à la clôture de `d+21`.
+- Le stop d'une position ouverte est fixé à l'entrée et n'est jamais recalculé : l'indisponibilité
+  de l'ATR ne modifie pas une position en cours.
+
+### 10.4 Canal D1 de 55 jours
+
+- **Référence (retenue par l'opérateur le 2026-10-30)** : règle **stricte**. Les 55 D1 de la
+  fenêtre utilisée par le filtre, et la D1 de contexte, sont toutes utilisables. Une seule D1 non
+  utilisable dans la fenêtre bloque les entrées filtrées.
+- Règle « ciblée » (ne bloquer que si la D1 dégradée porte l'extrême observé) : **écartée comme
+  référence**. Une journée dégradée qui ne détient pas l'extrême observé peut avoir contenu un
+  extrême manquant ; la baisse du taux de blocage ne prouve pas sa validité.
+- Mesure de disponibilité des données sur 2015-2021 (aucun calcul de stratégie), avec les états
+  ci-dessus et les jours fériés probables non documentés classés `INTERRUPTION_INEXPLIQUÉE` :
+  10 912 décisions H4 ; 6 484 permises ; **40,6 % bloquées**, dont 34,4 % par le seul canal D1
+  (chaque 25 décembre et 1er janvier non documenté gèle environ 55 jours de trading), 3,1 % par
+  les canaux H4, 2,8 % faute d'historique D1 suffisant au début, 0,3 % sur la bougie de signal.
+  Documenter ces fermetures par une source citée réduirait ce taux ; cela reste à faire et
+  n'est pas présumé.
+- La **variante sans filtre D1** (§2) est une expérience distincte, enregistrée à l'avance ; elle
+  n'est soumise ni au canal D1 ni à la D1 de contexte. Aucune sélection entre les deux variantes
+  n'est faite sur 2022-2023 à ce stade.
+
+### 10.5 Position ouverte pendant une interruption
+
+**Définitions.**
+- *Franchissement observé* : une cotation du côté de déclenchement (bid pour le stop d'un achat,
+  ask pour celui d'une vente ; convention du courtier à confirmer, ASSUMP-008) au niveau du stop
+  ou au-delà, à un instant connu.
+- *Franchissement possible mais non observable* : la position est ouverte pendant une interruption
+  inexpliquée, et les cotations qui l'encadrent restent du bon côté du stop ; le parcours du prix
+  pendant l'interruption est inconnu.
+- *Prix de déclenchement* : le niveau du stop `S`. Ce n'est pas un prix d'exécution.
+- *Prix d'exécution simulé* : le prix retenu par la simulation pour la sortie ; il dépend du type
+  de stop et d'hypothèses explicites.
+
+**Type de stop et coûts.** Les deux hypothèses sont simulées séparément, chacune avec ses coûts :
+- *stop garanti* (obligatoire sur le compte réel cible) : exécution au niveau `S`, plus la prime
+  de stop garanti lorsqu'il est déclenché (inconnue pour le compte réel : paramètre de scénario,
+  jamais zéro) ;
+- *stop normal* (comparaison de recherche) : exécution au premier prix observable du côté de
+  sortie au moment du déclenchement ou après ; glissement éventuel paramétré.
+
+**Cas.**
+
+| Cas | Constat | Stop garanti | Stop normal |
+|---|---|---|---|
+| A. Fermeture connue (fermeture hebdomadaire, `FERMETURE_DOCUMENTÉE`) | à la réouverture, la première cotation franchit le stop : franchissement observé | `S` + prime | première cotation après la réouverture (écart inclus) |
+| B. Interruption inexpliquée, première cotation après l'interruption au-delà du stop | déclenchement **certain**, instant inconnu (pendant l'interruption ou à sa fin) | `S` + prime | **hypothèse** : première cotation observée après l'interruption ; le déclenchement a pu avoir lieu plus tôt à un autre prix ; transaction marquée |
+| C. Interruption inexpliquée, cotations encadrantes du bon côté du stop | franchissement **possible mais non observable** : transaction **INDÉTERMINÉE** | scénarios H0 / H1 ci-dessous | scénarios H0 / H1 ci-dessous |
+
+**Scénarios d'une transaction INDÉTERMINÉE.**
+- H0 : le stop n'a pas été déclenché ; la position continue.
+- H1 : le stop a été déclenché pendant l'interruption ; sortie enregistrée à la fin de
+  l'interruption, au prix d'exécution simulé : `S` + prime pour un stop garanti ; pour un stop
+  normal, `S` dégradé d'un glissement paramétré (hypothèse, pas une observation).
+- Aucun des deux n'est qualifié d'office de « prudent » : une sortie au stop peut être plus
+  favorable que la suite réelle de la position, et inversement.
+
+**Propagation.** Chaque scénario est une trajectoire complète de simulation : fonds propres,
+dimensionnement, positions et décisions suivantes en découlent. Deux politiques appliquées à
+tous les événements indéterminés sont toujours publiées (« aucun déclenchement non observable »
+et « tous déclenchés ») ; si le nombre `k` d'événements est petit, les `2^k` combinaisons sont
+énumérées. Ces scénarios ne sont **pas** présentés comme des bornes garanties du résultat réel,
+faute de démonstration (dépendance au chemin). Aucune transaction indéterminée n'est supprimée :
+chacune est listée avec l'interruption, les cotations qui l'encadrent, leur distance au stop et
+le résultat de chaque scénario.
+
+**Sortie au canal.** Évaluée à la clôture de la bougie H4 suivante même si elle n'est pas
+utilisable : sa clôture reste la dernière cotation observée et une sortie réduit l'exposition ;
+le motif est journalisé.
 
 ## 11. Prévention des fuites temporelles
 
@@ -136,7 +266,14 @@ recherche indiquent les scénarios de coûts utilisés.
 - Exécution strictement après `end_utc(t)`.
 - Réglages uniquement sur 2015-2021 ; 2022-2023 pour la validation sans réglage ; 2024-2025 non
   ouvert (l'importeur le refuse).
-- Les essais et variantes sont enregistrés avant évaluation (cahier §6.6, §9).
+- Les essais et variantes sont enregistrés avant évaluation (cahier §6.6, §9), y compris la
+  variante sans filtre D1.
+- Règles et paramètres **figés et versionnés avant** la première évaluation sur 2022-2023 :
+  consulter la qualité technique de cette période ne la contamine pas, mais ajuster la stratégie
+  après avoir vu ses résultats la transforme en période de développement.
+- Un modèle de coûts calibré en 2026 appliqué au passé est présenté comme une **réévaluation avec
+  un modèle de coûts récent**, distincte d'une simulation n'utilisant que l'information
+  disponible à l'époque.
 - Le direct devra construire ses bougies avec le même ancrage, à partir du flux IG `PRICE`.
 
 ## 12. Paramètres et décisions ouvertes
@@ -150,7 +287,9 @@ recherche indiquent les scénarios de coûts utilisés.
 | Filtre D1 | milieu du canal 55 jours | avec / sans filtre |
 | Série du signal | bid | bid / mid (à décider) |
 
-Décisions ouvertes : série bid ou mid ; traitement du signal du vendredi soir ; sortie temporelle ;
+Décisions ouvertes : validation des règles du §10 (la règle stricte du canal D1 est retenue
+comme référence) ; source documentée des fermetures particulières (jours fériés) ; politique
+d'énumération des scénarios H0 / H1 ; glissement du stop normal ; latence de publication `L` (§5) ; série bid ou mid ; traitement du signal du vendredi soir ; sortie temporelle ;
 latence simulée ; ancrage H4/D1 (clôture New York, à comparer à l'ancrage des graphiques IG) ;
 scénarios de coûts tant que les coûts IG sont inconnus ; contraintes du compte réel (distance
 minimale, prime, référence de mesure).

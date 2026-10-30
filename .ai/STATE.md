@@ -2,15 +2,16 @@
 
 > **Ce fichier donne à l'agent une image précise de l'état du projet en temps réel à chaque début de session.**
 
-**Dernière mise à jour** : 2026-10-28
+**Dernière mise à jour** : 2026-10-30
 **Version** : 0.2.0 (template) — socle Python non encore publié
 
 ## 🚀 Phase Actuelle
-Lot 0/5 préparatoire : socle Python et vérification de l'accès à l'API IG démo en lecture seule.
+Historique de recherche EUR/USD acquis (2015-2023) ; préparation du moteur de backtest S1.
 
 ## 🎯 Focus Courant
-Historiques EUR/USD et fiche S1 (branche `feat/eurusd-history-s1`, worktree séparé, basée sur `af29912`
-de la PR #2).
+Revue externe (Astra) du rapport sur l'historique : corrections, vérifications ciblées et règles de
+données de S1 proposées (branche `feat/eurusd-history-s1`, PR #3 brouillon, worktree séparé).
+Aucune PR ne sera fusionnée avant la fin des retours de la revue (décision de l'opérateur).
 
 ## ✅ Réalisé
 - [x] Structure IA-Native (template v0.2.0)
@@ -36,9 +37,15 @@ de la PR #2).
 - [x] Importeur historique reproductible (brut immuable, manifeste, empreinte, reprise, idempotence), bougies H1/H4/D1 bid/ask, rapport qualité, tests synthétiques
 - [x] Fiche exécutable S1 (brouillon, paramètres proposés)
 - [x] Adaptateur JForex SDK (Java, démo, lecture seule) ; échantillon 2019-03 acquis : 530 478 ticks, aucune anomalie, 97 H1 complètes (2026-10-28)
+- [x] Acquisition complète 2015-2023 terminée le 2026-10-30 **avec exceptions connues** : 3 287 jours sur 3 287, 260 051 730 ticks ; 3 heures absentes à la source (2016-09-02 18h, 2019-05-26 21h-22h UTC) acceptées par l'opérateur sans comblement (ces journées restent incomplètes)
+- [x] Bougies H1/H4/D1 et rapport qualité sur 2015-2023 (construction en mémoire bornée, 87 s) ; 26 trous pendant l'ouverture prévue, bougies incomplètes marquées (H1 89, H4 46, D1 33)
+- [x] Vérifications ciblées (2026-10-30) : comptes Java / CSV / Parquet identiques, conversion décimale exacte, aucune heure dupliquée, 5 jours re-téléchargés dans un cache isolé identiques octet pour octet (`docs/DATA.md` §6.1)
+- [x] Classement des interruptions corrigé (jour férié détecté à l'intérieur de l'interruption ; une réouverture tardive n'est plus masquée) ; purge limitée au squelette du dossier JForex créé par nos lancements
+- [x] ADR-002 : conteneurisation Docker différée jusqu'au besoin d'exécution continue
 
 ## 🔄 En Cours
-- [ ] PR #2 brouillon `feat/eurusd-mini-risk-guard` (dépend de la PR #1), en revue
+- [ ] PR #1 ouverte, PR #2 brouillon (dépend de #1), PR #3 brouillon (dépend de #2) ; aucune fusion avant les retours de la revue externe
+- [ ] Règles de données de S1 proposées (ASSUMP-023, fiche S1 §10) : canal D1 **strict** retenu par l'opérateur comme référence le 2026-10-30 ; états de bougie, ATR, positions pendant une interruption à valider
 - [ ] Demande au support IG préparée, non envoyée (`docs/IG_SUPPORT_REQUEST.md`)
 
 ## ⚠️ Problèmes Connus / Points de Vigilance
@@ -50,7 +57,15 @@ de la PR #2).
 - Mot de passe chiffré non géré si IG l'exige.
 - Dukascopy : licence ambiguë pour la conservation locale et la conversion ; l'opérateur a décidé d'acquérir quand même (usage personnel, arrêt en cas d'avertissement) ; convention temporelle non documentée, cohérente sur l'échantillon (ASSUMP-018, ASSUMP-019).
 - SDK JForex : une réponse HTTP 503 devient une heure vide mise en cache, sans erreur ; détecté et relancé par l'adaptateur (ASSUMP-022). Compte démo valable 14 jours.
+- 18 interruptions de 10 à 26 min commencent 0 à 45 min après 17:00 New York (15 en semaine, 3 réouvertures du dimanche ; 11 en 2023) : **inexpliquées**, reproduites à l'identique par un re-téléchargement isolé ; jamais traitées comme des fermetures connues.
+- Spreads Dukascopy nettement plus larges entre 21h et 24h UTC (95e centile pondéré par la durée : 2,7 pips) ; les spreads IG restent à mesurer.
+- Ancrage des bougies IG non vérifié (`snapshotTime` local / `snapshotTimeUTC`) ; l'ancrage New York est conservé pour la recherche et le fonctionnement (ASSUMP-015).
+- Données Dukascopy (environ 28 Go) uniquement sur le poste de l'opérateur, hors Git, sans copie de sauvegarde.
 
 ## 🏁 Prochaine Étape / Milestone
-Résultat réel du diagnostic → confirmer epic EUR/USD, taille minimale et distances de stop,
-puis vérifier la compatibilité avec un risque de 5 € par opération (cahier des charges §8).
+1. Valider les règles de données de S1 (ASSUMP-023) ; chercher une source documentée des fermetures particulières (sans elle, chaque jour férié probable bloque environ 55 jours d'entrées filtrées : 40,6 % des décisions H4 bloquées sur 2015-2021).
+2. Implémenter le moteur S1 avec ces règles et un journal détaillé (pas avant la validation).
+3. Premier backtest exploratoire sur 2015-2021 uniquement, coûts paramétrés explicitement.
+4. Comparer ensuite prix, bougies, signaux et coûts avec IG (calibrage ; ouverture de 2026 dans
+   l'adaptateur à décider par l'opérateur).
+Côté IG (inchangé) : confirmer unités, taille minimale, distances de stop et coûts (ASSUMP-004 à 008).

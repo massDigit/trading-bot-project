@@ -86,7 +86,7 @@ restent séparables des autres sources.
 | Horodatage | OBS : `getTime()` se lit en millisecondes ; interprété en UTC. Contrôle de cohérence : dernier tick du vendredi et premier du dimanche à moins de 0,1 min de l'horaire attendu, avant et après le changement d'heure américain (ce n'est pas une preuve) |
 | Sortie | Un CSV par jour UTC `data/dukascopy-sdk/ticks/EURUSD/<jour>.csv` (`time_ms,ask,bid,ask_volume,bid_volume`, valeurs du SDK sans conversion) et un JSON compagnon (période, date de récupération, ticks par heure, nouvelles tentatives, durée). Écriture atomique ; le CSV est écrit en dernier et marque le jour comme terminé |
 | Reprise | Un jour dont le CSV existe est sauté : un lancement interrompu reprend au premier jour manquant |
-| Cache du SDK | `data/dukascopy-sdk/cache` (purgeable). Le SDK crée aussi `~/Library/Application Support/JForex/` hors du projet |
+| Cache du SDK | `data/dukascopy-sdk/cache` (purgeable). Le SDK crée aussi `~/Library/Application Support/JForex/` hors du projet ; OBS (2026-10-30) : il n'y contient que les dossiers vides `Strategies/files`. La purge ne supprime ce dossier que s'il se réduit à ce squelette ; sinon il peut appartenir à une autre installation JForex et il est laissé en place, signalé à l'opérateur |
 | **Défaut observé : réponses 503** | OBS (2026-10-28) : quand l'hôte `datafeed` répond HTTP 503, `getTicks` renvoie une liste **vide sans erreur** et le cache garde un fichier de 0 octet pour l'heure : toutes les demandes suivantes de cette heure reviennent vides. Au premier passage, 7 heures de semaine ont été perdues ainsi. Traitement : avant chaque demande d'une heure où le marché est attendu ouvert, un fichier de cache de 0 octet de cette heure est supprimé (structure du cache observée, non documentée : `EURUSD/<année>/<mois 0-11>/<jour>/<HH>h_ticks.bi5`) ; une heure ouverte vide est relancée jusqu'à 5 fois (pauses de 5 à 40 s) ; si elle reste vide, le jour **n'est pas écrit** et un rapport `<jour>.incomplete.json` l'explique |
 | **Heures vides acceptées (décision opérateur 2026-10-30)** | Deux jours sont restés incomplets après 4 tentatives sur 3 sessions étalées sur environ 36 h, toujours sur les mêmes heures, avec des réponses 503 répétées alors que les heures voisines se chargeaient : **2016-09-02 18h UTC** (vendredi, publication de l'emploi américain ; 17h ne compte que 1 815 ticks) et **2019-05-26 21h et 22h UTC** (réouverture du dimanche ; 23h ne compte qu'un tick). Interprétation : fichiers probablement absents ou abîmés à la source, non prouvé. Traitement : liste fermée `ACCEPTED_EMPTY_HOURS` dans l'adaptateur ; ces heures restent demandées et relancées, et si elles restent vides le jour est écrit **sans les combler**, le JSON compagnon les liste (`accepted_empty_hours_utc`), le rapport qualité les montre comme trous et marque les bougies. Toute autre heure ouverte vide bloque toujours son jour. Test : `test_java_adapter_accepts_only_the_operator_listed_empty_hours` |
 | Jours fériés | Même calendrier que `calendar.py` : les heures des jours fériés probables (25 décembre, 1er janvier) ne sont pas relancées et sont acceptées vides ; le rapport qualité les marque. OBS (2026-10-28) : sur le 1er janvier 2015, le serveur répondait 503, des délais dépassés et des connexions réinitialisées ; l'adaptateur l'a relancé pendant 35 min sans terminer, alors qu'un jour ouvré de 2015 se télécharge en 52 s sans erreur |
@@ -106,7 +106,9 @@ Statut : **acquis le 2026-10-28** par le SDK (§1.4). Résultat : 530 478 ticks 
 avait perdu 7 heures (défaut 503, §1.4), corrigées au second.
 
 Acquisition complète décidée par l'opérateur le 2026-10-28 : 2015-01-01 → 2024-01-01
-(développement et validation).
+(développement et validation). **Terminée le 2026-10-30, avec exceptions connues** : 3 287 jours
+écrits sur 3 287 ; deux d'entre eux contiennent des heures absentes à la source, acceptées par
+décision de l'opérateur (§1.4) et non comblées : ces journées ne sont **pas** complètes.
 
 ### Convention temporelle
 
@@ -187,6 +189,56 @@ ticks simultanés et répétitions, prix invalides et cotations croisées, inter
 cohérence** de la convention temporelle (dernier tick avant la clôture du vendredi et premier tick
 après la réouverture du dimanche, comparés à l'horaire prévu ; ce n'est pas une preuve du fuseau), bougies complètes et incomplètes, et tableau du traitement
 de chaque anomalie (conservée, exclue ou marquée, avec justification).
+
+Classement des interruptions de plus de 10 min (revu le 2026-10-30) : plus de 10 min
+d'ouverture prévue sans cotation font un **trou**, même au contact d'un jour férié
+(« contigu à un jour férié probable ») ; sinon l'interruption est un jour férié probable si elle
+en touche un **à un instant quelconque** (pas seulement à ses bornes), puis une fermeture normale.
+Le rapport donne pour chaque classe la durée brute et les minutes d'ouverture prévue, et
+rapproche chaque clôture hebdomadaire attendue de l'interruption qui la contient. « Valide »
+signifie « conforme aux contrôles implémentés » : ni l'exactitude de chaque prix ni l'absence de
+données partiellement perdues ne sont prouvées.
+
+### 6.1 Vérifications ciblées (revue externe du 2026-10-30, 2015-2023)
+
+| Contrôle | Résultat |
+|---|---|
+| Comptes horaires : JSON compagnon (Java) / CSV / Parquet | identiques pour les 3 287 jours et chaque heure ; 260 051 730 ticks partout |
+| Prix : texte du CSV / `decimal128(18,5)` | tous les prix ont de 1 à 5 décimales ; sommes bid et ask identiques au dernier chiffre : conversion exacte |
+| Précision | part des cotations dont la 5e décimale est 0 : 9,1 à 10,0 % chaque année, sans rupture |
+| Heures identiques à des dates différentes (temps relatif et prix) | aucune |
+| Prix figés (au plus 2 bid et 2 ask distincts dans une heure avec ticks) | 1 heure : 2019-05-26 23h (un seul tick, réouverture après les heures absentes à la source) |
+| Plus longues séquences de ticks à cotation inchangée | 8,4 min au plus (25 décembre 2015), puis 6 à 7 min autour des réouvertures du dimanche |
+| Sauts de 10 pips ou plus annulés au tick suivant | 8, conservés : 4 à la clôture de New York ou à la réouverture du 1er janvier (spreads de 5 à 34 pips), 2 à 13:30 UTC (2023-01-12 et 2023-11-14, heures de publications américaines), 2 le 2019-01-02 vers 22:50 |
+| Ruptures de densité (ticks par heure, d'un mois au suivant, ×1,8 ou ÷1,8) | 2016-07 et 2016-11 (après le référendum britannique, élection américaine), 2020-03 et 2020-04 (Covid) : coïncidences, pas des explications |
+| Re-téléchargement dans un cache et une sortie isolés (5 jours avec trous : 2015-05-06, 2021-04-20, 2023-03-15, 2023-06-15, 2023-09-25) | 5 CSV **identiques octet pour octet** ; le 2023-09-25 a d'abord échoué (heure 21h vide après 503), puis réussi. Les trous ne viennent donc ni de notre cache ni de notre acquisition, mais des données servies par Dukascopy ; cela ne dit pas si le marché était sans cotation ou si le fournisseur les a perdues |
+
+**Spreads pondérés par la durée.** Chaque cotation pèse le temps pendant lequel elle reste la
+dernière connue, borné par trois limites : le tick suivant, **60 s**, et le début de la
+prochaine période où le marché n'est pas attendu ouvert (clôture hebdomadaire, jour férié
+probable). Au-delà, le temps n'est attribué à **aucune** cotation et compte comme **non couvert** :
+une dernière cotation n'est jamais prolongée à travers une fermeture ni de plus de 60 s dans une
+interruption. Les cotations des jours fériés probables sont incluses et comptées à part. Pour
+2015-2023, l'ouverture prévue représente 56 040 h ; la durée couverte y est de **55 859 h
+(99,68 %)**, soit 181 h non couvertes, issues de 24 738 silences de plus de 60 s, dont 496 de plus
+de 10 min ; 463 cotations ont été coupées au début d'une fermeture ; 49 h couvertes tombent hors
+de l'ouverture prévue (jours fériés probables). Heures non couvertes par année : 2015 : 8,7 ;
+2016 : 8,5 ; 2017 : 6,8 ; 2018 : 1,6 ; 2019 : 6,7 ; 2020 : 24,1 ; 2021 : 62,2 ; 2022 : 25,3 ;
+2023 : 37,4. Médiane / 95e / 99e centile, en pips :
+
+| 2015 | 2016 | 2017 | 2018 | 2019 | 2020 | 2021 | 2022 | 2023 |
+|---|---|---|---|---|---|---|---|---|
+| 0,3 / 0,8 / 1,7 | 0,3 / 0,8 / 2,0 | 0,3 / 0,7 / 1,7 | 0,3 / 0,7 / 2,0 | 0,3 / 0,6 / 1,8 | 0,3 / 0,8 / 2,0 | 0,3 / 0,6 / 2,4 | 0,5 / 0,9 / 3,4 | 0,3 / 0,7 / 3,3 |
+
+| Session (heures UTC fixes) | Asie 00-07 | Londres 07-12 | Londres + New York 12-16 | New York 16-21 | Transition 21-24 |
+|---|---|---|---|---|---|
+| Durée couverte (h) | 16 362 | 11 678 | 9 338 | 11 658 | 6 873 |
+| Médiane / P95 / P99 | 0,3 / 0,6 / 0,7 | 0,3 / 0,5 / 0,6 | 0,3 / 0,5 / 0,6 | 0,3 / 0,6 / 1,0 | 0,6 / 2,7 / 5,1 |
+
+Épisodes de spread d'au moins 5 pips : 21 816, pour 6 185 minutes cotées au total (plafond de
+60 s par cotation) ; 78 % de ces minutes commencent entre 20h et 24h UTC. Les plus longs entourent
+Noël et le Nouvel An (2023-12-25 vers 03:43 UTC, 132 min ; 2023-01-02 vers 02:08, 94 min). Aucune
+observation extrême n'est supprimée.
 
 ## 7. Commandes
 

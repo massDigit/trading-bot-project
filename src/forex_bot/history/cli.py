@@ -21,7 +21,7 @@ from pathlib import Path
 from forex_bot.history.bars import DEFAULT_GAP_THRESHOLD, build_bars, write_bars
 from forex_bot.history.calendar import partitions_touched, require_utc
 from forex_bot.history.formats import FORMATS, JFOREX_SDK_TICKS_CSV, FormatError
-from forex_bot.history.purge import purge, purge_targets
+from forex_bot.history.purge import jforex_dir_left_in_place, purge, purge_targets
 from forex_bot.history.quality import build_report, write_report
 from forex_bot.history.store import HistoryStore, IngestError, IngestRequest
 
@@ -109,6 +109,9 @@ def cmd_ingest_jforex(args: argparse.Namespace) -> int:
 
 def cmd_purge(args: argparse.Namespace) -> int:
     targets = purge_targets(Path(args.data_dir))
+    foreign = jforex_dir_left_in_place()
+    if foreign is not None:
+        print(f"Laissé en place (contenu autre que le squelette créé par nos lancements du SDK) : {foreign}")
     if not targets:
         print("Aucune donnée Dukascopy trouvée.")
         return 0
