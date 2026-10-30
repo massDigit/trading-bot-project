@@ -42,6 +42,7 @@ Aucune PR ne sera fusionnée avant la fin des retours de la revue (décision de 
 - [x] Vérifications ciblées (2026-10-30) : comptes Java / CSV / Parquet identiques, conversion décimale exacte, aucune heure dupliquée, 5 jours re-téléchargés dans un cache isolé identiques octet pour octet (`docs/DATA.md` §6.1)
 - [x] Classement des interruptions corrigé (jour férié détecté à l'intérieur de l'interruption ; une réouverture tardive n'est plus masquée) ; purge limitée au squelette du dossier JForex créé par nos lancements
 - [x] ADR-002 : conteneurisation Docker différée jusqu'au besoin d'exécution continue
+- [x] Qualité des bougies : état connaissable à la clôture (`complete_at_close`, seul utilisable pour une décision) distinct de l'audit rétrospectif (`complete`) ; un tick invalide exclu rend désormais la bougie incomplète (revue du 2026-10-30)
 
 ## 🔄 En Cours
 - [ ] PR #1 ouverte, PR #2 brouillon (dépend de #1), PR #3 brouillon (dépend de #2) ; aucune fusion avant les retours de la revue externe
@@ -63,7 +64,7 @@ Aucune PR ne sera fusionnée avant la fin des retours de la revue (décision de 
 - Données Dukascopy (environ 28 Go) uniquement sur le poste de l'opérateur, hors Git, sans copie de sauvegarde.
 
 ## 🏁 Prochaine Étape / Milestone
-1. Valider les règles de données de S1 (ASSUMP-023) ; chercher une source documentée des fermetures particulières (sans elle, chaque jour férié probable bloque environ 55 jours d'entrées filtrées : 40,6 % des décisions H4 bloquées sur 2015-2021).
+1. Valider les règles de données de S1 (ASSUMP-023) ; chercher une source documentée des fermetures particulières (sans elle, chaque jour férié probable bloque environ 55 jours d'entrées filtrées : 40,6 % des décisions H4 de 2015-2021 bloquées, variante avec filtre D1, état connaissable à la clôture).
 2. Implémenter le moteur S1 avec ces règles et un journal détaillé (pas avant la validation).
 3. Premier backtest exploratoire sur 2015-2021 uniquement, coûts paramétrés explicitement.
 4. Comparer ensuite prix, bougies, signaux et coûts avec IG (calibrage ; ouverture de 2026 dans

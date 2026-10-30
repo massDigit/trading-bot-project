@@ -146,6 +146,11 @@ recherche indiquent les scénarios de coûts utilisés.
 
 ### 10.1 État de qualité d'une bougie
 
+Les états sont dérivés de l'**état connaissable à la clôture** (`complete_at_close`,
+`flags_at_close`), jamais de l'audit rétrospectif (`complete`, `flags`), qui peut utiliser des
+ticks postérieurs à la clôture (`docs/DATA.md` §5). Une bougie passée peut être réévaluée avec
+l'information disponible jusqu'à l'instant de décision, pas au-delà.
+
 | État | Définition | Utilisable |
 |---|---|---|
 | `OK` | `complete = true` | oui |
@@ -198,11 +203,16 @@ Chaque abstention est journalisée avec la première règle qui l'a provoquée.
 - Règle « ciblée » (ne bloquer que si la D1 dégradée porte l'extrême observé) : **écartée comme
   référence**. Une journée dégradée qui ne détient pas l'extrême observé peut avoir contenu un
   extrême manquant ; la baisse du taux de blocage ne prouve pas sa validité.
-- Mesure de disponibilité des données sur 2015-2021 (aucun calcul de stratégie), avec les états
-  ci-dessus et les jours fériés probables non documentés classés `INTERRUPTION_INEXPLIQUÉE` :
-  10 912 décisions H4 ; 6 484 permises ; **40,6 % bloquées**, dont 34,4 % par le seul canal D1
-  (chaque 25 décembre et 1er janvier non documenté gèle environ 55 jours de trading), 3,1 % par
-  les canaux H4, 2,8 % faute d'historique D1 suffisant au début, 0,3 % sur la bougie de signal.
+- Mesure de disponibilité des données (aucun calcul de stratégie). **Portée** : décisions H4 de
+  la partition de développement 2015-2021 uniquement, variante **avec** filtre D1, règles 1 à 5
+  du §10.2, jours fériés probables non documentés classés `INTERRUPTION_INEXPLIQUÉE`, aucune
+  position ouverte supposée (une position S1 en cours, qui interdit une nouvelle entrée, n'est
+  pas simulée). Avec l'**état à la clôture** : 10 912 décisions H4 ; 6 485 permises ;
+  **40,6 % bloquées** (40,57 %), dont 34,4 % par le seul canal D1 (chaque 25 décembre et
+  1er janvier non documenté gèle environ 55 jours de trading), 3,1 % par les canaux H4, 2,8 %
+  faute d'historique D1 suffisant au début, 0,3 % sur la bougie de signal. La première mesure
+  publiée (40,58 %, 6 484 permises) utilisait par erreur l'audit rétrospectif ; l'écart est d'une
+  décision.
   Documenter ces fermetures par une source citée réduirait ce taux ; cela reste à faire et
   n'est pas présumé.
 - La **variante sans filtre D1** (§2) est une expérience distincte, enregistrée à l'avance ; elle

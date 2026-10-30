@@ -59,8 +59,13 @@ BAR_SCHEMA = pa.schema(
         pa.field("last_tick_utc", pa.timestamp("us", tz="UTC"), nullable=False),
         pa.field("expected_hours", pa.int64(), nullable=False),
         pa.field("present_hours", pa.int64(), nullable=False),
+        # Retrospective audit status: may use ticks AFTER end_utc (e.g. a gap that starts inside the
+        # candle and is only known to exceed the threshold later). Never a decision input.
         pa.field("complete", pa.bool_(), nullable=False),
         pa.field("flags", pa.list_(pa.string()), nullable=False),
+        # Status knowable at end_utc: built only from ticks strictly before end_utc. Decision input.
+        pa.field("complete_at_close", pa.bool_(), nullable=False),
+        pa.field("flags_at_close", pa.list_(pa.string()), nullable=False),
     ]
 )
 
@@ -298,36 +303,61 @@ def _h1_rows(store: HistoryStore, source: str, instrument: str) -> list[dict[str
     return result
 
 
-def _overlaps_gap(start: datetime, end: datetime, gaps: list[Gap], threshold: timedelta) -> bool:
+def overlaps_gap(
+    start: datetime, end: datetime, gaps: list[Gap], threshold: timedelta, known_until: datetime | None = None
+) -> bool:
+    """True if a quote gap longer than `threshold` of expected-open time touches [start, end).
+
+    With `known_until`, only what is knowable at that instant is used: a gap still open at
+    `known_until` is cut there, so it counts only if its part before `known_until` already exceeds
+    the threshold. Without it, the whole gap is used (retrospective audit, may look past `end`).
+    """
     for gap in gaps:
-        lo, hi = max(start, gap.start_utc), min(end, gap.end_utc)
-        if lo < hi and _open_minutes(gap.start_utc, gap.end_utc) * 60 > threshold.total_seconds():
+        gap_end = gap.end_utc if known_until is None else min(gap.end_utc, known_until)
+        lo, hi = max(start, gap.start_utc), min(end, gap_end)
+        if lo < hi and _open_minutes(gap.start_utc, gap_end) * 60 > threshold.total_seconds():
             if _open_minutes(lo, hi) > 0:
                 return True
     return False
 
 
+# Flags that make a candle unusable; matched as substrings because some start with a count.
+INCOMPLETE_MARKERS = (
+    "hors couverture",
+    "trou de cotation",
+    "ticks pendant",
+    "heures manquantes",
+    "H1 incomplète",
+    "jour férié",
+    "tick(s) invalides exclus",
+)
+
+
+def _is_complete(flags: list[str]) -> bool:
+    return not any(marker in flag for flag in flags for marker in INCOMPLETE_MARKERS)
+
+
 def _finish(bar: dict[str, Any], summary: TickSummary, threshold: timedelta, expected: list[datetime]) -> None:
+    """Sets the retrospective (`flags`, `complete`) and decision-time (`*_at_close`) statuses."""
     flags: list[str] = bar.setdefault("flags", [])
+    at_close: list[str] = bar.setdefault("flags_at_close", [])
     start, end = bar["start_utc"], bar["end_utc"]
+    common = []
     if not _covered(start, end, summary.coverage):
-        flags.append("hors couverture déclarée (bougie non clôturée ou partielle dans l'échantillon)")
+        common.append("hors couverture déclarée (bougie non clôturée ou partielle dans l'échantillon)")
     if market_state(start) is MarketState.PROBABLE_HOLIDAY:
-        flags.append("jour férié probable")
+        common.append("jour férié probable")
     elif not expected:
-        flags.append("ticks pendant la fermeture prévue")
-    if _overlaps_gap(start, end, summary.gaps, threshold):
-        flags.append(f"trou de cotation > {int(threshold.total_seconds() // 60)} min pendant l'ouverture prévue")
-    if bar["excluded_ticks"]:
-        flags.append(f"{bar['excluded_ticks']} tick(s) invalides exclus")
+        common.append("ticks pendant la fermeture prévue")
+    gap_flag = f"trou de cotation > {int(threshold.total_seconds() // 60)} min pendant l'ouverture prévue"
+    invalid = [f"{bar['excluded_ticks']} tick(s) invalides exclus"] if bar["excluded_ticks"] else []
+    flags.extend(common + ([gap_flag] if overlaps_gap(start, end, summary.gaps, threshold) else []) + invalid)
+    known = overlaps_gap(start, end, summary.gaps, threshold, known_until=end)
+    at_close.extend(common + ([gap_flag] if known else []) + invalid)
     bar["expected_hours"] = len(expected)
     bar.setdefault("present_hours", 1)
-    bar["complete"] = not any(
-        f.startswith(
-            ("hors couverture", "trou de cotation", "ticks pendant", "heures manquantes", "H1 incomplète", "jour férié")
-        )
-        for f in flags
-    )
+    bar["complete"] = _is_complete(flags)
+    bar["complete_at_close"] = _is_complete(at_close)
 
 
 def build_bars(
@@ -365,12 +395,17 @@ def build_bars(
                 "last_tick_utc": members[-1]["last_tick_utc"],
                 "present_hours": len(present),
                 "flags": [],
+                "flags_at_close": [],
             }
             missing = [h for h in expected if h not in present]
             if missing:
-                candle["flags"].append(f"heures manquantes : {len(missing)}/{len(expected)}")
+                for key in ("flags", "flags_at_close"):
+                    candle[key].append(f"heures manquantes : {len(missing)}/{len(expected)}")
             if any(not m["complete"] for m in members):
                 candle["flags"].append("H1 incomplète dans la bougie")
+            # Every member H1 closes no later than the candle: its decision-time status is known here.
+            if any(not m["complete_at_close"] for m in members):
+                candle["flags_at_close"].append("H1 incomplète dans la bougie")
             _finish(candle, summary, gap_threshold, expected)
             bars.append(candle)
         result[timeframe] = bars

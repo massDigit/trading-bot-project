@@ -223,6 +223,64 @@ def test_weekend_is_a_normal_closure_and_candle_beyond_coverage_is_flagged(tmp_p
     assert any(f.startswith("hors couverture") for f in monday["flags"])
 
 
+def _bars_with_next_tick_at(tmp_path: Path, name: str, next_tick: datetime) -> dict[Timeframe, list[dict]]:
+    """Thursday 2019-03-07: a tick every minute 06:00-08:59, then nothing until `next_tick`, then every minute."""
+    store = HistoryStore(tmp_path / name)
+    rows = every_minute(utc(2019, 3, 7, 6), utc(2019, 3, 7, 9)) + every_minute(next_tick, utc(2019, 3, 7, 11))
+    ingest(store, write_csv(tmp_path / f"{name}.csv", rows), utc(2019, 3, 7, 6), utc(2019, 3, 7, 11))
+    bars, _ = build_bars(store, "dukascopy", "EURUSD")
+    return bars
+
+
+def test_changing_only_future_ticks_never_changes_a_past_decision_time_status(tmp_path: Path) -> None:
+    """Last tick 08:59 before a 09:00 close: next tick at 09:01 or 09:19 is indistinguishable at 09:00."""
+    early = _bars_with_next_tick_at(tmp_path, "early", utc(2019, 3, 7, 9, 1))
+    late = _bars_with_next_tick_at(tmp_path, "late", utc(2019, 3, 7, 9, 19))
+    decision = utc(2019, 3, 7, 9)
+    for timeframe in Timeframe:
+        past_early = [b for b in early[timeframe] if b["end_utc"] <= decision]
+        past_late = [b for b in late[timeframe] if b["end_utc"] <= decision]
+        assert [(b["start_utc"], b["complete_at_close"], b["flags_at_close"]) for b in past_early] == [
+            (b["start_utc"], b["complete_at_close"], b["flags_at_close"]) for b in past_late
+        ]
+    h1_early = {b["start_utc"]: b for b in early[Timeframe.H1]}
+    h1_late = {b["start_utc"]: b for b in late[Timeframe.H1]}
+    eight = utc(2019, 3, 7, 8)
+    assert h1_early[eight]["complete_at_close"] and h1_late[eight]["complete_at_close"]
+    # The retrospective audit does see the 20-minute gap that started at 08:59: it is not a decision input.
+    assert h1_early[eight]["complete"] and not h1_late[eight]["complete"]
+    # Once 10:00 has passed, the gap is known: the 09:00 candle is unusable for a decision taken at 10:00.
+    nine = utc(2019, 3, 7, 9)
+    assert not h1_late[nine]["complete_at_close"] and h1_early[nine]["complete_at_close"]
+
+
+def test_gap_cut_at_the_decision_instant_counts_only_its_known_part() -> None:
+    from forex_bot.history.bars import Gap, overlaps_gap
+
+    ten = timedelta(minutes=10)
+    gap = Gap(utc(2019, 3, 7, 8, 45), utc(2019, 3, 7, 9, 30), 45.0)
+    start, end = utc(2019, 3, 7, 8), utc(2019, 3, 7, 9)
+    assert overlaps_gap(start, end, [gap], ten, known_until=end)  # 15 min already elapsed at 09:00
+    late_start = Gap(utc(2019, 3, 7, 8, 55), utc(2019, 3, 7, 9, 30), 35.0)
+    assert not overlaps_gap(start, end, [late_start], ten, known_until=end)  # only 5 min known at 09:00
+    assert overlaps_gap(start, end, [late_start], ten)  # retrospective audit
+
+
+def test_a_candle_with_an_excluded_invalid_tick_is_incomplete(tmp_path: Path) -> None:
+    store = HistoryStore(tmp_path / "data")
+    rows = every_minute(utc(2019, 3, 7, 6), utc(2019, 3, 7, 10))
+    rows.insert(71, line(utc(2019, 3, 7, 7, 10, 30), "1.10000", "1.10050"))  # crossed: bid > ask, in order
+    ingest(store, write_csv(tmp_path / "x.csv", rows), utc(2019, 3, 7, 6), utc(2019, 3, 7, 10))
+    bars, summary = build_bars(store, "dukascopy", "EURUSD")
+    assert summary.crossed == 1 and summary.out_of_order_in_file == 0
+    seven = next(b for b in bars[Timeframe.H1] if b["start_utc"] == utc(2019, 3, 7, 7))
+    assert seven["flags"] == ["1 tick(s) invalides exclus"] == seven["flags_at_close"]
+    assert not seven["complete"] and not seven["complete_at_close"]
+    h4 = next(b for b in bars[Timeframe.H4] if b["start_utc"] == utc(2019, 3, 7, 6))
+    assert not h4["complete"] and not h4["complete_at_close"]
+    assert all(b["complete_at_close"] for b in bars[Timeframe.H1] if b["start_utc"] != utc(2019, 3, 7, 7))
+
+
 def test_ticks_during_expected_closure_are_flagged(tmp_path: Path) -> None:
     store = HistoryStore(tmp_path / "data")
     rows = [line(utc(2019, 3, 9, 12, 0), "1.12010", "1.12000")]  # Saturday

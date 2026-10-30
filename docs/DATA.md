@@ -175,9 +175,26 @@ comptées mais conservées, car indiscernables d'une cotation répétée.
   25 décembre et le 1er janvier sont marqués « jour férié probable ».
 - **Bougie complète** si : dans la couverture déclarée, toutes les heures d'ouverture prévues
   présentes et complètes, aucun trou de cotation > 10 min pendant l'ouverture prévue
-  (ASSUMP-017), aucun tick pendant la fermeture prévue, pas de jour férié probable.
-- **Bougie incomplète** : conservée et marquée (`complete = false`, `flags`) ; jamais comblée. Une
-  bougie qui dépasse la fin de la couverture est « non clôturée » et inutilisable.
+  (ASSUMP-017), aucun tick pendant la fermeture prévue, pas de jour férié probable, **aucun tick
+  invalide exclu** (prix nul ou négatif, bid > ask ; corrigé le 2026-10-30 : un tel tick laissait
+  la bougie complète).
+- **Bougie incomplète** : conservée et marquée ; jamais comblée. Une bougie qui dépasse la fin de
+  la couverture est « non clôturée » et inutilisable.
+- **Deux états de qualité par bougie** (revue externe du 2026-10-30) :
+  - `complete` / `flags` : **audit rétrospectif**. Il peut utiliser des ticks postérieurs à la
+    clôture : un trou qui commence dans la bougie n'est connu comme supérieur à 10 min que plus
+    tard. Exemple : dernier tick à 08:59, clôture à 09:00 ; un tick suivant à 09:01 ou à 09:19
+    rend la bougie complète ou incomplète, alors que les deux cas sont indiscernables à 09:00.
+    Utile pour auditer les données, **jamais pour une décision** ;
+  - `complete_at_close` / `flags_at_close` : **état connaissable à la clôture**, construit
+    uniquement avec les ticks antérieurs à `end_utc` (un trou encore en cours est coupé à la
+    clôture et ne compte que si sa partie écoulée dépasse déjà 10 min ; une H4 ou une D1 reprend
+    l'état à la clôture de ses H1). Seul cet état peut servir à une décision ; un moteur peut
+    aussi réévaluer une bougie passée avec l'information disponible jusqu'à l'instant de décision
+    (`overlaps_gap(..., known_until=instant)`), jamais avec l'audit.
+  - Sur 2015-2023, ils diffèrent pour 2 H1, 1 H4 et 1 D1, toutes incomplètes en audit seulement :
+    le trou du 2020-02-11 qui commence à 20:58 UTC, 2 min avant la clôture de la H1, et la
+    fin de séance du vendredi 2019-05-24 suivie des heures absentes à la source.
 - H4 et D1 sont agrégées à partir des H1 (frontières sur des heures pleines : résultat identique
   à une agrégation des ticks).
 

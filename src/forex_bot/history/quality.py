@@ -27,8 +27,8 @@ DISCLAIMER = (
 
 DECISIONS = [
     ("Ticks hors de la période déclarée du fichier", "exclus à l'import", "évite les chevauchements entre fichiers"),
-    ("Prix nul ou négatif", "exclu des bougies, compté", "prix non valide"),
-    ("bid > ask (cotation croisée)", "exclu des bougies, compté", "incohérence bid/ask"),
+    ("Prix nul ou négatif", "exclu des bougies, compté, bougie marquée incomplète", "prix non valide"),
+    ("bid > ask (cotation croisée)", "exclu des bougies, compté, bougie marquée incomplète", "incohérence bid/ask"),
     ("Ticks simultanés (même horodatage)", "conservés, ordre du fichier", "légitimes : plusieurs cotations par ms"),
     (
         "Lignes consécutives identiques (heure, prix, volumes)",
@@ -160,11 +160,21 @@ def build_report(
             for flag in row["flags"]:
                 key = flag.split(" :")[0]
                 flags[key] = flags.get(key, 0) + 1
+        flags_at_close: dict[str, int] = {}
+        for row in rows:
+            for flag in row["flags_at_close"]:
+                key = flag.split(" :")[0]
+                flags_at_close[key] = flags_at_close.get(key, 0) + 1
         candles[timeframe.value] = {
             "count": len(rows),
             "complete": sum(1 for r in rows if r["complete"]),
             "incomplete": sum(1 for r in rows if not r["complete"]),
             "flags": flags,
+            # Status knowable at each candle's close (decision input), vs the retrospective audit above.
+            "complete_at_close": sum(1 for r in rows if r["complete_at_close"]),
+            "incomplete_at_close": sum(1 for r in rows if not r["complete_at_close"]),
+            "flags_at_close": flags_at_close,
+            "retrospective_only_incomplete": sum(1 for r in rows if r["complete_at_close"] and not r["complete"]),
         }
     return {
         "source": source,
@@ -253,10 +263,16 @@ def to_markdown(report: dict[str, Any]) -> str:
         + "; ".join(f"{k} ({v})" for k, v in report["weekly_closure_reconciliation"].items()),
         "",
         "## Bougies",
-        "| Unité | Total | Complètes | Incomplètes | Motifs |",
-        "|---|---|---|---|---|",
+        "Deux états : l'audit rétrospectif (`complete`) peut utiliser des ticks postérieurs à la clôture ; "
+        "l'état à la clôture (`complete_at_close`) n'utilise que les ticks antérieurs et seul il peut "
+        "servir à une décision.",
+        "",
+        "| Unité | Total | Complètes (audit) | Incomplètes (audit) | Complètes à la clôture | "
+        "Incomplètes seulement en audit | Motifs (audit) |",
+        "|---|---|---|---|---|---|---|",
         *[
-            f"| {tf} | {c['count']} | {c['complete']} | {c['incomplete']} | "
+            f"| {tf} | {c['count']} | {c['complete']} | {c['incomplete']} | {c['complete_at_close']} | "
+            f"{c['retrospective_only_incomplete']} | "
             f"{'; '.join(f'{k} ({v})' for k, v in c['flags'].items()) or '—'} |"
             for tf, c in report["candles"].items()
         ],
