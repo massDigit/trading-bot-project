@@ -2,7 +2,8 @@
 
 ## 📐 Standards de Code
 
-- **Langage & Typage** : TypeScript / Modern JavaScript. Typage strict obligatoire (`noImplicitAny`).
+- **Python (stack du projet)** : PEP 8 via `ruff` (lignes de 120), annotations de type complètes, `mypy --strict`. Nommage `snake_case` (fonctions, variables, modules), `PascalCase` (classes), `UPPER_CASE` (constantes). Docstrings sur les modules et fonctions publiques. Erreurs explicites ; jamais de secret dans un message d'exception.
+- **TypeScript (si interface Next.js ultérieure)** : typage strict obligatoire (`noImplicitAny`).
 - **Nommage** :
   - Variables & Fonctions : `camelCase`
   - Types, Interfaces & Composants : `PascalCase`

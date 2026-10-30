@@ -1,0 +1,44 @@
+[project]
+name = "forex-bot"
+version = "0.1.0"
+description = "Robot Forex adaptatif — socle V1 (diagnostic IG démo en lecture seule)"
+authors = [
+    { name = "Samuel", email = "samuel.zentou@my-digital-school.org" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "httpx>=0.28,<0.29",
+    "python-dotenv>=1.1,<2",
+]
+
+[build-system]
+requires = ["uv_build>=0.13.0,<0.14.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "mypy>=2.4.0",
+    "pytest>=9.1.1",
+    "ruff>=0.17.3",
+]
+
+[project.scripts]
+ig-demo-diagnostic = "forex_bot.diagnostic:main"
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "S", "RUF"]
+ignore = ["RUF001", "RUF002", "RUF003"]  # French text with typographic characters
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "S105", "S106"]
+
+[tool.mypy]
+strict = true
+python_version = "3.12"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

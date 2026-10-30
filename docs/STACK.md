@@ -1,10 +1,14 @@
 # STACK.md - Technologies & Dépendances
 
-## 💻 Tech Stack Choisie
+## 💻 Stack (socle V1)
 
-- **Language** : TypeScript / Node.js
-- **Frontend** : [Ex: Vite / React / Next.js]
-- **Backend / API** : [Ex: Express / Fastify / NestJS]
-- **Database** : [Ex: PostgreSQL / Prisma / Supabase]
-- **Style / UI** : Vanilla CSS / Design Tokens
-- **Testing** : Vitest / Playwright
+- **Langage** : Python 3.12 (CPython arm64, installé et épinglé par `uv` via `.python-version`)
+- **Gestion d'environnement / dépendances** : `uv` (`.venv/` local, versions verrouillées dans `uv.lock`)
+- **HTTP** : `httpx` 0.28 (timeouts explicites, redirections désactivées)
+- **Configuration locale** : `python-dotenv` (lecture de `.env`, jamais commité)
+- **Qualité** : `ruff` (lint + format), `mypy --strict`, `pytest`
+- **Courtier (candidat)** : IG, API REST, environnement **démo uniquement** en V1
+
+Prévus par le cahier des charges, non installés à ce stade : Parquet/DuckDB, LightGBM, MLX-LM (Qwen3-8B).
+Le choix de Python 3.12 (plutôt que 3.14) vise la disponibilité des roues arm64 de ces bibliothèques
+— voir `ASSUMP-001` dans `.ai/ASSUMPTIONS.md`.

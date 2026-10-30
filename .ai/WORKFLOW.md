@@ -2,26 +2,27 @@
 
 ## 🔁 Boucle de Développer-Tester-Valider
 
-Avant de déclarer une tâche terminée, l'agent doit exécuter :
+Avant de déclarer une tâche terminée, l'agent doit exécuter (stack Python, voir `docs/STACK.md`) :
 
 ```bash
-# 1. Verification TypeScript / Typecheck
-npm run typecheck
+# 0. Environnement synchronisé avec uv.lock
+uv sync
 
-# 2. Linter
-npm run lint
+# 1. Typecheck
+uv run mypy src tests
 
-# 3. Tests Unitaires
-npm test
+# 2. Linter et format
+uv run ruff check src tests
+uv run ruff format --check src tests
 
-# 4. Tests d'Intégration
-npm run test:integration
+# 3. Tests unitaires (hors ligne)
+uv run pytest
 
-# 5. Build de Production
-npm run build
+# 4. Tests d'intégration : diagnostic démo IG, exécuté par l'opérateur avec son .env.demo
+uv run ig-demo-diagnostic
 ```
 
-> Les commandes ci-dessus sont des valeurs par défaut pour une stack Node.js. Les adapter à la stack réelle définie dans `docs/STACK.md`.
+Pas d'étape de build de production à ce stade (projet de recherche local).
 
 Si l'une de ces commandes échoue, l'agent doit immédiatement traiter l'erreur avant de poursuivre.
 

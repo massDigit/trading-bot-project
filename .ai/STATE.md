@@ -2,31 +2,38 @@
 
 > **Ce fichier donne à l'agent une image précise de l'état du projet en temps réel à chaque début de session.**
 
-**Dernière mise à jour** : 2026-10-05
-**Version** : 0.2.0
+**Dernière mise à jour** : 2026-10-27
+**Version** : 0.2.0 (template) — socle Python non encore publié
 
 ## 🚀 Phase Actuelle
-Bootstrap & Définition de la Spécification Produit.
+Lot 0/5 préparatoire : socle Python et vérification de l'accès à l'API IG démo en lecture seule.
 
 ## 🎯 Focus Courant
-Initialisation de l'architecture IA-Native et rédaction des spécifications dans `docs/`.
+Diagnostic de connexion démo reproductible (`uv run ig-demo-diagnostic`), branche `feat/ig-demo-diagnostic`.
 
 ## ✅ Réalisé
-- [x] Arborescence standardisée IA (`AGENTS.md`, `CLAUDE.md`, `GEMINI.md`)
-- [x] Structure de mémoire `.ai/` (`CONTEXT.md`, `STATE.md`, `TASKS.md`, `RULES.md`, `DECISIONS.md`, `ASSUMPTIONS.md`)
-- [x] Skill universal `project-bootstrap` (`.agents/skills/project-bootstrap/SKILL.md`)
-- [x] Règle stricte de classification des décisions & non-usurpation d'ADR (`AGENTS.md`, `RULES.md`)
-- [x] Documentation d'accueil universelle générique (`README.md`)
-- [x] Règle Git & Versioning (`RULES.md`), `VERSION`, `CHANGELOG.md`, procédure de release (`release-check`)
-- [x] Cohérence des règles & skills, règle branches/PR, protection de `main` (v0.1.1)
-- [x] Dépôt GitHub template privé, configuration GitHub dans `project-bootstrap`, GitHub Releases dans `release-check` (v0.2.0)
+- [x] Structure IA-Native (template v0.2.0)
+- [x] Projet Python 3.12 / uv, dépendances verrouillées (`uv.lock`)
+- [x] `.env.example` fictif, `.gitignore` (secrets, `.venv`, journaux)
+- [x] Client IG lecture seule verrouillé sur la démo, masquage des secrets
+- [x] Script de diagnostic + 15 tests hors ligne (ruff, mypy strict, pytest OK)
+
+- [x] Diagnostic réel démo exécuté le 2026-10-27 : code 0, aucune donnée sensible affichée
+
+## 📊 Résultat du diagnostic démo (2026-10-27)
+- 2 comptes CFD en EUR (« CFD » actif/par défaut, « Barrières et Options ») ; solde fictif 10 000 €.
+- EUR/USD : `CS.D.EURUSD.CEF.IP` (contrat 100 000, 10 USD/pip/contrat) et `CS.D.EURUSD.CEFM.IP`
+  Mini (contrat 10 000, 1 USD/pip/contrat) ; `minDealSize` 0,1 ; stop normal min 2 points ;
+  stop garanti min 5 points ; marge 3,33 %. Le marché « Weekend EUR/USD » ressort aussi du filtre.
 
 ## 🔄 En Cours
-- [ ] Test d'initialisation de projet réel via le skill `project-bootstrap` (projet LeCubeDeVie, créé depuis le template v0.2.0)
+- [ ] Validation opérateur, puis commit/PR de `feat/ig-demo-diagnostic`
 
 ## ⚠️ Problèmes Connus / Points de Vigilance
-- Template universel vierge d'application source (`src/`).
+- Unité de `minDealSize` renvoyée en « POINTS » : lecture en contrats à confirmer.
+- Incrément de taille : pas de champ dédié documenté par IG (`ASSUMP-004`).
+- Mot de passe chiffré non géré si IG l'exige.
 
 ## 🏁 Prochaine Étape / Milestone
-Tester le workflow de bootstrap sur un nouveau projet réel (LeCubeDeVie) pour vérifier la génération complète de la documentation sans toucher au code source.
-
+Résultat réel du diagnostic → confirmer epic EUR/USD, taille minimale et distances de stop,
+puis vérifier la compatibilité avec un risque de 5 € par opération (cahier des charges §8).
