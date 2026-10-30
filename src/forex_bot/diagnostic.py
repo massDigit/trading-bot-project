@@ -14,20 +14,30 @@ from __future__ import annotations
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import Any, TextIO
 
 import httpx
 
 from forex_bot.config import IG_DEMO_BASE_URL, ConfigError, Settings, load_settings
 from forex_bot.ig_client import IGApiError, IGDemoReadOnlyClient, ReadOnlyViolation
+from forex_bot.instruments import (
+    EURUSD_MINI,
+    EURUSD_MINI_CONVENTIONS,
+    EURUSD_MINI_EPIC,
+    ContractCheck,
+    is_excluded_market,
+    verify_contract,
+)
+from forex_bot.market import Quote, quote_from_market_details
 from forex_bot.redaction import Redactor
+from forex_bot.risk import CostModel, Holding, RiskConfig, entry_blockers
 
 EXIT_OK = 0
 EXIT_CONFIG = 1
 EXIT_BLOCKING = 2
 EXIT_PARTIAL = 3
 
-MAX_MARKET_DETAILS = 5
 NOT_PROVIDED = "non fourni par l'API"
 
 # Explanations for errorCode values documented in the IG Labs reference.
@@ -75,7 +85,7 @@ ERROR_HINTS: dict[str, str] = {
 @dataclass
 class Check:
     name: str
-    status: str  # "OK" | "AVERTISSEMENT" | "ÉCHEC" | "NON EXÉCUTÉ"
+    status: str  # "OK" | "AVERTISSEMENT" | "ÉCHEC" | "NON EXÉCUTÉ" | "BLOQUÉ" (expected, not a failure)
     detail: str = ""
 
 
@@ -102,8 +112,10 @@ CHECK_CONFIG = "Configuration locale"
 CHECK_AUTH = "Authentification (POST /session)"
 CHECK_ACCOUNTS = "Comptes accessibles (GET /accounts)"
 CHECK_BALANCE = "Solde du compte sélectionné"
-CHECK_SEARCH = "Recherche du marché"
+CHECK_SEARCH = "Recherche du marché (information)"
 CHECK_RULES = "Contraintes du marché (GET /markets/{epic})"
+CHECK_CONTRACT = "Vérification du contrat EUR/USD Mini"
+CHECK_SIZING = "Entrée / dimensionnement exécutable"
 CHECK_LOGOUT = "Fermeture de session (DELETE /session)"
 BLOCKING_CHECKS = {CHECK_AUTH, CHECK_ACCOUNTS}
 
@@ -132,11 +144,6 @@ def fmt_rule(rule: Any) -> str:
 
 def fmt(value: Any) -> str:
     return NOT_PROVIDED if value is None or value == "" else str(value)
-
-
-def select_spot_candidates(markets: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Keep currency markets without expiry ('-' in IG search results)."""
-    return [m for m in markets if m.get("instrumentType") == "CURRENCIES" and m.get("expiry") in ("-", None, "")]
 
 
 def run(
@@ -192,7 +199,7 @@ def _diagnose(
         session = client.login(settings.username, settings.password)
     except (IGApiError, httpx.HTTPError) as exc:
         report.add(CHECK_AUTH, "ÉCHEC", explain(exc))
-        for name in (CHECK_ACCOUNTS, CHECK_BALANCE, CHECK_SEARCH, CHECK_RULES):
+        for name in (CHECK_ACCOUNTS, CHECK_BALANCE, CHECK_SEARCH, CHECK_RULES, CHECK_CONTRACT):
             report.add(name, "NON EXÉCUTÉ", "authentification requise")
         out("Échec.")
         return
@@ -245,61 +252,90 @@ def _diagnose(
     elif not any(c.name == CHECK_BALANCE for c in report.checks):
         report.add(CHECK_BALANCE, "ÉCHEC", "aucun compte accessible")
 
-    # 4. Market search ---------------------------------------------------------
-    out(f"--- 4. Recherche « {settings.search_term} »")
+    # 4. Market search (informational only) ----------------------------------
+    out(f"--- 4. Recherche « {settings.search_term} » (information, ne sert pas à la sélection)")
     try:
         markets = client.search_markets(settings.search_term)
     except (IGApiError, httpx.HTTPError) as exc:
-        report.add(CHECK_SEARCH, "ÉCHEC", explain(exc))
-        report.add(CHECK_RULES, "NON EXÉCUTÉ", "recherche indisponible")
-        return
-
-    for m in markets:
-        out(
-            f"  {fmt(m.get('epic'))} | {fmt(m.get('instrumentName'))} | "
-            f"type={fmt(m.get('instrumentType'))} | échéance={fmt(m.get('expiry'))} | "
-            f"statut={fmt(m.get('marketStatus'))} | bid={fmt(m.get('bid'))} offer={fmt(m.get('offer'))}"
-        )
-    candidates = select_spot_candidates(markets)
-    if not candidates:
+        report.add(CHECK_SEARCH, "AVERTISSEMENT", explain(exc))
+    else:
+        for m in markets:
+            epic = str(m.get("epic") or "")
+            tag = " [SÉLECTIONNÉ]" if epic == EURUSD_MINI_EPIC else ""
+            if is_excluded_market(epic, m.get("instrumentName")):
+                tag = " [EXCLU]"
+            out(
+                f"  {fmt(epic)} | {fmt(m.get('instrumentName'))} | type={fmt(m.get('instrumentType'))} | "
+                f"échéance={fmt(m.get('expiry'))} | statut={fmt(m.get('marketStatus'))}{tag}"
+            )
+        found = any(m.get("epic") == EURUSD_MINI_EPIC for m in markets)
         report.add(
             CHECK_SEARCH,
-            "ÉCHEC",
-            f"{len(markets)} résultat(s), aucun marché CURRENCIES sans échéance",
+            "OK" if found else "AVERTISSEMENT",
+            f"{len(markets)} résultat(s), {EURUSD_MINI_EPIC} {'présent' if found else 'absent'}",
         )
-        report.add(CHECK_RULES, "NON EXÉCUTÉ", "aucun marché candidat")
-        return
-    report.add(
-        CHECK_SEARCH,
-        "OK",
-        f"{len(markets)} résultat(s), {len(candidates)} marché(s) devise sans échéance",
-    )
     out("")
 
-    # 5. Market constraints ----------------------------------------------------
-    out("--- 5. Contraintes des marchés candidats")
-    missing_any = False
-    detailed = 0
-    for m in candidates[:MAX_MARKET_DETAILS]:
-        epic = str(m.get("epic") or "")
-        try:
-            details = client.get_market(epic)
-        except (IGApiError, httpx.HTTPError, ValueError) as exc:
-            out(f"[{epic}] échec : {explain(exc)}")
-            missing_any = True
-            continue
-        detailed += 1
-        missing_any |= _show_market(details, out)
-        out("")
-    if len(candidates) > MAX_MARKET_DETAILS:
-        out(f"({len(candidates) - MAX_MARKET_DETAILS} candidat(s) non détaillé(s), quota API préservé)")
-
-    if detailed == 0:
-        report.add(CHECK_RULES, "ÉCHEC", "aucun détail de marché obtenu")
-    elif missing_any:
-        report.add(CHECK_RULES, "AVERTISSEMENT", "certaines contraintes ne sont pas fournies")
+    # 5. Explicit contract: characteristics and state ------------------------
+    out(f"--- 5. Contrat sélectionné {EURUSD_MINI_EPIC}")
+    check: ContractCheck | None = None
+    quote: Quote | None = None
+    try:
+        details = client.get_market(EURUSD_MINI_EPIC)
+        received_at = datetime.now(UTC)
+    except (IGApiError, httpx.HTTPError) as exc:
+        report.add(CHECK_RULES, "ÉCHEC", explain(exc))
+        report.add(CHECK_CONTRACT, "NON EXÉCUTÉ", "détails du contrat indisponibles")
     else:
-        report.add(CHECK_RULES, "OK", f"{detailed} marché(s) détaillé(s)")
+        missing = _show_market(details, out)
+        report.add(
+            CHECK_RULES,
+            "AVERTISSEMENT" if missing else "OK",
+            "contraintes incomplètes" if missing else "contraintes reçues",
+        )
+        check = verify_contract(details, received_at_utc=received_at)
+        quote = quote_from_market_details(details, received_at_utc=received_at)
+        for issue in check.issues:
+            out(f"  ! {issue}")
+        if not check.characteristics_ok:
+            report.add(CHECK_CONTRACT, "ÉCHEC", "caractéristiques différentes de la référence : revue requise")
+        elif not check.tradeable_now:
+            report.add(CHECK_CONTRACT, "AVERTISSEMENT", "caractéristiques conformes, marché non négociable maintenant")
+        else:
+            report.add(CHECK_CONTRACT, "OK", "caractéristiques conformes, marché négociable")
+    out("")
+
+    # 6. Entry gate (no order is ever sent by this tool) ---------------------
+    risk = RiskConfig()
+    out("--- 6. Conditions d'une future entrée (aucun ordre n'est envoyé)")
+    out(
+        f"Allocation initiale : {risk.initial_allocation} {risk.account_currency} — capital de départ, "
+        "distinct du solde démo et des fonds propres actualisés du robot"
+    )
+    out(
+        "Budget indicatif sur l'allocation initiale : "
+        f"{risk.initial_allocation * risk.risk_fraction_per_trade:.2f} {risk.account_currency} (information seulement)"
+    )
+    blockers = entry_blockers(
+        quote=quote,
+        now_utc=datetime.now(UTC),
+        spec=EURUSD_MINI,
+        contract_check=check,
+        conventions=EURUSD_MINI_CONVENTIONS,
+        equity=None,  # robot portfolio equity tracking does not exist yet
+        unintegrated_events=(),  # no event ledger yet; equity=None blocks anyway
+        costs=CostModel(),
+        holding=Holding.INTRADAY,
+        guaranteed_stop=False,
+        risk=risk,
+    )
+    if blockers:
+        out("Entrée et dimensionnement exécutable : BLOQUÉS")
+        for reason in blockers:
+            out(f"  - {reason}")
+        report.add(CHECK_SIZING, "BLOQUÉ", f"{len(blockers)} condition(s) bloquante(s), attendu à ce stade")
+    else:
+        report.add(CHECK_SIZING, "OK", "aucune condition bloquante")
 
 
 def _show_balance(
@@ -387,8 +423,8 @@ def _show_market(details: dict[str, Any], out: Callable[[str], None]) -> bool:
     width = max(len(label) for label, _ in rows)
     for label, value in rows:
         out(f"  {label.ljust(width)} : {value}")
-    out("  Incrément de taille : l'API ne documente pas de champ dédié. minStepDistance est")
-    out("    décrit seulement comme « Dealing rule » ; son interprétation reste à confirmer.")
+    out("  Incrément de taille : aucun champ dédié dans l'API. minStepDistance n'est vraisemblablement")
+    out("    pas l'incrément (valeur incohérente avec minDealSize) : incrément à confirmer.")
 
     key_rules = ("minDealSize", "minNormalStopOrLimitDistance")
     return any(fmt_rule(rules.get(k)) == NOT_PROVIDED for k in key_rules)

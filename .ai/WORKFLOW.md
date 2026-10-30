@@ -20,6 +20,7 @@ uv run pytest
 
 # 4. Tests d'intégration : diagnostic démo IG, exécuté par l'opérateur avec son .env.demo
 uv run ig-demo-diagnostic
+uv run ig-price-probe --seconds 20   # PRICE stream probe, read-only
 ```
 
 Pas d'étape de build de production à ce stade (projet de recherche local).

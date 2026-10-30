@@ -8,6 +8,7 @@ authors = [
 requires-python = ">=3.12"
 dependencies = [
     "httpx>=0.28,<0.29",
+    "lightstreamer-client-lib>=2.2,<3",
     "python-dotenv>=1.1,<2",
 ]
 
@@ -24,6 +25,7 @@ dev = [
 
 [project.scripts]
 ig-demo-diagnostic = "forex_bot.diagnostic:main"
+ig-price-probe = "forex_bot.price_probe:main"
 
 [tool.ruff]
 line-length = 120
@@ -39,6 +41,10 @@ ignore = ["RUF001", "RUF002", "RUF003"]  # French text with typographic characte
 [tool.mypy]
 strict = true
 python_version = "3.12"
+
+[[tool.mypy.overrides]]
+module = ["lightstreamer.*"]
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

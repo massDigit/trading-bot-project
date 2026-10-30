@@ -19,6 +19,7 @@ open -e .env.demo     # or any editor: IG_API_KEY, IG_USERNAME, IG_PASSWORD
 
 # 3. Run the diagnostic
 uv run ig-demo-diagnostic
+uv run ig-price-probe --seconds 20   # PRICE stream probe, read-only
 echo "exit code: $?"
 ```
 
