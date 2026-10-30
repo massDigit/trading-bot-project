@@ -2,23 +2,28 @@
 
 > **Ce fichier donne à l'agent une image précise de l'état du projet en temps réel à chaque début de session.**
 
-**Dernière mise à jour** : 2026-10-30
+**Dernière mise à jour** : 2026-10-31
 **Version de l'application** : 0.1.0 (`pyproject.toml`), non publiée
 **Modèle de dépôt IA** : v0.2.0 (`massDigit/ai-project-template`, structure `AGENTS.md`, `.ai/`, `.agents/`)
 
 ## 🚀 Phase Actuelle
 Historique de recherche EUR/USD acquis (2015-2023, avec exceptions connues) ; règles de données
-de S1 validées comme référence expérimentale ; moteur de backtest S1 à écrire hors ligne.
+de S1 validées comme référence expérimentale ; moteur de backtest S1 hors ligne **implémenté**
+(tests synthétiques), **en revue** (PR #4) ; **aucun passage sur données historiques réalisé**.
 
 ## 🎯 Focus Courant
-Moteur S1 hors ligne (branche `feat/s1-backtest-engine`, partie de `main`) : tests synthétiques
-écrits ; lecteur de ticks en flux puis premier passage exploratoire sur 2015-2021.
+Corrections de la revue d'Astra du moteur S1 (branche `feat/s1-backtest-engine`, PR #4 en
+brouillon vers `main`) : priorité du stop sur une sortie au canal, fonds propres valorisés,
+risque au prix exécuté, taille d'un retournement. Ensuite : lecteur de ticks en flux et petit
+passage exploratoire sur 2015-2021.
 
-## 🧾 Synthèse vérifiée (2026-10-30)
+## 🧾 Synthèse vérifiée (2026-10-31)
 - PR #1, #2 et #3 fusionnées dans `main` par commits de fusion, sur autorisation de l'opérateur
-  (`main` = `aa69503`). Aucune PR ouverte. Désormais : une branche depuis `main`, une PR vers `main`.
-- Branche `feat/s1-backtest-engine` (depuis `aa69503`) : 188 tests réussis ; `ruff check`,
-  `ruff format --check` et `uv run mypy src tests` sans erreur.
+  (`main` = `aa69503`). Une branche depuis `main`, une PR vers `main`.
+- **PR #4 ouverte en brouillon** (`feat/s1-backtest-engine` → `main`) : moteur S1 au commit
+  `9b38118`, revu par Astra le 2026-10-31 (deux défauts reproduits, non couverts par les tests) ;
+  corrections et 6 tests ciblés dans l'arbre de travail, non commités. 194 tests réussis ;
+  `ruff check`, `ruff format --check` et `uv run mypy src tests` sans erreur.
 
 ## ✅ Réalisé
 - [x] Structure IA-Native (modèle de dépôt v0.2.0)
@@ -35,6 +40,7 @@ Moteur S1 hors ligne (branche `feat/s1-backtest-engine`, partie de `main`) : tes
 - [x] Règles de données de S1 validées comme référence expérimentale (ADR-006) ; fiche S1 harmonisée
 - [x] Choix du projet ASSUMP-001 à 022 approuvés dans leur portée (ADR-008) ; faits extérieurs ouverts : ASSUMP-005, 008, 018, 019 et parts extérieures des entrées mixtes
 - [x] ADR-002 : conteneurisation Docker différée jusqu'au besoin d'exécution continue
+- [x] Moteur S1 hors ligne implémenté (`src/forex_bot/backtest/`), tests synthétiques uniquement ; jamais exécuté sur l'historique
 
 ## 📊 Résultat du diagnostic démo (2026-10-27, observations démo uniquement)
 - 2 comptes CFD en EUR (« CFD » actif/par défaut, « Barrières et Options ») ; solde fictif 10 000 €.
@@ -44,7 +50,8 @@ Moteur S1 hors ligne (branche `feat/s1-backtest-engine`, partie de `main`) : tes
   Ces valeurs ne sont pas transposées au compte réel.
 
 ## 🔄 En Cours
-- [ ] Moteur S1 hors ligne (ADR-006), tests synthétiques d'abord
+- [ ] Revue du moteur S1 (PR #4) : corrections d'Astra appliquées, conventions ASSUMP-024 proposées à l'opérateur
+- [ ] Lecteur de ticks en flux (DuckDB) puis premier passage exploratoire 2015-2021 : **non réalisé**
 - [ ] Recherche d'une source applicable pour les fermetures particulières (non bloquante)
 - [ ] Demande au support IG préparée, non envoyée (`docs/IG_SUPPORT_REQUEST.md`)
 
@@ -53,7 +60,8 @@ Moteur S1 hors ligne (branche `feat/s1-backtest-engine`, partie de `main`) : tes
 - Coûts IG inconnus (commission, conversion, financement, prime de stop garanti) : ASSUMP-006. Ils bloquent une conclusion réaliste sur IG, pas le moteur hors ligne.
 - Déclenchement des stops et référence des distances minimales non confirmés : ASSUMP-008.
 - Compte réel cible à risque limité : stop garanti obligatoire, rapprochable mais jamais éloigné, prime au déclenchement (`docs/CONFIRMATIONS.md` §5, DÉCL) ; ses valeurs ne sont pas observées.
-- Pas encore de suivi des fonds propres du robot ; flux `PRICE` validé par sonde seulement.
+- Pas encore de suivi des fonds propres du robot en fonctionnement (le moteur de recherche les valorise, ASSUMP-024) ; flux `PRICE` validé par sonde seulement.
+- Moteur S1 : la taille est fixée avant l'exécution simulée ; l'entrée exécutée peut dépasser le budget de risque, dépassement enregistré et jamais supprimé. Drawdown mesuré sur des échantillons (décisions H4 et sorties), pas tick par tick.
 - Mot de passe chiffré non géré si IG l'exige.
 - Dukascopy : ambiguïté de licence **non résolue** (ASSUMP-018) ; acquisition par décision de l'opérateur (ADR-004), arrêt et purge en cas d'avertissement ; convention temporelle non documentée, cohérente sur 2015-2023 (ASSUMP-019).
 - SDK JForex : une réponse HTTP 503 devient une heure vide mise en cache, sans erreur ; traitée comme acquisition incomplète (ASSUMP-022). Compte démo valable 14 jours.
@@ -65,6 +73,6 @@ Moteur S1 hors ligne (branche `feat/s1-backtest-engine`, partie de `main`) : tes
 - Authentification SSH vers GitHub intermittente le 2026-10-30 (clé enregistrée et chargée) ; une nouvelle tentative a suffi.
 
 ## 🏁 Prochaine Étape / Milestone
-1. Écrire et tester S1 hors ligne : données synthétiques, puis 2015-2021 uniquement, coûts paramétrés, sans optimisation.
+1. Valider les corrections de la PR #4, puis lecteur de ticks en flux et petit passage sur 2015-2021 uniquement, coûts paramétrés (non confirmés chez IG), sans optimisation.
 2. En parallèle : fermetures particulières et confirmations IG.
 3. Garder 2022-2023 pour l'évaluation des variantes figées, puis 2024-2025 pour le test final (ADR-007).

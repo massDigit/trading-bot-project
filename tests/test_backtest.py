@@ -26,7 +26,14 @@ from forex_bot.backtest.engine import (
 from forex_bot.backtest.feed import Silence, Tick, TickFeed, classify_silence
 from forex_bot.backtest.s1 import S1Params, WilderAtr, evaluate_entry
 from forex_bot.history.bars import Gap
-from forex_bot.history.calendar import MarketState, Timeframe, candle_end, candle_start, market_state
+from forex_bot.history.calendar import (
+    MarketState,
+    Timeframe,
+    candle_end,
+    candle_start,
+    market_state,
+    trading_day,
+)
 from forex_bot.risk import Cost, CostModel, CostStatus, Side
 
 SPREAD = D("0.0001")
@@ -238,6 +245,96 @@ def test_unexplained_interruption_followed_by_a_price_beyond_the_stop_is_a_certa
     assert any("exécution supposée" in h for h in normal.hypotheses)
 
 
+def test_stop_crossed_on_the_tick_that_executes_a_channel_exit_takes_precedence() -> None:
+    probe, _ = run(ticks_for([FLAT] * 25 + [BREAKOUT, HOLD]))
+    stop = first_trade(probe).stop
+    drop = (D("1.1025"), D("1.1026"), D("1.1015"), D("1.1016"))  # exit decided, stop not reached
+    crash = (D("1.1016"), stop - D("0.0010"), D("1.0990"), D("1.0995"))  # first tick after D: bid below S
+    spec_ticks = ticks_for([FLAT] * 25 + [BREAKOUT] + [HOLD] * 10 + [drop, crash, HOLD])
+    for stop_type in StopType:
+        result, h4 = run(spec_ticks, stop_type=stop_type)
+        (trade,) = result.trades
+        assert trade.exit_reason == "STOP_OBSERVÉ" and trade.exit_utc == h4[36]["end_utc"] + STEP
+        assert kinds(result, "SORTIE_DÉCIDÉE") and kinds(result, "SORTIE_CANAL_ABANDONNÉE")
+        if stop_type is StopType.GUARANTEED:
+            assert trade.exit_price == stop and "prime de stop garanti" in trade.costs_quote
+        else:
+            assert trade.exit_price == stop - D("0.0010") and "prime de stop garanti" not in trade.costs_quote
+
+
+# ---------------------------------------------------------------- reversal
+
+WIDE = S1Params(use_d1_filter=False, stop_atr_multiple=D(10))  # long stop far below the 20-candle low
+FINE = {"min_size": D("0.01"), "size_increment": D("0.01")}
+REVERSE = (D("1.1025"), D("1.1026"), D("1.0985"), D("1.0990"))  # below the exit and the 20-candle lows
+
+
+def test_reversal_sizes_the_new_entry_on_equity_including_the_position_being_exited() -> None:
+    after = (D("1.0990"), D("1.0988"), D("1.0985"), D("1.0988"))
+    result, h4 = run(ticks_for([FLAT] * 25 + [BREAKOUT] + [HOLD] * 10 + [REVERSE, after, after]), WIDE, **FINE)
+    decision = h4[36]["end_utc"]
+    (closed,) = result.trades
+    reopened = result.open_trade
+    assert closed.side is Side.LONG and closed.exit_reason == "SORTIE_CANAL"
+    assert reopened is not None and reopened.side is Side.SHORT and reopened.decided_utc == decision
+    assert closed.exit_utc == reopened.entry_utc == decision + STEP  # exit then entry on the same tick
+    (point,) = [p for p in result.equity_curve if p.utc == decision]
+    assert point.balance == D("2000") and point.unrealized < 0  # the exit is not booked yet at D
+    assert reopened.risk_budget == point.equity * D("0.0025") < D("2000") * D("0.0025")
+
+
+def test_reversal_with_the_stop_crossed_on_the_execution_tick_still_opens_the_new_entry() -> None:
+    probe, _ = run(ticks_for([FLAT] * 25 + [BREAKOUT, HOLD]), WIDE, **FINE)
+    stop = first_trade(probe).stop
+    gap = (D("1.0990"), stop - D("0.0010"), stop - D("0.0012"), stop - D("0.0011"))
+    result, _ = run(ticks_for([FLAT] * 25 + [BREAKOUT] + [HOLD] * 10 + [REVERSE, gap, gap]), WIDE, **FINE)
+    (closed,) = result.trades
+    reopened = result.open_trade
+    assert closed.exit_reason == "STOP_OBSERVÉ" and closed.exit_price == stop
+    assert kinds(result, "SORTIE_CANAL_ABANDONNÉE")
+    assert reopened is not None and reopened.side is Side.SHORT
+    assert reopened.entry_utc == closed.exit_utc and reopened.entry_price == stop - D("0.0010")
+
+
+# ---------------------------------------------------------------- equity
+
+
+def test_open_position_is_valued_in_equity_without_being_closed() -> None:
+    spec_ticks = ticks_for([FLAT] * 25 + [BREAKOUT, HOLD, HOLD])
+    result, _ = run(spec_ticks)
+    trade, last = result.open_trade, spec_ticks[-1]
+    assert trade is not None and not result.trades and trade.entry_price == D("1.1031")
+    units = trade.size * D("10000")
+    nights = (trading_day(last.ts_utc) - trading_day(trade.entry_utc)).days
+    net_quote = (last.bid - trade.entry_price - D("0.00005")) * units - D("0.10") * trade.size * nights
+    assert result.balance == D("2000")
+    assert result.unrealized == net_quote / last.bid < 0  # loss: converted at 1/bid
+    assert result.equity == D("2000") + result.unrealized
+    assert result.equity_curve[-1].utc == last.ts_utc
+
+
+def test_equity_curve_shows_a_drawdown_the_balance_does_not() -> None:
+    dip = (D("1.1025"), D("1.1026"), D("1.1008"), D("1.1010"))  # above the stop, below the entry
+    result, h4 = run(ticks_for([FLAT] * 25 + [BREAKOUT, HOLD, dip, HOLD]))
+    (point,) = [p for p in result.equity_curve if p.utc == h4[27]["end_utc"]]
+    assert point.balance == D("2000") and point.equity < D("2000")
+    assert all(p.balance == D("2000") for p in result.equity_curve)
+
+
+# ---------------------------------------------------------------- estimated vs executed entry
+
+
+def test_entry_executed_beyond_the_estimate_is_kept_with_its_risk_overrun() -> None:
+    jump = (D("1.1025"), D("1.1060"), D("1.1055"), D("1.1058"))  # first tick after D far above the estimate
+    result, _ = run(ticks_for([FLAT] * 25 + [BREAKOUT, jump, jump]))
+    trade = result.open_trade
+    assert trade is not None and trade.entry_price == D("1.1061")
+    assert trade.size * trade.estimate.loss_account_per_contract <= trade.risk_budget  # sized before sending
+    assert trade.risk_at_execution > trade.risk_budget and trade.risk_overrun > 0
+    (overrun,) = kinds(result, "DÉPASSEMENT_RISQUE")
+    assert "exécution conservée" in overrun
+
+
 # ---------------------------------------------------------------- scenarios
 
 
@@ -263,7 +360,7 @@ def test_unobservable_crossing_gives_distinct_trajectories_propagated_to_later_d
     assert first.exit_reason == "STOP_SCÉNARIO_H1" and first.indeterminate
     assert first.exit_price == first.stop and first.exit_utc == h4_starts(29)[28] + 21 * STEP
     assert h1.open_trade is not None and h1.open_trade.entry_utc > first.exit_utc
-    assert h1.equity < h0.equity  # the H1 loss is booked; H0 books nothing yet
+    assert h1.balance < h0.balance == D("2000")  # the H1 loss is booked; H0 books nothing yet
     # Same indeterminate event in both trajectories; nothing is removed.
     assert h0.open_trade.unobservable_crossings == first.unobservable_crossings
 
@@ -290,7 +387,7 @@ def test_size_is_rounded_down_on_the_up_to_date_equity() -> None:
         assert trade.estimate.complete
         if trade.net_account is not None:
             equity += trade.net_account
-    assert equity == result.equity  # the second budget used the equity after the first (losing) trade
+    assert equity == result.balance  # the second budget used the equity after the first (losing) trade
 
 
 def test_unknown_cost_blocks_the_entry_instead_of_counting_zero() -> None:

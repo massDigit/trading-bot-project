@@ -5,6 +5,20 @@ candles available at D(t) only, their state re-evaluated with the information av
 Exits are evaluated before entries. Orders execute at the first tick strictly after D(t): buy at
 the ask, sell at the bid. Between decisions every tick is replayed in order to monitor the stop.
 
+Event priority on a tick: a silence before it, then the stop of the open position, then a pending
+channel exit, then a pending entry. A stop crossed on the tick that would have executed a channel
+exit takes precedence: the resting stop order is reached first, the channel exit is dropped.
+
+Accounting: the balance moves only when a trade is closed; the unrealized result is the liquidation
+value of the open position at the last known tick (exit-side price, exit costs accrued so far,
+conversion on the less favourable side); equity = balance + unrealized. Equity is sampled at every
+H4 decision and every exit; a position still open at the end of the study is valued, never closed.
+
+Sizing is fixed before the simulated sending, at D, on the equity estimated with the last tick
+strictly before D (balance + unrealized, so a reversal accounts for the position being exited).
+The executed entry is never removed afterwards: its risk at the executed price is recorded with
+any overrun of the budget.
+
 Research only: costs, sizes and conversions are explicit scenario parameters, never confirmed
 broker values; an unknown cost blocks the entry instead of counting as zero. No order is ever
 sent and nothing here talks to a broker.
@@ -67,6 +81,17 @@ class ResearchConfig:
     documented_closures: frozenset[date] = frozenset()  # trading days with a cited closure source
 
 
+@dataclass(frozen=True)
+class EquityPoint:
+    utc: datetime
+    balance: Decimal  # EUR, realized
+    unrealized: Decimal  # EUR, liquidation value of the open position (0 if flat)
+
+    @property
+    def equity(self) -> Decimal:
+        return self.balance + self.unrealized
+
+
 @dataclass
 class Trade:
     side: Side
@@ -75,7 +100,9 @@ class Trade:
     entry_utc: datetime
     entry_price: Decimal
     stop: Decimal  # technical stop, never moved
-    estimate: LossEstimate
+    estimate: LossEstimate  # at the sizing quote, before the simulated sending
+    risk_budget: Decimal  # EUR, equity estimated at D x risk fraction
+    risk_at_execution: Decimal  # EUR, size x loss per contract recomputed at the executed price
     exit_utc: datetime | None = None
     exit_price: Decimal | None = None  # execution price only; costs are booked separately
     exit_reason: str | None = None
@@ -91,6 +118,11 @@ class Trade:
     def indeterminate(self) -> bool:
         return bool(self.unobservable_crossings)
 
+    @property
+    def risk_overrun(self) -> Decimal:
+        """EUR above the budget at the executed price; kept, never used to drop the trade."""
+        return max(Decimal(0), self.risk_at_execution - self.risk_budget)
+
 
 @dataclass(frozen=True)
 class JournalEntry:
@@ -105,9 +137,29 @@ class BacktestResult:
     params: S1Params
     trades: list[Trade]
     journal: list[JournalEntry]
-    equity: Decimal
-    equity_curve: list[tuple[datetime, Decimal]]
-    open_trade: Trade | None
+    equity_curve: list[EquityPoint]
+    open_trade: Trade | None  # still open at the end of the study, valued in the last point
+
+    @property
+    def balance(self) -> Decimal:
+        return self.equity_curve[-1].balance if self.equity_curve else self.config.initial_equity
+
+    @property
+    def unrealized(self) -> Decimal:
+        return self.equity_curve[-1].unrealized if self.equity_curve else Decimal(0)
+
+    @property
+    def equity(self) -> Decimal:
+        return self.balance + self.unrealized
+
+
+@dataclass(frozen=True)
+class _Settlement:
+    move_quote: Decimal  # USD, prices only
+    lines: dict[str, Decimal]  # USD, one line per cost
+    rate: Decimal  # USD -> EUR
+    fee: Decimal  # EUR
+    net_account: Decimal  # EUR
 
 
 @dataclass(frozen=True)
@@ -116,6 +168,7 @@ class _PendingEntry:
     signal: EntrySignal
     size: Decimal
     estimate: LossEstimate
+    budget: Decimal
 
 
 @dataclass(frozen=True)
@@ -143,10 +196,10 @@ class S1Backtest:
         if self.h4_available != sorted(self.h4_available) or self.d1_available != sorted(self.d1_available):
             raise ValueError("bougies attendues dans l'ordre chronologique")
         self.atr = WilderAtr(h4, params.atr_period)
-        self.equity = config.initial_equity
+        self.balance = config.initial_equity
         self.trades: list[Trade] = []
         self.journal: list[JournalEntry] = []
-        self.curve: list[tuple[datetime, Decimal]] = []
+        self.curve: list[EquityPoint] = []
         self.position: Trade | None = None
         self.pending_entry: _PendingEntry | None = None
         self.pending_exit: _PendingExit | None = None
@@ -158,12 +211,13 @@ class S1Backtest:
     def run(self) -> BacktestResult:
         for t, decision in enumerate(self.h4_available):
             self._advance(decision)
+            self._sample(decision, self.feed.last_before(decision))
             self._decide(t, decision)
         if len(self.feed):
-            self._advance(self.feed[len(self.feed) - 1].ts_utc)
-        return BacktestResult(
-            self.config, self.params, self.trades, self.journal, self.equity, self.curve, self.position
-        )
+            last = self.feed[len(self.feed) - 1]
+            self._advance(last.ts_utc)
+            self._sample(last.ts_utc, last)
+        return BacktestResult(self.config, self.params, self.trades, self.journal, self.curve, self.position)
 
     # ------------------------------------------------------------------ decisions
 
@@ -219,19 +273,8 @@ class S1Backtest:
         if last is None:
             self._log(decision, "ABSTENTION", "aucune cotation connue à l'instant de décision")
             return
-        quote = Quote(last.bid, last.ask, "TRADEABLE", last.ts_utc, delayed=False, source="historique")
         try:
-            estimate = estimate_loss_per_contract(
-                side=signal.side,
-                stop_price=signal.stop,
-                quote=quote,
-                spec=config.spec,
-                conversion=usd_to_eur_from_eurusd_bid(last.bid),
-                costs=config.costs,
-                holding=Holding.OVERNIGHT,
-                nights=config.estimated_nights,
-                guaranteed_stop=config.stop_type is StopType.GUARANTEED,
-            )
+            estimate = self._loss_estimate(signal.side, signal.stop, last)
         except ValueError as exc:
             self._log(decision, "ABSTENTION", f"estimation impossible : {exc}")
             return
@@ -240,14 +283,33 @@ class S1Backtest:
                 decision, "ABSTENTION", "coût inconnu, jamais compté zéro : " + ", ".join(estimate.excluded_unknown)
             )
             return
-        budget = self.equity * config.risk_fraction
+        equity = self.balance + self._unrealized(last)  # a reversal counts the position being exited
+        budget = equity * config.risk_fraction
         units = (budget / estimate.loss_account_per_contract / config.size_increment).to_integral_value(ROUND_FLOOR)
         size = units * config.size_increment
         if size < config.min_size:
             self._log(decision, "ABSTENTION", f"taille minimale {config.min_size} > taille permise {size}")
             return
-        self.pending_entry = _PendingEntry(decision, signal, size, estimate)
-        self._log(decision, "ENTRÉE_DÉCIDÉE", f"{signal.side.value} {size} contrat(s), stop {signal.stop}")
+        self.pending_entry = _PendingEntry(decision, signal, size, estimate, budget)
+        self._log(
+            decision,
+            "ENTRÉE_DÉCIDÉE",
+            f"{signal.side.value} {size} contrat(s), stop {signal.stop}, fonds propres estimés {equity:.2f} EUR",
+        )
+
+    def _loss_estimate(self, side: Side, stop: Decimal, tick: Tick) -> LossEstimate:
+        config = self.config
+        return estimate_loss_per_contract(
+            side=side,
+            stop_price=stop,
+            quote=Quote(tick.bid, tick.ask, "TRADEABLE", tick.ts_utc, delayed=False, source="historique"),
+            spec=config.spec,
+            conversion=usd_to_eur_from_eurusd_bid(tick.bid),
+            costs=config.costs,
+            holding=Holding.OVERNIGHT,
+            nights=config.estimated_nights,
+            guaranteed_stop=config.stop_type is StopType.GUARANTEED,
+        )
 
     # ------------------------------------------------------------------ tick replay
 
@@ -256,15 +318,14 @@ class S1Backtest:
             previous = self._last_tick
             if self.position is not None and previous is not None:
                 self._after_silence(previous, tick)
+            if self.position is not None:
+                self._observed_stop(tick)  # before a pending exit: the resting stop is reached first
             if self.pending_exit is not None and tick.ts_utc > self.pending_exit.decided_utc:
                 pending, self.pending_exit = self.pending_exit, None
                 if self.position is not None:
-                    price = tick.bid if self.position.side is Side.LONG else tick.ask
-                    self._close(tick, price, pending.reason, stop_triggered=False)
+                    self._close(tick, self._exit_side(tick), pending.reason, stop_triggered=False)
             if self.pending_entry is not None and tick.ts_utc > self.pending_entry.decided_utc:
                 self._open(tick)
-            if self.position is not None:
-                self._observed_stop(tick)
             self._last_tick = tick
             self._next_tick = index + 1
 
@@ -272,6 +333,9 @@ class S1Backtest:
         if self.position is None:
             raise RuntimeError("aucune position ouverte")
         return self.position
+
+    def _exit_side(self, tick: Tick) -> Decimal:
+        return tick.bid if self._open_position().side is Side.LONG else tick.ask
 
     def _crossed(self, tick: Tick) -> bool:
         position = self._open_position()
@@ -283,7 +347,7 @@ class S1Backtest:
         position = self._open_position()
         if self.config.stop_type is StopType.GUARANTEED:
             return position.stop
-        return tick.bid if position.side is Side.LONG else tick.ask
+        return self._exit_side(tick)
 
     def _observed_stop(self, tick: Tick) -> None:
         if self._crossed(tick):
@@ -332,15 +396,29 @@ class S1Backtest:
             self._log(tick.ts_utc, "ENTRÉE_ANNULÉE", "stop déjà franchi au premier prix après la décision")
             return
         price = tick.ask if long else tick.bid
+        risk = pending.size * self._loss_estimate(signal.side, signal.stop, tick).loss_account_per_contract
         self.position = Trade(
-            signal.side, pending.size, pending.decided_utc, tick.ts_utc, price, signal.stop, pending.estimate
+            signal.side,
+            pending.size,
+            pending.decided_utc,
+            tick.ts_utc,
+            price,
+            signal.stop,
+            pending.estimate,
+            pending.budget,
+            risk,
         )
         self._log(tick.ts_utc, "ENTRÉE", f"{signal.side.value} {pending.size} à {price}")
+        if self.position.risk_overrun:
+            self._log(
+                tick.ts_utc,
+                "DÉPASSEMENT_RISQUE",
+                f"risque au prix exécuté {risk:.2f} EUR > budget {pending.budget:.2f} EUR "
+                f"(+{self.position.risk_overrun:.2f}) : exécution conservée",
+            )
 
-    def _close(
-        self, tick: Tick, price: Decimal, reason: str, stop_triggered: bool, hypotheses: list[str] | None = None
-    ) -> None:
-        trade = self._open_position()
+    def _settle(self, trade: Trade, tick: Tick, price: Decimal, stop_triggered: bool) -> _Settlement:
+        """Result of closing `trade` at `price` on `tick`: prices, one line per cost, conversion."""
         config, spec = self.config, self.config.spec
         units = trade.size * spec.contract_size
         move = price - trade.entry_price if trade.side is Side.LONG else trade.entry_price - price
@@ -366,13 +444,32 @@ class S1Backtest:
         rate = Decimal(1) / (tick.bid if net_quote < 0 else tick.ask)
         gross_account = net_quote * rate
         fee = abs(gross_account) * value("conversion", costs.conversion_fee_rate.value)
+        return _Settlement(move * units, lines, rate, fee, gross_account - fee)
+
+    def _unrealized(self, tick: Tick | None) -> Decimal:
+        """Liquidation value of the open position at `tick` (exit-side price, no stop premium)."""
+        if self.position is None or tick is None:
+            return Decimal(0)
+        return self._settle(self.position, tick, self._exit_side(tick), stop_triggered=False).net_account
+
+    def _sample(self, utc: datetime, tick: Tick | None) -> None:
+        self.curve.append(EquityPoint(utc, self.balance, self._unrealized(tick)))
+
+    def _close(
+        self, tick: Tick, price: Decimal, reason: str, stop_triggered: bool, hypotheses: list[str] | None = None
+    ) -> None:
+        trade = self._open_position()
+        settled = self._settle(trade, tick, price, stop_triggered)
         trade.exit_utc, trade.exit_price, trade.exit_reason = tick.ts_utc, price, reason
-        trade.price_pnl_quote, trade.costs_quote = move * units, lines
-        trade.conversion_rate, trade.conversion_fee = rate, fee
-        trade.net_account = gross_account - fee
+        trade.price_pnl_quote, trade.costs_quote = settled.move_quote, settled.lines
+        trade.conversion_rate, trade.conversion_fee = settled.rate, settled.fee
+        trade.net_account = settled.net_account
         trade.hypotheses.extend(hypotheses or [])
-        self.equity += trade.net_account
-        self.curve.append((tick.ts_utc, self.equity))
+        self.balance += settled.net_account
         self.trades.append(trade)
         self.position = None
+        self._sample(tick.ts_utc, tick)
         self._log(tick.ts_utc, "SORTIE", f"{reason} à {price}, résultat net {trade.net_account:.2f} EUR")
+        if self.pending_exit is not None:
+            self.pending_exit = None
+            self._log(tick.ts_utc, "SORTIE_CANAL_ABANDONNÉE", f"{reason} avant l'exécution de la sortie au canal")
