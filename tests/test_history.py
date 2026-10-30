@@ -12,6 +12,7 @@ import stat
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal as D
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -223,35 +224,57 @@ def test_weekend_is_a_normal_closure_and_candle_beyond_coverage_is_flagged(tmp_p
     assert any(f.startswith("hors couverture") for f in monday["flags"])
 
 
-def _bars_with_next_tick_at(tmp_path: Path, name: str, next_tick: datetime) -> dict[Timeframe, list[dict]]:
-    """Thursday 2019-03-07: a tick every minute 06:00-08:59, then nothing until `next_tick`, then every minute."""
+def _bars_with_silence_after(
+    tmp_path: Path, name: str, data_start: datetime, close: datetime, next_tick: datetime, data_end: datetime
+) -> dict[Timeframe, list[dict[str, Any]]]:
+    """A tick every minute from `data_start` to one minute before `close`, then nothing until `next_tick`."""
     store = HistoryStore(tmp_path / name)
-    rows = every_minute(utc(2019, 3, 7, 6), utc(2019, 3, 7, 9)) + every_minute(next_tick, utc(2019, 3, 7, 11))
-    ingest(store, write_csv(tmp_path / f"{name}.csv", rows), utc(2019, 3, 7, 6), utc(2019, 3, 7, 11))
+    rows = every_minute(data_start, close) + every_minute(next_tick, data_end)
+    ingest(store, write_csv(tmp_path / f"{name}.csv", rows), data_start, data_end)
     bars, _ = build_bars(store, "dukascopy", "EURUSD")
     return bars
 
 
-def test_changing_only_future_ticks_never_changes_a_past_decision_time_status(tmp_path: Path) -> None:
-    """Last tick 08:59 before a 09:00 close: next tick at 09:01 or 09:19 is indistinguishable at 09:00."""
-    early = _bars_with_next_tick_at(tmp_path, "early", utc(2019, 3, 7, 9, 1))
-    late = _bars_with_next_tick_at(tmp_path, "late", utc(2019, 3, 7, 9, 19))
-    decision = utc(2019, 3, 7, 9)
+# Thursday 2019-03-07, US winter time: H4 boundaries at 22, 02, 06, 10, 14, 18 UTC; D1 at 22:00 UTC.
+CLOSE_CASES = [
+    # (closing timeframe, data start, close = decision instant, data end, candles ending <= close per timeframe)
+    (Timeframe.H1, utc(2019, 3, 7, 6), utc(2019, 3, 7, 9), utc(2019, 3, 7, 11), {"1h": 3, "4h": 0, "1d": 0}),
+    (Timeframe.H4, utc(2019, 3, 7, 2), utc(2019, 3, 7, 10), utc(2019, 3, 7, 12), {"1h": 8, "4h": 2, "1d": 0}),
+    (Timeframe.D1, utc(2019, 3, 6, 22), utc(2019, 3, 7, 22), utc(2019, 3, 8, 0), {"1h": 24, "4h": 6, "1d": 1}),
+]
+
+
+@pytest.mark.parametrize(
+    ("closing", "data_start", "close", "data_end", "expected"), CLOSE_CASES, ids=["H1-09h", "H4-10h", "D1-22h"]
+)
+def test_changing_only_future_ticks_never_changes_a_past_decision_time_status(
+    tmp_path: Path,
+    closing: Timeframe,
+    data_start: datetime,
+    close: datetime,
+    data_end: datetime,
+    expected: dict[str, int],
+) -> None:
+    """Last tick one minute before a real close: a next tick 1 or 19 minutes after it is unknowable at the close."""
+    early = _bars_with_silence_after(tmp_path, "early", data_start, close, close + timedelta(minutes=1), data_end)
+    late = _bars_with_silence_after(tmp_path, "late", data_start, close, close + timedelta(minutes=19), data_end)
     for timeframe in Timeframe:
-        past_early = [b for b in early[timeframe] if b["end_utc"] <= decision]
-        past_late = [b for b in late[timeframe] if b["end_utc"] <= decision]
+        past_early = [b for b in early[timeframe] if b["end_utc"] <= close]
+        past_late = [b for b in late[timeframe] if b["end_utc"] <= close]
+        assert len(past_early) == len(past_late) == expected[timeframe.value]  # never two empty lists by accident
         assert [(b["start_utc"], b["complete_at_close"], b["flags_at_close"]) for b in past_early] == [
             (b["start_utc"], b["complete_at_close"], b["flags_at_close"]) for b in past_late
         ]
-    h1_early = {b["start_utc"]: b for b in early[Timeframe.H1]}
-    h1_late = {b["start_utc"]: b for b in late[Timeframe.H1]}
-    eight = utc(2019, 3, 7, 8)
-    assert h1_early[eight]["complete_at_close"] and h1_late[eight]["complete_at_close"]
-    # The retrospective audit does see the 20-minute gap that started at 08:59: it is not a decision input.
-    assert h1_early[eight]["complete"] and not h1_late[eight]["complete"]
-    # Once 10:00 has passed, the gap is known: the 09:00 candle is unusable for a decision taken at 10:00.
-    nine = utc(2019, 3, 7, 9)
-    assert not h1_late[nine]["complete_at_close"] and h1_early[nine]["complete_at_close"]
+    # The candle of the closing timeframe that ends exactly at the decision instant exists in both runs.
+    (closed_early,) = [b for b in early[closing] if b["end_utc"] == close]
+    (closed_late,) = [b for b in late[closing] if b["end_utc"] == close]
+    assert closed_early["complete_at_close"] and closed_late["complete_at_close"]
+    # Only the retrospective audit sees the 20-minute gap that starts one minute before the close.
+    assert closed_early["complete"] and not closed_late["complete"]
+    # Once the following hour has closed, the gap is known: that H1 is unusable for a later decision.
+    next_early = next(b for b in early[Timeframe.H1] if b["start_utc"] == close)
+    next_late = next(b for b in late[Timeframe.H1] if b["start_utc"] == close)
+    assert next_early["complete_at_close"] and not next_late["complete_at_close"]
 
 
 def test_gap_cut_at_the_decision_instant_counts_only_its_known_part() -> None:
