@@ -4,8 +4,9 @@
 
 ### 🏃 En Cours
 - [ ] Moteur de backtest S1 hors ligne, sur une branche distincte dépendant de la PR #3 (ADR-006) :
-  - [ ] tests synthétiques d'abord : chronologie et disponibilité des bougies, exécution bid/ask au premier tick après la décision, stops (observé, non observable, garanti, normal), dimensionnement, propagation des scénarios H0 / H1 aux fonds propres et aux décisions suivantes
+  - [x] moteur et tests synthétiques (branche `feat/s1-backtest-engine`, 2026-10-30) : chronologie et disponibilité des bougies, exécution bid/ask au premier tick après la décision, stops (observé, non observable, garanti, normal), dimensionnement, propagation des scénarios H0 / H1 aux fonds propres et aux décisions suivantes
   - [ ] journal détaillé de chaque décision, abstention et transaction (motifs, données lues, scénarios)
+  - [ ] lecteur de ticks en flux (DuckDB) pour l'historique réel : impossible de charger 190 millions de ticks en mémoire
   - [ ] premier passage exploratoire sur 2015-2021 uniquement, coûts paramétrés explicitement, sans optimisation
 - [ ] Fermetures particulières (jours fériés, fermetures anticipées) : rechercher une source applicable, en parallèle ; sans preuve, le classement actuel est conservé (ASSUMP-016)
 

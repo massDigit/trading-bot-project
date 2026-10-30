@@ -11,14 +11,14 @@ Historique de recherche EUR/USD acquis (2015-2023, avec exceptions connues) ; r�
 de S1 validées comme référence expérimentale ; moteur de backtest S1 à écrire hors ligne.
 
 ## 🎯 Focus Courant
-Remise en ordre de la mémoire `.ai/` (décisions, suppositions classées par nature, tâches), puis
-moteur S1 sur une branche distincte dépendant de la PR #3. Aucune PR n'est fusionnée avant la fin
-des retours de la revue externe (décision de l'opérateur).
+Moteur S1 hors ligne (branche `feat/s1-backtest-engine`, partie de `main`) : tests synthétiques
+écrits ; lecteur de ticks en flux puis premier passage exploratoire sur 2015-2021.
 
-## 🧾 Synthèse vérifiée (branche `feat/eurusd-history-s1`, commit `7484426`, 2026-10-30)
-- 166 tests réussis ; `ruff check`, `ruff format --check` et `uv run mypy src tests` sans erreur.
-- PR #1 ouverte ; PR #2 brouillon (base PR #1) ; PR #3 brouillon (base PR #2), synchronisée avec
-  `b28daa6`. Aucune fusion.
+## 🧾 Synthèse vérifiée (2026-10-30)
+- PR #1, #2 et #3 fusionnées dans `main` par commits de fusion, sur autorisation de l'opérateur
+  (`main` = `aa69503`). Aucune PR ouverte. Désormais : une branche depuis `main`, une PR vers `main`.
+- Branche `feat/s1-backtest-engine` (depuis `aa69503`) : 188 tests réussis ; `ruff check`,
+  `ruff format --check` et `uv run mypy src tests` sans erreur.
 
 ## ✅ Réalisé
 - [x] Structure IA-Native (modèle de dépôt v0.2.0)

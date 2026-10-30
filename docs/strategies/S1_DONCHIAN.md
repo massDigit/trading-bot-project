@@ -1,6 +1,7 @@
 # Fiche exécutable S1 — Cassure de canal Donchian (swing)
 
-> Identifiant code : `SWING_01`. Statut : **spécifiée**, non implémentée, non évaluée. Les règles
+> Identifiant code : `SWING_01`. Statut : **implémentée hors ligne** (`src/forex_bot/backtest/`,
+> tests synthétiques), **non évaluée** : aucun passage sur données réelles. Les règles
 > de données et de chronologie (§5, §10) sont validées comme **référence expérimentale** (ADR-006,
 > 2026-10-30) : ni validation de performance ni autorisation de trading.
 > Les paramètres chiffrés sont une **configuration initiale expérimentale** approuvée (ASSUMP-020,
