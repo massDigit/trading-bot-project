@@ -13,6 +13,7 @@
 | **OBS** | Valeur observée sur notre compte CFD démo | Démo uniquement, à la date indiquée ; **jamais généralisée au réel** |
 | **CALC** | Calcul de cohérence entre valeurs observées | Ne prouve pas la signification d'un champ |
 | **HYP** | Hypothèse ou ambiguïté non levée | Le code bloque ce qui en dépend |
+| **DÉCL** | Communication officielle IG relayée par l'opérateur, non vérifiée par l'agent | Celle indiquée par l'opérateur |
 
 Une documentation officielle explicite et applicable à notre compte suffit à confirmer une
 convention ; une réponse du support n'est nécessaire que pour les ambiguïtés restantes.
@@ -131,6 +132,33 @@ documentée pour les stops normaux et garantis, sous réserve des exceptions des
 (voir plus haut), et rien n'est confirmé pour le réel tant que les documents acceptés par
 l'opérateur ne sont pas identifiés.
 
+## 5. Compte RÉEL cible : contraintes déclarées par l'opérateur
+
+Source : courriel officiel d'activation IG reçu par l'opérateur, rapporté le 2026-10-27. Le
+numéro de compte, les liens personnalisés et le courriel lui-même ne sont pas conservés dans le
+dépôt. Nature : **DÉCL** (communication officielle IG relayée par l'opérateur, non vérifiée par
+l'agent).
+
+| Contrainte | Contenu | Périmètre |
+|---|---|---|
+| Type de compte | CFD **à risque limité** | Compte réel de l'opérateur uniquement |
+| Stop garanti | **Obligatoire sur chaque position** | idem |
+| Modification du stop | Peut être rapproché ; **ne peut pas être éloigné** de son niveau initial | idem |
+| Prime | Facturée **si le stop garanti est déclenché** | idem (cohérent avec la clause 13(6) de S4/S5, sous réserve de l'entité) |
+
+Conséquences pour le projet :
+- Pour le compte réel cible, tout dimensionnement doit utiliser les contraintes du **stop
+  garanti** : distance minimale `minControlledRiskStopDistance` et prime `limitedRiskPremium`
+  **du compte réel**, aujourd'hui non observées (seules les valeurs démo sont connues : 5.0 et
+  1.2 POINTS, non transposables).
+- Un stop technique plus proche que le minimum garanti applicable entraîne le **refus du
+  signal** ; le stop n'est jamais élargi ni déplacé silencieusement.
+- La règle « rapprocher sans éloigner » est compatible avec le cahier des charges (§7 : pas
+  d'élargissement libre du stop).
+- **La démo n'est pas présumée soumise aux mêmes restrictions** : elle est observée séparément.
+- Le code actuel accepte `guaranteed_stop` comme paramètre ; le rendre obligatoire pour le
+  compte réel est une tâche distincte, non réalisée (aucun contrôle d'exécution modifié).
+
 ## Propositions de levée de blocage (non activées)
 
 Aucune n'est appliquée dans le code. Chacune exige une décision explicite de l'opérateur et une PR
@@ -146,3 +174,5 @@ dédiée.
 - Renforcer `verify_contract` pour contrôler aussi `instrument.unit = CONTRACTS`,
   `snapshot.scalingFactor` (10000) et `instrument.controlledRiskAllowed` (`true`) : contrôles
   supplémentaires uniquement, sans levée de blocage, dans une modification de code séparée.
+- Profil « compte réel à risque limité » : stop garanti obligatoire, interdiction d'éloigner le
+  stop, prime au déclenchement ; contraintes du compte réel à observer séparément de la démo.
