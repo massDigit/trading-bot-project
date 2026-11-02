@@ -97,6 +97,15 @@ place) : stop garanti exécuté au niveau `S` avec sa prime, stop normal au prix
 sortie au canal est abandonnée et journalisée (`SORTIE_CANAL_ABANDONNÉE`). Une entrée en attente
 (retournement) est ensuite exécutée sur ce même tick.
 
+**Événements exactement à `D` (ASSUMP-024, proposée).** La décision lit l'état strictement avant
+`D` (solde, positions, cotations). Un tick horodaté à `D` est rejoué après la décision : il peut
+déclencher le stop d'une position encore ouverte, jamais exécuter un ordre décidé à `D`.
+
+**Stop déjà franchi au premier tick d'exécution.** L'ordre au marché n'est pas annulé en silence.
+Par défaut, il est exécuté puis liquidé immédiatement au prix côté sortie du même tick, sans
+garantie ni prime. Variante explicite : rejet modélisé de l'ordre portant un stop attaché invalide
+(comportement IG non confirmé, ASSUMP-008).
+
 ## 6. Stop initial, sorties et invalidation
 
 **Stop technique (stratégie)**, fixé à la décision et jamais élargi :
@@ -147,7 +156,8 @@ Règles du contrôleur de risque existant (`risk.py`, `docs/BUSINESS_RULES.md`) 
 - *Fonds propres* = solde réalisé + résultat latent. Le latent est la valeur de liquidation de la
   position au dernier tick connu (prix côté sortie, coûts de sortie accumulés, conversion du côté
   défavorable, sans prime). Courbe échantillonnée à chaque décision H4 et à chaque sortie ; une
-  position ouverte en fin d'étude est valorisée, pas clôturée.
+  position ouverte en fin d'étude est valorisée, pas clôturée. Fin de l'étude : max(dernier instant
+  de décision, dernier tick) ; la courbe est chronologique.
 - *Taille* fixée à `D`, avant l'envoi simulé, sur les fonds propres estimés au dernier tick
   strictement antérieur à `D` ; lors d'un retournement, ils incluent le latent de la position en
   cours de sortie, dont la sortie n'est pas encore comptabilisée.

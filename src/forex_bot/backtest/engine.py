@@ -5,6 +5,13 @@ candles available at D(t) only, their state re-evaluated with the information av
 Exits are evaluated before entries. Orders execute at the first tick strictly after D(t): buy at
 the ask, sell at the bid. Between decisions every tick is replayed in order to monitor the stop.
 
+Instant D: the state used by the decision (balance, positions, quotes, equity point) is the state
+strictly before D. Ticks stamped exactly at D are replayed after the decision: they can trigger the
+stop of a position still open, never execute an order decided at D (execution needs ts > D).
+
+End of the study: end_utc = max(last decision instant, last tick). Every remaining tick is replayed,
+then a final point valued with the last tick is added at end_utc; the curve never goes back in time.
+
 Event priority on a tick: a silence before it, then the stop of the open position, then a pending
 channel exit, then a pending entry. A stop crossed on the tick that would have executed a channel
 exit takes precedence: the resting stop order is reached first, the channel exit is dropped.
@@ -17,7 +24,8 @@ H4 decision and every exit; a position still open at the end of the study is val
 Sizing is fixed before the simulated sending, at D, on the equity estimated with the last tick
 strictly before D (balance + unrealized, so a reversal accounts for the position being exited).
 The executed entry is never removed afterwards: its risk at the executed price is recorded with
-any overrun of the budget.
+any overrun of the budget. A market order whose first execution tick is already beyond its stop is
+handled by an explicit `StopAtExecution` rule, never by silently dropping the order.
 
 Research only: costs, sizes and conversions are explicit scenario parameters, never confirmed
 broker values; an unknown cost blocks the entry instead of counting as zero. No order is ever
@@ -56,6 +64,17 @@ class StopType(StrEnum):
     NORMAL = "NORMAL"  # executed at the first observable exit-side price at or after the trigger
 
 
+class StopAtExecution(StrEnum):
+    """Market entry whose execution tick is already beyond the technical stop."""
+
+    # Filled at the execution price, then liquidated at once at the exit-side price of the same
+    # tick: the stop could not be attached on the right side, so no guarantee and no premium.
+    FILL_THEN_LIQUIDATE = "EXÉCUTÉE_PUIS_LIQUIDÉE"
+    # Modelled acceptance condition: the order carrying an invalid attached stop is rejected at
+    # execution. Broker behaviour not confirmed (ASSUMP-008): a scenario, not a fact.
+    REJECT = "REJETÉE_STOP_INVALIDE"
+
+
 class ScenarioPolicy(StrEnum):
     """What an unobservable possible crossing is assumed to be, for ALL such events of a run."""
 
@@ -70,6 +89,7 @@ class ResearchConfig:
     costs: CostModel  # every applicable cost must be explicit (ASSUMED); UNKNOWN blocks entries
     stop_type: StopType = StopType.GUARANTEED
     policy: ScenarioPolicy = ScenarioPolicy.NONE_TRIGGERED
+    stop_at_execution: StopAtExecution = StopAtExecution.FILL_THEN_LIQUIDATE
     spec: ContractSpec = EURUSD_MINI  # contract size and pip from the demo observation (ASSUMP-005)
     min_size: Decimal = Decimal("0.1")  # scenario: unit and value unconfirmed (ASSUMP-005)
     size_increment: Decimal = Decimal("0.1")  # scenario: increment unknown (ASSUMP-004)
@@ -137,8 +157,9 @@ class BacktestResult:
     params: S1Params
     trades: list[Trade]
     journal: list[JournalEntry]
-    equity_curve: list[EquityPoint]
+    equity_curve: list[EquityPoint]  # chronological; last point at end_utc
     open_trade: Trade | None  # still open at the end of the study, valued in the last point
+    end_utc: datetime | None  # max(last decision instant, last tick); None without data
 
     @property
     def balance(self) -> Decimal:
@@ -210,14 +231,15 @@ class S1Backtest:
 
     def run(self) -> BacktestResult:
         for t, decision in enumerate(self.h4_available):
-            self._advance(decision)
-            self._sample(decision, self.feed.last_before(decision))
+            self._advance(decision, inclusive=False)  # state strictly before D
+            self._sample(decision, self._last_tick)
             self._decide(t, decision)
-        if len(self.feed):
-            last = self.feed[len(self.feed) - 1]
-            self._advance(last.ts_utc)
-            self._sample(last.ts_utc, last)
-        return BacktestResult(self.config, self.params, self.trades, self.journal, self.curve, self.position)
+        instants = self.h4_available[-1:] + ([self.feed[len(self.feed) - 1].ts_utc] if len(self.feed) else [])
+        end = max(instants, default=None)
+        if end is not None:
+            self._advance(end, inclusive=True)
+            self._sample(end, self._last_tick)
+        return BacktestResult(self.config, self.params, self.trades, self.journal, self.curve, self.position, end)
 
     # ------------------------------------------------------------------ decisions
 
@@ -313,8 +335,8 @@ class S1Backtest:
 
     # ------------------------------------------------------------------ tick replay
 
-    def _advance(self, until: datetime) -> None:
-        for index, tick in self.feed.ticks_between(self._next_tick, until):
+    def _advance(self, until: datetime, *, inclusive: bool) -> None:
+        for index, tick in self.feed.ticks_between(self._next_tick, until, inclusive=inclusive):
             previous = self._last_tick
             if self.position is not None and previous is not None:
                 self._after_silence(previous, tick)
@@ -392,11 +414,16 @@ class S1Backtest:
             return
         signal = pending.signal
         long = signal.side is Side.LONG
-        if (long and tick.bid <= signal.stop) or (not long and tick.ask >= signal.stop):
-            self._log(tick.ts_utc, "ENTRÉE_ANNULÉE", "stop déjà franchi au premier prix après la décision")
+        beyond = (long and tick.bid <= signal.stop) or (not long and tick.ask >= signal.stop)
+        if beyond and self.config.stop_at_execution is StopAtExecution.REJECT:
+            self._log(
+                tick.ts_utc,
+                "ENTRÉE_REJETÉE",
+                "condition d'acceptation modélisée : stop attaché du mauvais côté au prix d'exécution "
+                "(comportement courtier non confirmé, ASSUMP-008)",
+            )
             return
         price = tick.ask if long else tick.bid
-        risk = pending.size * self._loss_estimate(signal.side, signal.stop, tick).loss_account_per_contract
         self.position = Trade(
             signal.side,
             pending.size,
@@ -406,15 +433,35 @@ class S1Backtest:
             signal.stop,
             pending.estimate,
             pending.budget,
-            risk,
+            Decimal(0),
         )
-        self._log(tick.ts_utc, "ENTRÉE", f"{signal.side.value} {pending.size} à {price}")
-        if self.position.risk_overrun:
+        if beyond:
+            # Risk = immediate liquidation loss; the trade is booked, its overrun recorded.
+            loss = -self._settle(self.position, tick, self._exit_side(tick), stop_triggered=False).net_account
+            self.position.risk_at_execution = max(Decimal(0), loss)
+            self._log_entry(tick, pending)
+            self._close(
+                tick,
+                self._exit_side(tick),
+                "STOP_FRANCHI_À_L'EXÉCUTION",
+                stop_triggered=False,
+                hypotheses=["stop non attachable au prix d'exécution : liquidation immédiate, sans garantie"],
+            )
+            return
+        self.position.risk_at_execution = (
+            pending.size * self._loss_estimate(signal.side, signal.stop, tick).loss_account_per_contract
+        )
+        self._log_entry(tick, pending)
+
+    def _log_entry(self, tick: Tick, pending: _PendingEntry) -> None:
+        position = self._open_position()
+        self._log(tick.ts_utc, "ENTRÉE", f"{position.side.value} {position.size} à {position.entry_price}")
+        if position.risk_overrun:
             self._log(
                 tick.ts_utc,
                 "DÉPASSEMENT_RISQUE",
-                f"risque au prix exécuté {risk:.2f} EUR > budget {pending.budget:.2f} EUR "
-                f"(+{self.position.risk_overrun:.2f}) : exécution conservée",
+                f"risque au prix exécuté {position.risk_at_execution:.2f} EUR > budget {pending.budget:.2f} EUR "
+                f"(+{position.risk_overrun:.2f}) : exécution conservée",
             )
 
     def _settle(self, trade: Trade, tick: Tick, price: Decimal, stop_triggered: bool) -> _Settlement:

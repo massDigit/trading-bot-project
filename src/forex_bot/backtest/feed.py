@@ -54,10 +54,12 @@ class TickFeed:
         index = bisect.bisect_left(self._times, require_utc(instant))
         return self._ticks[index - 1] if index else None
 
-    def ticks_between(self, start_index: int, until: datetime) -> Iterator[tuple[int, Tick]]:
-        """Ticks from `start_index` with ts <= `until`."""
+    def ticks_between(self, start_index: int, until: datetime, *, inclusive: bool = True) -> Iterator[tuple[int, Tick]]:
+        """Ticks from `start_index` with ts <= `until` (ts < `until` if not `inclusive`)."""
         index = start_index
-        while index < len(self._ticks) and self._ticks[index].ts_utc <= until:
+        while index < len(self._ticks) and (
+            self._ticks[index].ts_utc <= until if inclusive else self._ticks[index].ts_utc < until
+        ):
             yield index, self._ticks[index]
             index += 1
 

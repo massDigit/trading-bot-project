@@ -21,6 +21,7 @@ from forex_bot.backtest.engine import (
     ResearchConfig,
     S1Backtest,
     ScenarioPolicy,
+    StopAtExecution,
     StopType,
 )
 from forex_bot.backtest.feed import Silence, Tick, TickFeed, classify_silence
@@ -296,12 +297,77 @@ def test_reversal_with_the_stop_crossed_on_the_execution_tick_still_opens_the_ne
     assert reopened.entry_utc == closed.exit_utc and reopened.entry_price == stop - D("0.0010")
 
 
+def test_a_tick_stamped_at_the_decision_instant_does_not_enter_the_decision_state() -> None:
+    probe, _ = run(ticks_for([FLAT] * 25 + [BREAKOUT, HOLD]), WIDE, **FINE)
+    stop = first_trade(probe).stop
+    after = (D("1.0990"), D("1.0988"), D("1.0985"), D("1.0988"))
+    base = ticks_for([FLAT] * 25 + [BREAKOUT] + [HOLD] * 10 + [REVERSE, after, after])
+    h4 = candles(base, Timeframe.H4)
+    decision = h4[36]["end_utc"]
+    crossing = [Tick(t.ts_utc, stop - D("0.0010"), stop - D("0.0009")) if t.ts_utc == decision else t for t in base]
+    results = []
+    for feed_ticks in (base, crossing):  # same candles and earlier ticks; only the tick at D differs
+        feed = TickFeed(feed_ticks)
+        results.append(
+            S1Backtest(
+                h4,
+                candles(base, Timeframe.D1),
+                feed,
+                feed.gaps(timedelta(minutes=10)),
+                WIDE,
+                ResearchConfig(costs=COSTS, min_size=FINE["min_size"], size_increment=FINE["size_increment"]),
+            ).run()
+        )
+    plain, crossed = results
+    (point_plain,) = [p for p in plain.equity_curve if p.utc == decision and p.unrealized]
+    (point_crossed,) = [p for p in crossed.equity_curve if p.utc == decision and p.unrealized]
+    assert point_plain == point_crossed  # state strictly before D in both runs
+    assert plain.open_trade is not None and crossed.open_trade is not None
+    assert plain.open_trade.risk_budget == crossed.open_trade.risk_budget == point_plain.equity * D("0.0025")
+    # The tick at D is replayed after the decision: it triggers the stop, never executes the orders.
+    (stopped,) = crossed.trades
+    assert stopped.exit_reason == "STOP_OBSERVÉ" and stopped.exit_utc == decision and stopped.exit_price == stop
+    assert kinds(crossed, "SORTIE_CANAL_ABANDONNÉE")
+    assert crossed.open_trade.entry_utc == decision + STEP
+    assert _chronological(crossed)
+
+
+# ---------------------------------------------------------------- stop already beyond at execution
+
+
+def _beyond_at_execution() -> list[Tick]:
+    probe, _ = run(ticks_for([FLAT] * 25 + [BREAKOUT, HOLD]))
+    stop = first_trade(probe).stop
+    crash = (D("1.1025"), stop - D("0.0010"), stop - D("0.0012"), stop - D("0.0011"))  # j=1: first tick after D
+    return ticks_for([FLAT] * 25 + [BREAKOUT, crash, crash])
+
+
+def test_market_entry_beyond_its_stop_is_filled_then_liquidated_by_default() -> None:
+    result, h4 = run(_beyond_at_execution())
+    (trade,) = result.trades
+    execution = h4[25]["end_utc"] + STEP
+    assert trade.entry_utc == trade.exit_utc == execution
+    assert trade.entry_price == trade.stop - D("0.0010") + SPREAD and trade.exit_price == trade.stop - D("0.0010")
+    assert trade.exit_reason == "STOP_FRANCHI_À_L'EXÉCUTION" and "prime de stop garanti" not in trade.costs_quote
+    assert trade.net_account is not None and trade.risk_at_execution == -trade.net_account > 0
+    assert kinds(result, "ENTRÉE") and not kinds(result, "ENTRÉE_ANNULÉE")
+
+
+def test_rejection_of_an_entry_beyond_its_stop_is_an_explicit_modelled_condition() -> None:
+    result, h4 = run(_beyond_at_execution(), stop_at_execution=StopAtExecution.REJECT)
+    decided = h4[25]["end_utc"]
+    booked = [*result.trades, *([result.open_trade] if result.open_trade else [])]
+    assert all(t.decided_utc != decided for t in booked)  # later signals are unaffected
+    (rejected,) = kinds(result, "ENTRÉE_REJETÉE")
+    assert "condition d'acceptation modélisée" in rejected and "ASSUMP-008" in rejected
+
+
 # ---------------------------------------------------------------- equity
 
 
 def test_open_position_is_valued_in_equity_without_being_closed() -> None:
     spec_ticks = ticks_for([FLAT] * 25 + [BREAKOUT, HOLD, HOLD])
-    result, _ = run(spec_ticks)
+    result, h4 = run(spec_ticks)
     trade, last = result.open_trade, spec_ticks[-1]
     assert trade is not None and not result.trades and trade.entry_price == D("1.1031")
     units = trade.size * D("10000")
@@ -310,7 +376,33 @@ def test_open_position_is_valued_in_equity_without_being_closed() -> None:
     assert result.balance == D("2000")
     assert result.unrealized == net_quote / last.bid < 0  # loss: converted at 1/bid
     assert result.equity == D("2000") + result.unrealized
-    assert result.equity_curve[-1].utc == last.ts_utc
+    # The last tick (12:55) precedes the last H4 close (13:00): the study ends at the close.
+    assert result.equity_curve[-1].utc == result.end_utc == h4[-1]["end_utc"]
+
+
+def _chronological(result: BacktestResult) -> bool:
+    times = [p.utc for p in result.equity_curve]
+    return times == sorted(times)
+
+
+def test_equity_curve_is_chronological_and_ends_at_the_end_of_the_study() -> None:
+    spec_ticks = ticks_for([FLAT] * 25 + [BREAKOUT, HOLD, HOLD])
+    after_last_close, h4 = run(spec_ticks)
+    assert _chronological(after_last_close) and spec_ticks[-1].ts_utc < h4[-1]["end_utc"]
+    assert after_last_close.end_utc == h4[-1]["end_utc"]
+    # Ticks after the last decision: the study ends at the last tick, which is replayed and valued.
+    feed = TickFeed(spec_ticks)
+    truncated = S1Backtest(
+        h4[:-1],
+        candles(spec_ticks, Timeframe.D1),
+        feed,
+        feed.gaps(timedelta(minutes=10)),
+        NO_FILTER,
+        ResearchConfig(costs=COSTS),
+    ).run()
+    assert _chronological(truncated) and truncated.end_utc == spec_ticks[-1].ts_utc
+    assert truncated.equity_curve[-1].utc == spec_ticks[-1].ts_utc
+    assert truncated.unrealized == after_last_close.unrealized  # both valued with the same last tick
 
 
 def test_equity_curve_shows_a_drawdown_the_balance_does_not() -> None:

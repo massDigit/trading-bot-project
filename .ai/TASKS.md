@@ -6,6 +6,7 @@
 - [ ] Moteur de backtest S1 hors ligne (ADR-006), PR #4 en brouillon vers `main` :
   - [x] moteur et tests synthétiques (branche `feat/s1-backtest-engine`, 2026-10-30) : chronologie et disponibilité des bougies, exécution bid/ask au premier tick après la décision, stops (observé, non observable, garanti, normal), dimensionnement, propagation des scénarios H0 / H1 aux fonds propres et aux décisions suivantes
   - [x] corrections de la revue d'Astra (2026-10-31) : stop prioritaire sur une sortie au canal en attente, solde / latent / fonds propres, risque au prix exécuté et dépassement conservé, taille d'un retournement ; 6 tests ciblés (ASSUMP-024 proposée)
+  - [x] seconde revue (2026-11-03) : fin d'étude et courbe chronologique, état strictement avant `D`, règle explicite pour une entrée au-delà du stop ; 4 tests ciblés
   - [ ] journal détaillé de chaque décision, abstention et transaction (motifs, données lues, scénarios)
   - [ ] lecteur de ticks en flux (DuckDB) pour l'historique réel : impossible de charger 190 millions de ticks en mémoire
   - [ ] premier passage exploratoire sur 2015-2021 uniquement, coûts paramétrés explicitement, sans optimisation

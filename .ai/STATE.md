@@ -2,7 +2,7 @@
 
 > **Ce fichier donne à l'agent une image précise de l'état du projet en temps réel à chaque début de session.**
 
-**Dernière mise à jour** : 2026-10-31
+**Dernière mise à jour** : 2026-11-03
 **Version de l'application** : 0.1.0 (`pyproject.toml`), non publiée
 **Modèle de dépôt IA** : v0.2.0 (`massDigit/ai-project-template`, structure `AGENTS.md`, `.ai/`, `.agents/`)
 
@@ -12,18 +12,20 @@ de S1 validées comme référence expérimentale ; moteur de backtest S1 hors li
 (tests synthétiques), **en revue** (PR #4) ; **aucun passage sur données historiques réalisé**.
 
 ## 🎯 Focus Courant
-Corrections de la revue d'Astra du moteur S1 (branche `feat/s1-backtest-engine`, PR #4 en
-brouillon vers `main`) : priorité du stop sur une sortie au canal, fonds propres valorisés,
-risque au prix exécuté, taille d'un retournement. Ensuite : lecteur de ticks en flux et petit
-passage exploratoire sur 2015-2021.
+Seconde revue d'Astra du moteur S1 (branche `feat/s1-backtest-engine`, PR #4 en brouillon vers
+`main`) : fin d'étude et courbe chronologique, convention unique à l'instant `D`, entrée dont le
+premier tick d'exécution dépasse le stop. Ensuite : lecteur de ticks en flux, puis petit passage
+exploratoire sur 2015-2021 une fois les corrections validées.
 
-## 🧾 Synthèse vérifiée (2026-10-31)
+## 🧾 Synthèse vérifiée (2026-11-03)
 - PR #1, #2 et #3 fusionnées dans `main` par commits de fusion, sur autorisation de l'opérateur
   (`main` = `aa69503`). Une branche depuis `main`, une PR vers `main`.
-- **PR #4 ouverte en brouillon** (`feat/s1-backtest-engine` → `main`) : moteur S1 au commit
-  `9b38118`, revu par Astra le 2026-10-31 (deux défauts reproduits, non couverts par les tests) ;
-  corrections et 6 tests ciblés dans l'arbre de travail, non commités. 194 tests réussis ;
+- **PR #4 ouverte en brouillon** (`feat/s1-backtest-engine` → `main`) : moteur S1 (`9b38118`),
+  première revue d'Astra corrigée (`b8506b0`) ; seconde revue (2026-11-03, trois incohérences
+  chronologiques) corrigée dans l'arbre de travail, non commitée. 198 tests réussis ;
   `ruff check`, `ruff format --check` et `uv run mypy src tests` sans erreur.
+- Branches fusionnées `feat/ig-demo-diagnostic`, `feat/eurusd-mini-risk-guard`,
+  `feat/eurusd-history-s1` supprimées (locales et GitHub) après vérification.
 
 ## ✅ Réalisé
 - [x] Structure IA-Native (modèle de dépôt v0.2.0)
@@ -50,7 +52,7 @@ passage exploratoire sur 2015-2021.
   Ces valeurs ne sont pas transposées au compte réel.
 
 ## 🔄 En Cours
-- [ ] Revue du moteur S1 (PR #4) : corrections d'Astra appliquées, conventions ASSUMP-024 proposées à l'opérateur
+- [ ] Revue du moteur S1 (PR #4) : corrections des deux revues d'Astra appliquées, conventions ASSUMP-024 proposées à l'opérateur
 - [ ] Lecteur de ticks en flux (DuckDB) puis premier passage exploratoire 2015-2021 : **non réalisé**
 - [ ] Recherche d'une source applicable pour les fermetures particulières (non bloquante)
 - [ ] Demande au support IG préparée, non envoyée (`docs/IG_SUPPORT_REQUEST.md`)
