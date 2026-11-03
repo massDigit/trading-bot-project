@@ -13,19 +13,23 @@ conventions validées (ADR-009), PR #4 en brouillon ; **un seul passage explorat
 (2019-04-01 → 2019-07-01), sans valeur de validation de performance.
 
 ## 🎯 Focus Courant
-Lecteur de ticks en flux et premier passage exploratoire de S1 (branche `feat/s1-backtest-engine`,
-PR #4 en brouillon vers `main`), à présenter à l'opérateur avant commit.
+Observation du passage exploratoire (branche `feat/s1-backtest-engine`, PR #4 en brouillon) :
+journal d'une ligne par décision H4 et drawdown observable au tick, à présenter avant commit.
 
 ## 🧾 Synthèse vérifiée (2026-11-03)
 - PR #1, #2 et #3 fusionnées dans `main` par commits de fusion, sur autorisation de l'opérateur
   (`main` = `aa69503`). Une branche depuis `main`, une PR vers `main`.
 - **PR #4 ouverte en brouillon** (`feat/s1-backtest-engine` → `main`) : moteur S1 (`9b38118`),
-  revues d'Astra corrigées (`b8506b0`, `cf4d0b4`) et confirmées par Astra ; ASSUMP-024 validée
-  (ADR-009). Lecteur en flux et passage exploratoire dans l'arbre de travail, non commités.
-  203 tests réussis ; `ruff check`, `ruff format --check` et `uv run mypy src tests` sans erreur.
+  revues d'Astra corrigées (`b8506b0`, `cf4d0b4`) ; ASSUMP-024 validée (ADR-009) ; lecteur en
+  flux et passage exploratoire (`8681a6e`) vérifiés par Astra. Journal des décisions et drawdown
+  au tick dans l'arbre de travail, non commités. 211 tests réussis ; `ruff check`, `ruff format --check` et `uv run mypy src tests` sans erreur.
 - Comparaison sur l'échantillon réel 2019-04-01 → 2019-07-01 (7 707 234 ticks, 91 fichiers) :
   lecteurs en mémoire et en flux **identiques** (transactions, coûts, journal, fonds propres, fin).
   Passage en flux seul : 164 s, pic de mémoire 195 Mio (Mac M4) ; avec la référence en mémoire : 3,7 Gio.
+- Passage H0 2019-04-01 → 2019-07-01 : aucun franchissement de stop non observable (aucun passage
+  H1 nécessaire pour cette fenêtre). Rejeu avec observation : 6 transactions identiques au JSON de
+  référence ; 390 lignes de décision pour 390 décisions H4 ; drawdown au tick 13,77 € (échantillonné
+  11,79 €) ; 190 s, pic 188 Mio.
 - Branches fusionnées `feat/ig-demo-diagnostic`, `feat/eurusd-mini-risk-guard`,
   `feat/eurusd-history-s1` supprimées (locales et GitHub) après vérification.
 
@@ -56,7 +60,7 @@ PR #4 en brouillon vers `main`), à présenter à l'opérateur avant commit.
   Ces valeurs ne sont pas transposées au compte réel.
 
 ## 🔄 En Cours
-- [ ] PR #4 en brouillon : lecteur en flux et premier passage exploratoire (2019-04-01 → 2019-07-01) à présenter, non commités
+- [ ] PR #4 en brouillon : journal des décisions H4 et drawdown au tick à présenter, non commités
 - [ ] Recherche d'une source applicable pour les fermetures particulières (non bloquante)
 - [ ] Demande au support IG préparée, non envoyée (`docs/IG_SUPPORT_REQUEST.md`)
 

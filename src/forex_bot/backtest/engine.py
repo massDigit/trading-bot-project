@@ -17,6 +17,11 @@ End of the study: the window end when given (ticks at or after it are never read
 max(last decision instant, last tick). Every remaining tick before it is replayed, then a final
 point valued with the last tick is added at the end; the curve never goes back in time.
 
+Observation only (never an input of a decision): one `DecisionRecord` per H4 decision of the study,
+holding what was known at D and what was decided, never a later price or result; and the maximum
+drawdown observable at the tick, from the initial equity, kept as running values (peak, deepest
+fall, their instants) without storing one value per tick. Falls during quote gaps stay unknown.
+
 Event priority on a tick: a silence before it, then the stop of the open position, then a pending
 channel exit, then a pending entry. A stop crossed on the tick that would have executed a channel
 exit takes precedence: the resting stop order is reached first, the channel exit is dropped.
@@ -42,7 +47,7 @@ sent and nothing here talks to a broker.
 from __future__ import annotations
 
 import bisect
-from collections.abc import Iterable, Iterator, Sequence
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from decimal import ROUND_FLOOR, Decimal
@@ -172,6 +177,56 @@ class Trade:
         return None if self.net_account is None else max(Decimal(0), -self.net_account)
 
 
+class PositionAction(StrEnum):
+    FLAT = "SANS_POSITION"
+    HELD = "POSITION_MAINTENUE"  # exit computed, no exit signal
+    HELD_EXIT_NOT_COMPUTABLE = "POSITION_MAINTENUE_SORTIE_NON_CALCULABLE"  # stop still in place
+    EXIT_DECIDED = "SORTIE_DÉCIDÉE"
+
+
+class EntryAction(StrEnum):
+    NOT_EVALUATED = "NON_ÉVALUÉE"  # a position stays open: one S1 position at a time
+    NO_SIGNAL = "AUCUN_SIGNAL"  # entry rules computed, no breakout
+    NOT_COMPUTABLE = "ÉVALUATION_IMPOSSIBLE"  # data rules refuse before a breakout can be tested
+    SIGNAL_REFUSED = "SIGNAL_REFUSÉ"  # breakout found, then refused (D1 filter, closed market, sizing)
+    ENTRY_DECIDED = "ENTRÉE_DÉCIDÉE"
+
+
+@dataclass
+class DecisionRecord:
+    """One H4 decision of the study: what was known at D and what was decided. No later outcome:
+    executions and results are linked afterwards through `decision_utc` (Trade.decided_utc)."""
+
+    decision_utc: datetime
+    known: dict[str, Any]
+    position_action: PositionAction
+    entry_action: EntryAction = EntryAction.NOT_EVALUATED
+    reasons: list[str] = field(default_factory=list)
+    signal: dict[str, Any] | None = None  # breakout found at D (side, stop, ATR, channel)
+    order: dict[str, Any] | None = None  # entry decided at D (size, budget, estimated stop loss)
+
+
+@dataclass
+class TickDrawdown:
+    """Maximum drawdown observable at the tick, from the initial equity (EUR)."""
+
+    peak_eur: Decimal  # highest equity seen
+    peak_utc: datetime | None
+    max_drawdown_eur: Decimal = Decimal(0)
+    drawdown_peak_utc: datetime | None = None  # peak preceding the deepest fall
+    trough_utc: datetime | None = None
+    trough_eur: Decimal | None = None
+    observed_ticks: int = 0
+
+    def observe(self, utc: datetime, equity: Decimal) -> None:
+        self.observed_ticks += 1
+        if equity > self.peak_eur:
+            self.peak_eur, self.peak_utc = equity, utc
+        elif self.peak_eur - equity > self.max_drawdown_eur:
+            self.max_drawdown_eur = self.peak_eur - equity
+            self.drawdown_peak_utc, self.trough_utc, self.trough_eur = self.peak_utc, utc, equity
+
+
 @dataclass(frozen=True)
 class JournalEntry:
     utc: datetime
@@ -188,6 +243,8 @@ class BacktestResult:
     equity_curve: list[EquityPoint]  # chronological; last point at end_utc
     open_trade: Trade | None  # still open at the end of the study, valued in the last point
     end_utc: datetime | None  # max(last decision instant, last tick); None without data
+    decisions: list[DecisionRecord] = field(default_factory=list)  # one per H4 decision of the study
+    tick_drawdown: TickDrawdown | None = None
 
     @property
     def balance(self) -> Decimal:
@@ -254,6 +311,9 @@ class S1Backtest:
         if self.h4_available != sorted(self.h4_available) or self.d1_available != sorted(self.d1_available):
             raise ValueError("bougies attendues dans l'ordre chronologique")
         self.atr = WilderAtr(h4, params.atr_period)
+        self._observed_atr = WilderAtr(h4, params.atr_period)  # separate cache: observing never alters decisions
+        self.decisions: list[DecisionRecord] = []
+        self.drawdown = TickDrawdown(config.initial_equity, start_utc)
         self.balance = config.initial_equity
         self.trades: list[Trade] = []
         self.journal: list[JournalEntry] = []
@@ -283,7 +343,17 @@ class S1Backtest:
             end = max(instants, default=None)
         if end is not None:
             self._sample(end, self._last_tick)
-        return BacktestResult(self.config, self.params, self.trades, self.journal, self.curve, self.position, end)
+        return BacktestResult(
+            self.config,
+            self.params,
+            self.trades,
+            self.journal,
+            self.curve,
+            self.position,
+            end,
+            self.decisions,
+            self.drawdown,
+        )
 
     def _in_window(self, moment: datetime) -> bool:
         return (self.start_utc is None or moment >= self.start_utc) and (self.end_utc is None or moment < self.end_utc)
@@ -310,56 +380,159 @@ class S1Backtest:
         def d1_state(i: int) -> BarState:
             return state(self.d1, d1_cache, i)
 
-        exiting = False
+        context = bisect.bisect_right(self.d1_available, decision) - 1
+        record = DecisionRecord(
+            decision,
+            self._known(t, decision, h4_state, d1_state, context if context >= 0 else None),
+            PositionAction.FLAT,
+        )
+        self.decisions.append(record)
+
         if self.position is not None:
             exit_now = evaluate_exit(t, self.position.side, self.h4, h4_state, self.params)
             if isinstance(exit_now, Refusal):
                 self._log(decision, "SORTIE_NON_CALCULABLE", exit_now.reason)
-            elif exit_now:
-                self.pending_exit = _PendingExit(decision, "SORTIE_CANAL")
-                self._log(decision, "SORTIE_DÉCIDÉE", "clôture bid au-delà du canal de sortie")
-                exiting = True
-            if not exiting:
+                record.position_action = PositionAction.HELD_EXIT_NOT_COMPUTABLE
+                record.reasons.append(exit_now.reason)
                 return  # one S1 position at a time: no new entry while one is open
+            if not exit_now:
+                record.position_action = PositionAction.HELD
+                return
+            self.pending_exit = _PendingExit(decision, "SORTIE_CANAL")
+            self._log(decision, "SORTIE_DÉCIDÉE", "clôture bid au-delà du canal de sortie")
+            record.position_action = PositionAction.EXIT_DECIDED
+            record.reasons.append("clôture bid au-delà du canal de sortie")
 
-        context = bisect.bisect_right(self.d1_available, decision) - 1
         result = evaluate_entry(
             t, self.h4, h4_state, self.atr, self.d1, context if context >= 0 else None, d1_state, self.params
         )
         if result is None:
+            record.entry_action = EntryAction.NO_SIGNAL
             return
         if isinstance(result, Refusal):
             self._log(decision, "ABSTENTION", result.reason)
+            record.entry_action = EntryAction.NOT_COMPUTABLE if result.side is None else EntryAction.SIGNAL_REFUSED
+            if result.side is not None:
+                record.signal = {"side": result.side.value}
+            record.reasons.append(result.reason)
             return
+        record.signal = {
+            "side": result.side.value,
+            "stop": result.stop,
+            "atr": result.atr,
+            "channel_high": result.channel_high,
+            "channel_low": result.channel_low,
+        }
         if market_state(decision) is not MarketState.OPEN:
-            self._log(decision, "SIGNAL_EXPIRÉ", f"{result.side.value} : marché fermé à l'instant de décision")
+            reason = f"{result.side.value} : marché fermé à l'instant de décision"
+            self._log(decision, "SIGNAL_EXPIRÉ", reason)
+            record.entry_action = EntryAction.SIGNAL_REFUSED
+            record.reasons.append(reason)
             return
-        self._size(decision, result)
+        self._size(decision, result, record)
 
-    def _size(self, decision: datetime, signal: EntrySignal) -> None:
+    def _known(
+        self,
+        t: int,
+        decision: datetime,
+        h4_state: Callable[[int], BarState],
+        d1_state: Callable[[int], BarState],
+        context: int | None,
+    ) -> dict[str, Any]:
+        """What the robot knew at D: candles available at D, their states, quote and account before D."""
+        bar, params = self.h4[t], self.params
+
+        def channel(
+            bars: Sequence[dict[str, Any]], state: Callable[[int], BarState], first: int, last: int
+        ) -> dict[str, Decimal] | None:
+            if first < 0 or any(not state(i).usable for i in range(first, last + 1)):
+                return None  # not computable with the data rules
+            window = bars[first : last + 1]
+            return {"high": max(b["bid_high"] for b in window), "low": min(b["bid_low"] for b in window)}
+
+        known: dict[str, Any] = {
+            "h4": {
+                "start_utc": bar["start_utc"],
+                "end_utc": bar["end_utc"],
+                "state": h4_state(t).value,
+                **{k: bar[k] for k in ("bid_open", "bid_high", "bid_low", "bid_close", "ask_close")},
+            },
+            "entry_channel": channel(self.h4, h4_state, t - params.entry_channel, t - 1),
+            "exit_channel": channel(self.h4, h4_state, t - params.exit_channel, t - 1),
+            "atr": self._observed_atr.at(t, h4_state),
+            "market": market_state(decision).value,
+            "d1_context": None,
+        }
+        if context is not None:
+            d1 = self.d1[context]
+            d1_channel = channel(self.d1, d1_state, context - params.d1_channel + 1, context)
+            known["d1_context"] = {
+                "start_utc": d1["start_utc"],
+                "state": d1_state(context).value,
+                "bid_close": d1["bid_close"],
+                "channel_middle": None if d1_channel is None else (d1_channel["high"] + d1_channel["low"]) / 2,
+            }
+        last = self._last_tick
+        known["quote"] = None if last is None else {"ts_utc": last.ts_utc, "bid": last.bid, "ask": last.ask}
+        point = self.curve[-1]  # sampled at D, strictly before D
+        known["account"] = {"balance": point.balance, "unrealized": point.unrealized, "equity": point.equity}
+        position = self.position
+        known["position"] = (
+            None
+            if position is None
+            else {
+                "side": position.side.value,
+                "size": position.size,
+                "entry_utc": position.entry_utc,
+                "entry_price": position.entry_price,
+                "stop": position.stop,
+                "unobservable_crossings": len(position.unobservable_crossings),
+            }
+        )
+        known["pending_orders"] = [
+            name
+            for name, pending in (("entrée", self.pending_entry), ("sortie", self.pending_exit))
+            if pending is not None
+        ]
+        return known
+
+    def _size(self, decision: datetime, signal: EntrySignal, record: DecisionRecord) -> None:
+        def refuse(reason: str) -> None:
+            self._log(decision, "ABSTENTION", reason)
+            record.entry_action = EntryAction.SIGNAL_REFUSED
+            record.reasons.append(reason)
+
         config = self.config
         last = self._last_tick  # last tick strictly before D: the replay stopped there
         if last is None:
-            self._log(decision, "ABSTENTION", "aucune cotation connue à l'instant de décision")
+            refuse("aucune cotation connue à l'instant de décision")
             return
         try:
             estimate = self._loss_estimate(signal.side, signal.stop, last)
         except ValueError as exc:
-            self._log(decision, "ABSTENTION", f"estimation impossible : {exc}")
+            refuse(f"estimation impossible : {exc}")
             return
         if estimate.excluded_unknown:
-            self._log(
-                decision, "ABSTENTION", "coût inconnu, jamais compté zéro : " + ", ".join(estimate.excluded_unknown)
-            )
+            refuse("coût inconnu, jamais compté zéro : " + ", ".join(estimate.excluded_unknown))
             return
         equity = self.balance + self._unrealized(last)  # a reversal counts the position being exited
         budget = equity * config.risk_fraction
         units = (budget / estimate.loss_account_per_contract / config.size_increment).to_integral_value(ROUND_FLOOR)
         size = units * config.size_increment
         if size < config.min_size:
-            self._log(decision, "ABSTENTION", f"taille minimale {config.min_size} > taille permise {size}")
+            refuse(f"taille minimale {config.min_size} > taille permise {size}")
             return
         self.pending_entry = _PendingEntry(decision, signal, size, estimate, budget)
+        record.entry_action = EntryAction.ENTRY_DECIDED
+        record.order = {
+            "side": signal.side.value,
+            "size": size,
+            "stop": signal.stop,
+            "equity_estimate": equity,
+            "budget": budget,
+            "estimated_stop_loss": size * estimate.loss_account_per_contract,
+            "sizing_quote_utc": last.ts_utc,
+        }
         self._log(
             decision,
             "ENTRÉE_DÉCIDÉE",
@@ -399,6 +572,7 @@ class S1Backtest:
             if self.pending_entry is not None and tick.ts_utc > self.pending_entry.decided_utc:
                 self._open(tick)
             self._last_tick = tick
+            self._observe(tick)
 
     def _peek(self) -> Tick | None:
         """Next tick of the window, read lazily; checks the chronological order."""
@@ -572,6 +746,10 @@ class S1Backtest:
         if self.position is None or tick is None:
             return Decimal(0)
         return self._settle(self.position, tick, self._exit_side(tick), stop_triggered=False).net_account
+
+    def _observe(self, tick: Tick) -> None:
+        """Equity after the events of `tick`, for the tick-level drawdown (nothing stored per tick)."""
+        self.drawdown.observe(tick.ts_utc, self.balance + self._unrealized(tick))
 
     def _sample(self, utc: datetime, tick: Tick | None) -> None:
         self.curve.append(EquityPoint(utc, self.balance, self._unrealized(tick)))

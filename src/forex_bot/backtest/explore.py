@@ -5,6 +5,9 @@
 Candles from --init-start only initialise the indicators; decisions and ticks are limited to
 [--start, --end). The window must lie in 2015-2021. S1 parameters are the fixed reference
 (ASSUMP-020); costs are the explicit research scenario below, never confirmed IG values.
+`--decisions-out` writes one JSON line per H4 decision of the study, with only what was known at
+the decision and what was decided; executions and later results go to `outcomes_after_decision`
+in the report, never into those lines. `--reference` compares the trades with an earlier report.
 `--compare` first runs the in-memory reference reader and checks that the streaming reader
 gives identical trades, costs, journal and equity (memory figures are then not representative).
 """
@@ -26,6 +29,9 @@ from typing import Any
 from forex_bot.backtest.data import load_bars, load_gaps, load_ticks, stream_ticks, tick_files
 from forex_bot.backtest.engine import (
     BacktestResult,
+    DecisionRecord,
+    EntryAction,
+    PositionAction,
     ResearchConfig,
     S1Backtest,
     ScenarioPolicy,
@@ -118,10 +124,70 @@ def summarize(result: BacktestResult) -> dict[str, Any]:
             "equity_eur": result.equity,
             "equity_min_eur": min((p.equity for p in curve), default=None),
             "max_drawdown_on_samples_eur": drawdown,
+            "tick_drawdown": asdict(result.tick_drawdown) if result.tick_drawdown else None,
+            "decisions": {
+                "count": len(result.decisions),
+                "by_action": dict(
+                    sorted(Counter(f"{r.position_action} / {r.entry_action}" for r in result.decisions).items())
+                ),
+            },
             "equity_points": len(curve),
             "end_utc": result.end_utc,
         }
     )
+
+
+def decision_line(record: DecisionRecord) -> dict[str, Any]:
+    """Decision-time information only (future model input): never an execution price or a result."""
+    return _json(
+        {
+            "decision_utc": record.decision_utc,
+            "known": record.known,
+            "position_action": record.position_action.value,
+            "entry_action": record.entry_action.value,
+            "reasons": record.reasons,
+            "signal": record.signal,
+            "order": record.order,
+        }
+    )
+
+
+def outcomes_after_decision(result: BacktestResult) -> list[dict[str, Any]]:
+    """Executions and results linked to the decision that caused them, kept apart from the decision lines."""
+    trades = [*result.trades, *([result.open_trade] if result.open_trade else [])]
+    by_entry_decision = {t.decided_utc: t for t in trades}
+    by_entry_time = {t.entry_utc: t for t in trades}
+    lines = []
+    for record in result.decisions:
+        line: dict[str, Any] = {"decision_utc": record.decision_utc}
+        if record.position_action is PositionAction.EXIT_DECIDED and record.known["position"]:
+            exited = by_entry_time[record.known["position"]["entry_utc"]]
+            line["exit"] = {"utc": exited.exit_utc, "price": exited.exit_price, "reason": exited.exit_reason}
+        if record.entry_action is EntryAction.ENTRY_DECIDED:
+            opened = by_entry_decision.get(record.decision_utc)
+            line["entry"] = (
+                None  # e.g. rejected at execution (see the journal)
+                if opened is None
+                else {
+                    "utc": opened.entry_utc,
+                    "price": opened.entry_price,
+                    "exposure": opened.exposure,
+                    "exposure_measure": opened.exposure_measure,
+                    "risk_overrun": opened.risk_overrun,
+                    "exit_utc": opened.exit_utc,
+                    "exit_reason": opened.exit_reason,
+                    "net_account": opened.net_account,
+                }
+            )
+        if len(line) > 1:
+            lines.append(_json(line))
+    return lines
+
+
+def compare_with_reference(summary: dict[str, Any], reference: dict[str, Any]) -> list[str]:
+    """Trades and their exact amounts must not change when only observation is added."""
+    keys = ("trades", "open_trade_at_end", "balance_eur", "journal_counts")
+    return [key for key in keys if summary.get(key) != reference["result"].get(key)]
 
 
 def _identical(a: BacktestResult, b: BacktestResult) -> list[str]:
@@ -157,6 +223,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--compare", action="store_true", help="vérifier d'abord l'égalité mémoire / flux")
     parser.add_argument("--out", type=Path, help="fichier JSON du résultat (hors Git, sous data/)")
+    parser.add_argument("--decisions-out", type=Path, help="journal JSONL des décisions H4 (hors Git, sous data/)")
+    parser.add_argument("--reference", type=Path, help="rapport JSON antérieur : transactions attendues identiques")
     args = parser.parse_args(argv)
     if not args.init_start <= args.start < args.end:
         parser.error("dates attendues : init-start <= start < end")
@@ -198,6 +266,15 @@ def main(argv: list[str] | None = None) -> int:
     run_began = time.perf_counter()
     result = run(counting(stream_ticks(files, args.start, args.end)))
     elapsed = time.perf_counter() - run_began
+    summary = summarize(result)
+    reference_differences: list[str] | None = None
+    if args.reference:
+        reference_differences = compare_with_reference(summary, json.loads(args.reference.read_text()))
+    if args.decisions_out:
+        args.decisions_out.parent.mkdir(parents=True, exist_ok=True)
+        with args.decisions_out.open("w") as out:
+            for record in result.decisions:
+                out.write(json.dumps(decision_line(record), ensure_ascii=False) + "\n")
     report = {
         "generated_at_utc": datetime.now(UTC).isoformat(),
         "notice": "passage exploratoire hors ligne : ni validation de performance ni autorisation de trading",
@@ -215,7 +292,10 @@ def main(argv: list[str] | None = None) -> int:
         },
         "inputs": {"h4": len(h4), "d1": len(d1), "gaps": len(gaps), "tick_files": len(files), "ticks": counted},
         "reader_comparison": comparison,
-        "result": summarize(result),
+        "result": summary,
+        "expected_decisions": sum(1 for b in h4 if args.start <= b["end_utc"] + config.latency < args.end),
+        "reference_differences": reference_differences,
+        "outcomes_after_decision": outcomes_after_decision(result),
         "streaming_run_seconds": round(elapsed, 1),
         "total_seconds": round(time.perf_counter() - began, 1),
         "peak_rss_mib": round(_peak_rss_mib(), 1),

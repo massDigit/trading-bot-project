@@ -7,6 +7,7 @@ the window.
 
 from __future__ import annotations
 
+import json
 from collections import defaultdict
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal as D
@@ -30,6 +31,7 @@ from test_backtest import (
 
 from forex_bot.backtest.data import load_ticks, require_development_window, stream_ticks, tick_files
 from forex_bot.backtest.engine import BacktestResult, ResearchConfig, S1Backtest
+from forex_bot.backtest.explore import decision_line, outcomes_after_decision
 from forex_bot.backtest.feed import Tick, TickFeed
 from forex_bot.history.calendar import Timeframe
 from forex_bot.history.store import TICK_SCHEMA
@@ -156,3 +158,18 @@ def test_out_of_order_ticks_stop_the_engine() -> None:
     swapped = [ticks[1], ticks[0], *ticks[2:]]
     with pytest.raises(ValueError, match="hors ordre"):
         _engine(iter(swapped), ticks, ticks[0].ts_utc, ticks[-1].ts_utc)
+
+
+def test_decision_lines_hold_no_later_result_and_outcomes_are_linked_apart() -> None:
+    after = (D("1.0990"), D("1.0988"), D("1.0985"), D("1.0988"))
+    ticks = ticks_for([FLAT] * 25 + [BREAKOUT] + [HOLD] * 10 + [REVERSE, after, after])
+    start, end = ticks[0].ts_utc, datetime(2019, 3, 19, 13, tzinfo=UTC)
+    result = _engine(TickFeed(ticks), ticks, start, end)
+    lines = [json.dumps(decision_line(r), ensure_ascii=False) for r in result.decisions]
+    assert len(lines) == len(result.decisions) > 0
+    for forbidden in ("net_account", "exit_price", "exit_utc", "exit_reason", "risk_overrun"):
+        assert all(forbidden not in line for line in lines)
+    outcomes = {o["decision_utc"]: o for o in outcomes_after_decision(result)}
+    reversal = next(r for r in result.decisions if r.order and r.order["side"] == "SHORT")
+    linked = outcomes[reversal.decision_utc.isoformat()]
+    assert linked["exit"]["reason"] == "SORTIE_CANAL" and linked["entry"]["utc"] == linked["exit"]["utc"]

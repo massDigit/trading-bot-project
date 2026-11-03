@@ -110,6 +110,7 @@ class EntrySignal:
 @dataclass(frozen=True)
 class Refusal:
     reason: str
+    side: Side | None = None  # breakout side when the refusal comes after a breakout (refused signal)
 
 
 def _channel(bars: Sequence[dict[str, Any]], first: int, last: int) -> tuple[Decimal, Decimal]:
@@ -146,19 +147,19 @@ def evaluate_entry(
         return None
     if params.use_d1_filter:
         if d1_context is None or d1_context + 1 < params.d1_channel:
-            return Refusal("historique D1 insuffisant")
+            return Refusal("historique D1 insuffisant", side)
         if not d1_state(d1_context).usable:
-            return Refusal(f"D1 de contexte {d1_state(d1_context).value}")
+            return Refusal(f"D1 de contexte {d1_state(d1_context).value}", side)
         first = d1_context - params.d1_channel + 1
         if any(not d1_state(i).usable for i in range(first, d1_context + 1)):
-            return Refusal("D1 non utilisable dans le canal de 55 jours (règle stricte)")
+            return Refusal("D1 non utilisable dans le canal de 55 jours (règle stricte)", side)
         d1_high, d1_low = _channel(d1, first, d1_context)
         middle = (d1_high + d1_low) / TWO
         context_close = d1[d1_context]["bid_close"]
         if side is Side.LONG and not context_close > middle:
-            return Refusal("cassure haussière contre le contexte D1")
+            return Refusal("cassure haussière contre le contexte D1", side)
         if side is Side.SHORT and not context_close < middle:
-            return Refusal("cassure baissière contre le contexte D1")
+            return Refusal("cassure baissière contre le contexte D1", side)
     distance = params.stop_atr_multiple * value
     stop = close - distance if side is Side.LONG else h4[t]["ask_close"] + distance
     return EntrySignal(side, stop, value, high, low)

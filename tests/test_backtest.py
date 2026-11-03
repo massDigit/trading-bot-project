@@ -18,6 +18,8 @@ import pytest
 from forex_bot.backtest.bar_state import BarState, GapIndex, bar_state
 from forex_bot.backtest.engine import (
     BacktestResult,
+    EntryAction,
+    PositionAction,
     ResearchConfig,
     S1Backtest,
     ScenarioPolicy,
@@ -590,3 +592,141 @@ def test_engine_never_imports_an_order_path() -> None:
     source = engine.__loader__.get_source(engine.__name__) or ""  # type: ignore[union-attr]
     for forbidden in ("ig_client", "submit", "/positions/otc", "dealReference", "IgClient"):
         assert forbidden not in source
+
+
+# ---------------------------------------------------------------- decision journal (observation)
+
+
+def _decisions(result: BacktestResult) -> dict[datetime, Any]:
+    return {r.decision_utc: r for r in result.decisions}
+
+
+def test_one_record_per_h4_decision_with_both_actions_on_a_reversal() -> None:
+    after = (D("1.0990"), D("1.0988"), D("1.0985"), D("1.0988"))
+    result, h4 = run(ticks_for([FLAT] * 25 + [BREAKOUT] + [HOLD] * 10 + [REVERSE, after, after]), WIDE, **FINE)
+    assert [r.decision_utc for r in result.decisions] == [b["end_utc"] for b in h4]  # one line per decision
+    records = _decisions(result)
+    first = records[h4[0]["end_utc"]]
+    assert first.position_action is PositionAction.FLAT and first.entry_action is EntryAction.NOT_COMPUTABLE
+    assert records[h4[24]["end_utc"]].entry_action is EntryAction.NO_SIGNAL
+    entry = records[h4[25]["end_utc"]]
+    assert entry.entry_action is EntryAction.ENTRY_DECIDED and entry.order is not None
+    assert entry.order["size"] == result.trades[0].size and entry.order["side"] == "LONG"
+    held = records[h4[30]["end_utc"]]
+    assert held.position_action is PositionAction.HELD and held.entry_action is EntryAction.NOT_EVALUATED
+    assert held.known["position"]["side"] == "LONG"
+    reversal = records[h4[36]["end_utc"]]
+    assert reversal.position_action is PositionAction.EXIT_DECIDED
+    assert reversal.entry_action is EntryAction.ENTRY_DECIDED and reversal.signal is not None
+    assert reversal.signal["side"] == "SHORT" and reversal.known["position"]["side"] == "LONG"
+
+
+def test_refused_signals_are_told_apart_from_the_absence_of_signal() -> None:
+    params = S1Params(use_d1_filter=True, d1_channel=1)
+    midday, h4 = run(ticks_for([FLAT] * 21 + [BREAKOUT, HOLD, HOLD]), params)
+    refused = _decisions(midday)[h4[21]["end_utc"]]
+    assert refused.entry_action is EntryAction.SIGNAL_REFUSED and refused.signal == {"side": "LONG"}
+    assert refused.reasons == ["cassure haussière contre le contexte D1"]
+    friday, h4 = run(ticks_for([FLAT] * 29 + [BREAKOUT] + [HOLD] * 3))
+    expired = _decisions(friday)[h4[29]["end_utc"]]
+    assert expired.entry_action is EntryAction.SIGNAL_REFUSED and "marché fermé" in expired.reasons[0]
+    assert expired.known["market"] != "OPEN"
+    small, h4 = run(ticks_for([FLAT] * 25 + [BREAKOUT, HOLD]), min_size=D("5"))
+    sized_out = _decisions(small)[h4[25]["end_utc"]]
+    assert sized_out.entry_action is EntryAction.SIGNAL_REFUSED and sized_out.reasons[0].startswith("taille minimale")
+
+
+def test_exit_not_computable_is_recorded_as_a_held_position() -> None:
+    spec_ticks = ticks_for([FLAT] * 25 + [BREAKOUT, HOLD, HOLD, HOLD])
+    feed = TickFeed(spec_ticks)
+    h4 = candles(spec_ticks, Timeframe.H4)
+    h4[27]["complete_at_close"], h4[27]["flags_at_close"] = False, ["1 tick(s) invalides exclus"]
+    result = S1Backtest(h4, [], feed, [], NO_FILTER, ResearchConfig(costs=COSTS)).run()
+    record = _decisions(result)[h4[27]["end_utc"]]
+    assert record.position_action is PositionAction.HELD_EXIT_NOT_COMPUTABLE
+    assert record.known["h4"]["state"] == "INTERRUPTION_INEXPLIQUÉE"
+
+
+def test_records_hold_only_what_was_known_at_the_decision() -> None:
+    base = ticks_for([FLAT] * 25 + [BREAKOUT, HOLD, HOLD, HOLD])
+    result, h4 = run(base)
+    for record in result.decisions:
+        assert record.known["h4"]["end_utc"] <= record.decision_utc
+        assert record.known["quote"] is None or record.known["quote"]["ts_utc"] < record.decision_utc
+    # Changing every tick after the breakout decision leaves the records up to it unchanged.
+    cut = h4[25]["end_utc"]
+    shifted = [t if t.ts_utc < cut else Tick(t.ts_utc, t.bid + D("0.0007"), t.ask + D("0.0007")) for t in base]
+    feed = TickFeed(shifted)
+    other = S1Backtest(
+        h4, candles(base, Timeframe.D1), feed, feed.gaps(timedelta(minutes=10)), NO_FILTER, ResearchConfig(costs=COSTS)
+    ).run()
+    upto = [r for r in result.decisions if r.decision_utc <= cut]
+    assert upto == [r for r in other.decisions if r.decision_utc <= cut]
+    assert upto[-1].entry_action is EntryAction.ENTRY_DECIDED
+
+
+def test_window_records_only_the_decisions_of_the_study() -> None:
+    ticks = ticks_for([FLAT] * 25 + [BREAKOUT, HOLD, HOLD])
+    feed = TickFeed(ticks)
+    h4 = candles(ticks, Timeframe.H4)
+    start, end = h4[10]["end_utc"], h4[20]["end_utc"]
+    result = S1Backtest(
+        h4, candles(ticks, Timeframe.D1), feed, feed.gaps(timedelta(minutes=10)), NO_FILTER,
+        ResearchConfig(costs=COSTS), start_utc=start, end_utc=end,
+    ).run()  # fmt: skip
+    assert [r.decision_utc for r in result.decisions] == [b["end_utc"] for b in h4[10:20]]
+
+
+# ---------------------------------------------------------------- tick-level drawdown (observation)
+
+
+class _EveryTick(S1Backtest):
+    """Reference for the test only: stores the equity of every tick."""
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.seen: list[tuple[datetime, D]] = []
+
+    def _observe(self, tick: Tick) -> None:
+        super()._observe(tick)
+        self.seen.append((tick.ts_utc, self.balance + self._unrealized(tick)))
+
+
+def _brute_force_drawdown(seen: list[tuple[datetime, D]]) -> tuple[D, datetime | None, datetime | None]:
+    peak, peak_at, worst, worst_peak_at, worst_at = D("2000"), None, D(0), None, None
+    for moment, equity in seen:
+        if equity > peak:
+            peak, peak_at = equity, moment
+        elif peak - equity > worst:
+            worst, worst_peak_at, worst_at = peak - equity, peak_at, moment
+    return worst, worst_peak_at, worst_at
+
+
+def test_tick_drawdown_matches_a_stored_reference_and_sees_more_than_the_samples() -> None:
+    dip = (D("1.1025"), D("1.1026"), D("1.1004"), D("1.1024"))  # deep low tick inside the candle, above the stop
+    up = (D("1.1024"), D("1.1060"), D("1.1023"), D("1.1055"))
+    down = (D("1.1055"), D("1.1056"), D("1.1030"), D("1.1032"))
+    ticks = ticks_for([FLAT] * 25 + [BREAKOUT, HOLD, dip, up, down, HOLD])
+    feed = TickFeed(ticks)
+    engine = _EveryTick(
+        candles(ticks, Timeframe.H4), candles(ticks, Timeframe.D1), feed, feed.gaps(timedelta(minutes=10)),
+        NO_FILTER, ResearchConfig(costs=COSTS),
+    )  # fmt: skip
+    result = engine.run()
+    drawdown = result.tick_drawdown
+    assert drawdown is not None and drawdown.observed_ticks == len(ticks) == len(engine.seen)
+    worst, peak_at, trough_at = _brute_force_drawdown(engine.seen)
+    assert (drawdown.max_drawdown_eur, drawdown.drawdown_peak_utc, drawdown.trough_utc) == (worst, peak_at, trough_at)
+    assert drawdown.peak_eur == max([D("2000"), *(e for _, e in engine.seen)])
+    sampled_peak, sampled = D("2000"), D(0)
+    for point in result.equity_curve:
+        sampled_peak = max(sampled_peak, point.equity)
+        sampled = max(sampled, sampled_peak - point.equity)
+    assert drawdown.max_drawdown_eur > sampled > 0  # the low tick of `dip` falls between two samples
+
+
+def test_tick_drawdown_without_trade_stays_at_zero_from_the_initial_equity() -> None:
+    result, _ = run(ticks_for([FLAT] * 10))
+    drawdown = result.tick_drawdown
+    assert drawdown is not None and drawdown.max_drawdown_eur == 0 and drawdown.peak_eur == D("2000")
+    assert drawdown.trough_utc is None

@@ -162,6 +162,12 @@ Règles du contrôleur de risque existant (`risk.py`, `docs/BUSINESS_RULES.md`) 
 - *Taille* fixée à `D`, avant l'envoi simulé, sur les fonds propres estimés au dernier tick
   strictement antérieur à `D` ; lors d'un retournement, ils incluent le latent de la position en
   cours de sortie, dont la sortie n'est pas encore comptabilisée.
+- *Observation* (jamais une entrée de décision) : une ligne par décision H4 de l'étude, avec ce
+  qui était connu à `D` (bougie, canaux, ATR, contexte D1, marché, cotation, compte, position) et
+  l'action décidée (position : sans position, maintenue, sortie non calculable, sortie décidée ;
+  entrée : non évaluée, aucun signal, évaluation impossible, signal refusé, entrée décidée).
+  Exécutions et résultats sont reliés à part. Drawdown maximal observable au tick depuis les
+  fonds propres initiaux ; les creux pendant les trous de cotation restent inconnus.
 - *Écart entre entrée estimée et exécutée* : la taille n'est pas recalculée après l'exécution et
   l'entrée n'est jamais supprimée au vu de son prix. La perte estimée au stop après exécution et
   le dépassement du budget sont enregistrés (`DÉPASSEMENT_RISQUE`) ; la perte simulée effectivement
