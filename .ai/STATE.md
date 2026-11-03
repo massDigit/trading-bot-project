@@ -14,10 +14,10 @@ validé comme moteur de recherche hors ligne et fusionné (PR #4, `d52f24f`) ; r
 (ADR-013) mesurées, sans valeur de validation de performance.
 
 ## 🎯 Focus Courant
-PR #5 fusionnée dans `main` (`d9d7089`, 2026-11-03) ; S1 à 0,25 % reste la référence de
-développement. Fiche S2 (`docs/strategies/S2_PULLBACK.md`) spécifiée, ASSUMP-025 approuvée pour la
-recherche hors ligne (ADR-015). Suite : étape 1 de S2 (implémentation et tests synthétiques) sur une
-branche distincte ; aucun passage historique.
+Fiche S2 (`docs/strategies/S2_PULLBACK.md`) approuvée pour la recherche hors ligne (ADR-015, PR #6
+fusionnée, `46439fb`). Étape 1 sur `feat/s2-pullback-engine` : moteur S2 hors ligne
+(`backtest/s2.py`, `backtest/s2_engine.py`, S1 inchangé) et 20 tests synthétiques ; 237 tests réussis,
+à présenter avant commit. Aucun passage historique, pas de rejeu 2019 (étape 2).
 
 ## 🧾 Synthèse vérifiée (2026-11-03)
 - PR #1 à #4 fusionnées dans `main` par commits de fusion, sur autorisation de l'opérateur
@@ -93,7 +93,7 @@ branche distincte ; aucun passage historique.
   Ces valeurs ne sont pas transposées au compte réel.
 
 ## 🔄 En Cours
-- [ ] S2 étape 1 : implémentation et tests synthétiques (ADR-015) ; aucun passage historique
+- [ ] S2 étape 1 : moteur et 20 tests synthétiques prêts, à présenter avant commit ; aucun passage historique
 - [ ] Recherche d'une source applicable pour les fermetures particulières (non bloquante)
 - [ ] Demande au support IG préparée, non envoyée (`docs/IG_SUPPORT_REQUEST.md`)
 

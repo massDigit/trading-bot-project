@@ -1,6 +1,8 @@
 # Fiche S2 — Reprise de tendance après repli (swing)
 
-> Identifiant code : `SWING_02`. Statut : **spécifiée** (cahier des charges §6.2, §6.6). Règles et
+> Identifiant code : `SWING_02`. Statut : **implémentée hors ligne** (`src/forex_bot/backtest/s2.py`,
+> `s2_engine.py`), **tests synthétiques uniquement** (`tests/test_s2.py`, étape 1) ; non évaluée
+> (cahier des charges §6.2, §6.6). Règles et
 > valeurs numériques **approuvées pour la recherche hors ligne** (ASSUMP-025, ADR-015, 2026-11-03),
 > au commit `a10a779` complété des décisions du §11. Ni validation de performance ni autorisation
 > de trading. Valeurs choisies a priori, jamais optimisées ; aucune donnée 2022-2025.
