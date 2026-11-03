@@ -14,13 +14,10 @@ validé comme moteur de recherche hors ligne et fusionné (PR #4, `d52f24f`) ; r
 (ADR-013) mesurées, sans valeur de validation de performance.
 
 ## 🎯 Focus Courant
-Référence S1 seule sur la période de développement 2015-2021 (branche
-`feat/s1-reference-2015-2021`, PR #5 en brouillon, depuis `main` = `d52f24f`) : référence commitée
-(`7414378`) ; granularité 0,01 contrat (`3477689`), conclusion retenue par l'opérateur après revue
-d'Astra ; risque 1 % (`docs/experiments/S1_RISK_1PCT_001.md`) terminé et clos (ADR-014) : S1 à
-0,25 % reste la référence de développement. Sorties de passage retirées de l'historique de la
-branche ; fusion de la PR #5 par l'agent autorisée par l'opérateur. Suite : protocole S2 (aucun
-backtest).
+PR #5 fusionnée dans `main` (`d9d7089`, 2026-11-03) par l'agent sur autorisation de l'opérateur,
+après retrait des sorties de passage de l'historique de la branche (ADR-014) ; S1 à 0,25 % reste la
+référence de développement. Protocole S2 (`docs/strategies/S2_PULLBACK.md`, ASSUMP-025) sur la
+branche `docs/s2-pullback-protocol` : proposé, à approuver ; aucun backtest.
 
 ## 🧾 Synthèse vérifiée (2026-11-03)
 - PR #1 à #4 fusionnées dans `main` par commits de fusion, sur autorisation de l'opérateur
