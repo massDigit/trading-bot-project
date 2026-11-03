@@ -8,10 +8,12 @@
 
 **Libellés.** Dans cette fiche, **H1, H4 et D1 désignent toujours des unités de temps** (bougies
 d'une heure, de quatre heures, d'un jour). Les deux scénarios de stop non observable du moteur
-(appelés H0 et H1 dans les rapports S1) sont nommés ici **scénario A** et **scénario B** (§7).
+(appelés H0 et H1 dans les rapports S1) sont nommés ici **scénario A** et **scénario B** ; s'y ajoute
+un **scénario C** propre à S2 (§7).
 
-**Points demandés par l'opérateur le 2026-11-03** : chronologie du signal → §4 et §5 ; définition et
-durée de la configuration → §3 et §4 ; exécution et risque → §6 et §7 ; lecture des résultats → §9.
+**Points demandés par l'opérateur le 2026-11-03** : chronologie du signal → §4.4 et §5 ; définition et
+durée de la configuration → §3, §4.2 et §4.3 ; vente → §4.5 ; comparaison H4 → §4.6 ; exécution et
+risque → §6 et §7 ; lecture des résultats → §9.
 
 ## 1. Hypothèse de marché et références
 
@@ -75,7 +77,11 @@ cette décision** : elles sont rendues disponibles dans l'ordre H1, H4, D1, puis
 pivots sont mis à jour, puis la sortie est évaluée, puis l'entrée (S1 §5). Un pivot confirmé par
 une bougie qui se termine à cet instant est donc connu de la décision.
 
-## 4. Configuration et entrée (achat ; la vente est symétrique)
+## 4. Configuration et entrée
+
+Les règles sont écrites pour un achat (§4.1 à §4.4) ; la vente est donnée au §4.5. Toutes les
+comparaisons de structure utilisent la série bid ; stop et cible sont comparés au côté de sortie
+(§6.4).
 
 ### 4.1 Tendance D1
 
@@ -89,45 +95,103 @@ dernier creux confirmé. Vérifiée à l'identification `I` **et** à la décisi
   la H4 `E + 3`).
 - **`K`** : le sommet H4 confirmé le plus récent, antérieur à `E` et strictement inférieur à `E`
   (ancienne résistance que la jambe vers `E` a franchie). Sans `K` : pas de configuration.
-- **Zone admissible** : `[K − z × A ; K + z × A]`, avec `z = 0,5`. Sa **borne basse** est le
-  niveau d'invalidation.
-- La configuration n'est créée que si la tendance D1 est haussière à `I`, si `A` est disponible et
-  si aucune H4 clôturée entre la fin de `E` et `I` n'a de `bid_close` sous la borne basse.
+- **Zone admissible** : `[K − z × A ; K + z × A]`, avec `z = 0,5`. **Borne basse** `K − z × A`,
+  **borne haute** `K + z × A`.
+- La configuration n'est créée que si la tendance D1 est haussière à `I`, si `A` est disponible, si
+  les bougies de la période de repli déjà écoulée sont utilisables (§4.3) et si aucune H4 clôturée
+  entre la fin de `E` et `I` n'a de `bid_close` sous la borne basse.
 
 ### 4.3 Vie de la configuration
 
-- **Contact** : une bougie H1 qui **commence à `I` ou après** et dont `bid_low ≤ K + z × A`. Un
-  contact antérieur à `I` ne compte pas.
-- **Creux du repli `PL`** : plus bas `bid_low` des H1 disponibles depuis la fin de la bougie `E`
-  (y compris avant `I`).
+- **Contact** : une bougie H1 qui **commence à `I` ou après** et dont l'intervalle recoupe la zone :
+  `bid_low ≤ borne haute` **et** `bid_high ≥ borne basse`. Une bougie entièrement sous la zone (par
+  exemple de 1,1430 à 1,1435 pour une zone 1,1440-1,1460) ou entièrement au-dessus n'est pas un
+  contact. Un contact antérieur à `I` ne compte pas. Le contact est **mesuré sur les extrêmes de la
+  bougie** : il ne prouve pas qu'une cotation a eu lieu dans la zone (le prix a pu la traverser par
+  un saut).
+- **Creux du repli `PL`** : plus bas `bid_low` des H1 depuis la fin de la bougie `E` jusqu'à la
+  dernière H1 disponible (y compris avant `I`).
+- **Données manquantes pendant le repli** : si une H1 de cette période (de la fin de `E` à la
+  décision) est absente ou inutilisable, son vrai plus bas est inconnu et `PL` pourrait être trop
+  haut ; de même, si une H4 de cette période est absente ou inutilisable, l'invalidation ne peut pas
+  être vérifiée. Dans les deux cas, la configuration est **abandonnée** avec un motif explicite
+  (`DONNÉES_REPLI_INCOMPLÈTES`). Une absence de données ne resserre jamais le stop et ne prolonge
+  jamais le délai. (H1 et H4 prévues pendant la fermeture hebdomadaire : aucune n'est attendue.)
 - **Invalidation (repli trop profond)** : la première H4 dont la **clôture bid est strictement
   sous la borne basse `K − z × A`** (et non sous `K`) abandonne la configuration.
 - **Reprise sans entrée** : si une H1 atteint `bid_high > E` avant l'entrée, la configuration est
   abandonnée.
 - **Nouveau sommet H4** confirmé avant l'entrée : s'il est **supérieur à `E`**, il remplace la
   configuration (nouvel `E`, nouveau `K`, nouvel `I`, nouvel `A`, compteurs remis à zéro) ; s'il est
-  inférieur ou égal à `E`, c'est un sommet de la correction : il est ignoré par la configuration.
-- **Durée maximale (`T_max = 30` H4)** : le compteur part de la **première H4 qui suit la bougie
-  `E`**. La configuration expire à la disponibilité de la 30e H4 : une entrée décidée à cet instant
-  est encore permise, aucune après. Les trois H4 de confirmation font partie des 30 (il en reste
-  27 après `I`). Le week-end ne compte pas : seules les H4 cotées sont comptées.
+  inférieur ou égal à `E`, c'est un sommet de la correction : il ne change pas la configuration.
+- **Durée maximale (`T_max = 30` H4)** : le compteur part de la **première H4 prévue après la
+  bougie `E`** ; il compte les H4 du calendrier de cotation, qu'elles soient complètes ou non (une
+  bougie manquante ne prolonge pas le délai ; elle abandonne d'ailleurs la configuration). La
+  configuration expire à la fin de la 30e H4 : une entrée décidée à cet instant est encore
+  permise, aucune après. Les trois H4 de confirmation font partie des 30. Le week-end ne compte pas.
 - Une configuration ne produit **qu'une entrée**.
 
-### 4.4 Déclenchement et décision d'entrée (instant `D`)
+### 4.4 Séquence obligatoire et décision d'entrée (instant `D`)
 
-À la disponibilité de la bougie H1 `h` (instant `D` = fin de `h`), une entrée est décidée si :
-1. la configuration est vivante (ni abandonnée, ni expirée, ni remplacée) ;
-2. un contact a eu lieu, dans une H1 qui commence à `I` ou après et qui n'est pas postérieure à
-   `h` (la bougie `h` elle-même peut être la bougie de contact) ;
-3. **seuil** : le dernier sommet H1 confirmé dont la bougie commence après la fin de `E`, et dont
-   la date de confirmation est **antérieure ou égale au début de `h`**. Le seuil est donc connu
-   avant la bougie qui le franchit ;
-4. `bid_close[h]` est strictement supérieur au seuil ;
-5. la tendance D1 est toujours haussière à `D` ;
-6. le rapport de risque est suffisant (§6.1) ;
-7. aucune position S2 ouverte, marché ouvert à `D`, taille admise (§6.2).
+L'entrée exige la séquence suivante, dans cet ordre, chaque étape sur une bougie ultérieure à la
+précédente :
+
+1. **configuration identifiée** à `I` (§4.2) ;
+2. **contact** sur une H1 `c` qui commence à `I` ou après (§4.3) ;
+3. **pivot de reprise** : un sommet H1 (ordre 2) formé sur une bougie `r` **postérieure à `c`**
+   (`r` commence après la fin de `c`) ;
+4. **confirmation** de ce sommet, à la fin de la bougie `r + 2` : son niveau devient le **seuil** ;
+5. **clôture de cassure** : la première H1 `h` qui commence à la confirmation ou après et dont
+   `bid_close[h]` est strictement supérieur au seuil. Le seuil est donc connu au début de `h`.
+
+Précisions :
+- s'il existe plusieurs pivots de reprise confirmés, le seuil est le **dernier** confirmé avant le
+  début de `h` ;
+- **un seuil ne produit qu'une cassure** : la première clôture au-dessus. Une clôture qui reste
+  ensuite au-dessus d'un seuil déjà franchi n'est pas une nouvelle cassure. Si l'entrée est refusée
+  à cette cassure (cible trop proche, taille, marché fermé), le seuil est consommé ; seul un
+  nouveau pivot de reprise, formé et confirmé ensuite, peut produire une nouvelle cassure ;
+- un pivot formé avant le contact, ou sur la bougie de contact, ne sert jamais de seuil.
+
+À `D` = fin de `h`, l'entrée est décidée si, en plus :
+- la configuration est vivante (ni abandonnée, ni expirée, ni remplacée) ;
+- la tendance D1 est toujours haussière ;
+- le rapport de risque est suffisant (§6.1) ;
+- aucune position S2 n'est ouverte, le marché est ouvert à `D` et la taille est admise (§6.2).
 
 Exécution : ordre au marché au premier tick strictement postérieur à `D` (achat à l'ask).
+
+### 4.5 Vente (règle symétrique)
+
+| Élément | Achat | Vente |
+|---|---|---|
+| Tendance D1 | 2 sommets et 2 creux croissants, clôture au-dessus du dernier creux | 2 sommets et 2 creux décroissants, clôture sous le dernier sommet |
+| `E` | dernier sommet H4 confirmé | dernier **creux** H4 confirmé |
+| `K` | sommet H4 antérieur, strictement **inférieur** à `E` | creux H4 antérieur, strictement **supérieur** à `E` |
+| Zone | `K ± z × A` | `K ± z × A` |
+| Contact | intervalle bid de la H1 recoupant la zone | idem |
+| Extrême du repli | `PL` = plus bas `bid_low` depuis `E` | `PH` = plus haut **`ask_high`** depuis `E` (côté de sortie d'une vente) |
+| Invalidation | clôture H4 bid **sous la borne basse** | clôture H4 bid **au-dessus de la borne haute** |
+| Reprise sans entrée | une H1 avec `bid_high > E` | une H1 avec `bid_low < E` |
+| Remplacement | nouveau sommet H4 **supérieur** à `E` | nouveau creux H4 **inférieur** à `E` |
+| Pivot de reprise | **sommet** H1 formé après le contact | **creux** H1 formé après le contact |
+| Cassure | première `bid_close` **au-dessus** du seuil | première `bid_close` **sous** le seuil |
+| Stop | `PL − b × A` (niveau bid) | `PH + b × A` (niveau ask) |
+| Cible | `E`, atteinte quand le **bid** ≥ `E` | `E`, atteinte quand l'**ask** ≤ `E` |
+| Exécution d'entrée | ask du premier tick après `D` | bid du premier tick après `D` |
+
+Asymétrie assumée : `E` est mesuré sur la série bid, mais la cible d'une vente est comparée à
+l'ask (côté de sortie). Une vente doit donc dépasser `E` d'environ un spread pour atteindre sa
+cible ; c'est la même convention de côté de sortie que pour les stops de S1.
+
+### 4.6 Comparaison enregistrée : déclenchement H4
+
+Même configuration (`E`, `K`, `A`, zone, invalidation, délai, données), même stop et mêmes sorties.
+La séquence du §4.4 est appliquée aux bougies **H4** : contact sur une H4 commençant à `I` ou après ;
+pivot de reprise H4 (ordre 3) formé sur une H4 postérieure à la H4 de contact ; confirmation ;
+première clôture H4 au-delà du seuil, connu au début de cette H4. Un sommet H4 inférieur ou égal à
+`E` peut servir de seuil dans cette comparaison sans changer la configuration (§4.3). Les décisions
+de cette comparaison ont lieu à la disponibilité de chaque H4.
 
 ## 5. Exemple horodaté (achat, données inventées)
 
@@ -141,12 +205,12 @@ Exécution : ordre au marché au premier tick strictement postérieur à `D` (ac
 | mar. 15 janv. 02:00 | Sommet 1,1450 confirmé (fin de la 3e H4 suivante) | §3 |
 | mar. 15 janv. 14:00-18:00 | H4 de sommet `bid_high` 1,1530 | futur `E` |
 | mer. 16 janv. 06:00 | `E` confirmé par les H4 18-22, 22-02 et 02-06, toutes plus basses. **`I` = 06:00.** Tendance D1 haussière (D1 close le 15 janv. à 22:00). `A` = 0,0020. Zone `[1,1440 ; 1,1460]`, invalidation sous 1,1440. Compteur `T_max` : il part de la H4 18-22 du 15 janv. ; expiration à la fin de la 30e H4, mar. 22 janv. 18:00 | §4.2, §4.3 |
-| mer. 16 janv. 04:00-05:00 | Une H1 descend à 1,1459 : **ne compte pas** comme contact (avant `I`) ; `PL` = 1,1459 | §4.3 |
-| mer. 16 janv. 13:00-14:00 | H1 `bid_low` 1,1455 : **contact** (≥ `I`) ; `PL` = 1,1455 | §4.3 |
-| mer. 16 janv. 15:00-16:00 | H1 de sommet `bid_high` 1,1478 | futur seuil |
+| mer. 16 janv. 04:00-05:00 | Une H1 de 1,1459 à 1,1474 recoupe la zone mais **ne compte pas** comme contact (avant `I`) ; `PL` = 1,1459 | §4.3 |
+| mer. 16 janv. 13:00-14:00 | H1 de 1,1455 à 1,1471 : recoupe la zone, **contact** (bougie `c`, commence après `I`) ; `PL` = 1,1455 | §4.3 |
+| mer. 16 janv. 15:00-16:00 | H1 de sommet `bid_high` 1,1478, formé après la bougie de contact : **pivot de reprise** `r` | §4.4 |
 | mer. 16 janv. 18:00 | Sommet H1 1,1478 confirmé (fin de la H1 17-18). La H1 17-18 a un `bid_low` de 1,1451 : `PL` = 1,1451. La H4 14-18 clôture à 1,1463 ≥ 1,1440 : pas d'invalidation | §3, §4.3 |
-| mer. 16 janv. 18:00-19:00 | H1 clôture à 1,1476 : sous le seuil, pas d'entrée | §4.4 |
-| mer. 16 janv. 19:00-20:00 | H1 `h` clôture à 1,1481 > 1,1478. Seuil confirmé à 18:00 ≤ début de `h` (19:00) | §4.4 |
+| mer. 16 janv. 18:00-19:00 | H1 clôture à 1,1476 : sous le seuil, pas de cassure | §4.4 |
+| mer. 16 janv. 19:00-20:00 | H1 `h` clôture à 1,1481 > 1,1478 : **première** clôture au-dessus du seuil depuis sa confirmation (18:00), connu au début de `h` (19:00). Toutes les H1 et H4 depuis la fin de `E` sont utilisables | §4.3, §4.4 |
 | mer. 16 janv. 20:00:00 | **Décision `D`.** Dernier tick avant `D` : bid 1,1481, ask 1,1482. Stop = `PL − 0,25 × A` = 1,1451 − 0,0005 = **1,1446**. Cible `E` = **1,1530**. Rapport net 1,19 ≥ 1 (§6.1). Taille 0,1 contrat | §4.4, §6 |
 | mer. 16 janv. 20:00:00,180 | Premier tick strictement après `D` : bid 1,1483, ask 1,1484. **Exécution à 1,1484** (ask observé), pas à 1,1482 (estimation) | §6.3 |
 | à partir de l'entrée | Compteur `H_max` : il part de la première H4 qui commence après l'exécution (20:00-22:00 n'en est pas une ; la première est 22:00-02:00). Sortie temporelle à la disponibilité de la 60e | §6.4 |
@@ -195,27 +259,36 @@ Premier prix déjà au-delà d'une borne (achat) :
 - **bid ≤ stop** au premier tick : convention de la référence, « exécutée puis liquidée » sur ce
   même tick, comptée (`STOP_DÉPASSÉ_À_L'EXÉCUTION`). Un passage de rejet à l'exécution n'est fait
   que si de tels cas existent (comme S1) ;
-- **bid ≥ cible** au premier tick : exécutée puis **sortie à la cible sur ce même tick**, au bid
-  observé, comptée (`CIBLE_ATTEINTE_À_L'EXÉCUTION`). L'entrée n'est pas annulée au vu de ce prix
-  futur (même principe qu'ADR-009). Le nombre de cas est rapporté.
+- **bid ≥ cible** au premier tick : exécutée à l'ask, puis **sortie sur ce même tick au bid**,
+  comptée (`CIBLE_ATTEINTE_À_L'EXÉCUTION`). L'entrée n'est pas annulée au vu de ce prix futur (même
+  principe qu'ADR-009). **« Cible atteinte » ne signifie pas « transaction gagnante »** : l'achat se
+  fait à l'ask et la revente au bid.
+
+Exemple (données inventées, cible `E` = 1,1530, taille 0,1 contrat) : premier tick après `D`, bid
+1,1531, ask 1,1532. Achat à 1,1532, revente à 1,1531 sur le même tick. Résultat de prix : −1 pip, soit
+−1,00 USD par contrat ; glissement 0,5 pip, soit −0,50 USD ; pas de nuit ni de prime. Total
+−1,50 USD par contrat, −0,15 USD pour 0,1 contrat, soit **−0,13 €** après conversion (taux 1/bid,
+frais de 0,5 %). La transaction sort « à la cible » et perd.
 
 ### 6.4 Sorties
 
 - **Stop** : stop garanti simulé à son niveau, prime comptée à part (S1 §6, §10.5). Jamais élargi
   ni rapproché du seul fait de l'entrée H1.
-- **Cible** : premier tick où le bid atteint `E` ou plus, exécuté à ce bid (un écart favorable est
-  conservé ; le comportement d'un ordre limite IG n'est pas confirmé, ASSUMP-008).
+- **Cible — convention de simulation** : sortie à la **première cotation exécutable observée** qui
+  atteint la cible, au prix de cette cotation : le bid pour clôturer un achat (bid ≥ `E`), l'ask
+  pour clôturer une vente (ask ≤ `E`). Un écart favorable observé est conservé. Ce n'est pas le
+  comportement confirmé d'un ordre limite IG (ASSUMP-008).
 - **Sortie temporelle (`H_max = 60` H4)** : le compteur part de la **première H4 qui commence après
   le tick d'exécution** ; à la disponibilité de la 60e, si la position est encore ouverte, sortie au
   marché au premier tick suivant. Environ 10 jours de cotation.
 - Pour un achat, stop et cible sont de part et d'autre du prix : un même tick ne peut pas franchir
   les deux. La priorité « stop, puis cible, puis sortie temporelle » ne départage que la sortie
-  temporelle et un tick qui franchit une borne au même instant.
+  temporelle et une borne franchie au même instant ; elle ne sert pas à reconstituer un trou (§7).
 
 ## 7. Trous de cotation : franchissements non observables
 
 Pendant une **interruption inexpliquée** (S1 §10.5), le parcours du prix est inconnu. Avec deux
-bornes, plusieurs cas sont possibles ; aucune règle de priorité ne reconstitue l'ordre réel.
+bornes, aucune règle de priorité ne reconstitue l'ordre réel.
 
 | Cotation après le trou (achat) | Ce qui est certain | Ce qui reste inconnu |
 |---|---|---|
@@ -224,91 +297,115 @@ bornes, plusieurs cas sont possibles ; aucune règle de priorité ne reconstitue
 | au-delà du stop | le stop a été franchi | la cible a pu être atteinte avant |
 
 Chaque transaction concernée est marquée **INDÉTERMINÉE** et listée avec le trou, les cotations
-qui l'encadrent, leur distance au stop et à la cible, et le résultat de chaque issue possible
-(stop, cible, poursuite). Deux trajectoires complètes sont publiées, comme pour S1 :
-- **scénario A** (« aucun franchissement non observé », politique `NONE_TRIGGERED` du moteur) :
-  seule la première cotation après le trou compte ; au-delà d'une borne, cette borne est exécutée
-  (stop au niveau garanti, cible au bid observé) ; sinon la position continue ;
-- **scénario B** (« stop d'abord », politique `ALL_TRIGGERED`) : tout franchissement du stop
-  possible pendant le trou est supposé avoir eu lieu, avant la cible ; sortie au stop à la fin du
-  trou.
+qui l'encadrent, leur distance au stop et à la cible, et le résultat de chaque issue possible.
 
-Ni A ni B n'est présenté comme une borne du résultat réel (dépendance au chemin). Une trajectoire
-« cible d'abord » n'est pas publiée dans la base (arbitrage ouvert, §11).
+Trajectoires publiées, chacune **rejouée en entier** (une sortie pendant le trou libère la position
+plus tôt et peut changer les entrées suivantes, les fonds propres et les tailles) :
+
+| Scénario | Règle pour une transaction indéterminée | Prix de sortie |
+|---|---|---|
+| **A — observé seulement** (`NONE_TRIGGERED`) | seule la première cotation après le trou compte ; au-delà d'une borne, cette borne s'exécute ; sinon la position continue | stop : niveau garanti ; cible : cotation observée |
+| **B — stop d'abord** (`ALL_TRIGGERED`) | tout franchissement du stop possible pendant le trou a eu lieu, avant la cible | niveau du stop garanti, à la fin du trou |
+| **C — cible d'abord** (à implémenter) | toute atteinte de la cible possible pendant le trou a eu lieu, avant le stop | **niveau `E`**, à la fin du trou, sans amélioration de prix invisible |
+
+C est publié seulement si au moins une transaction indéterminée admet une atteinte possible de la
+cible et si C diffère alors de A. B est publié seulement si au moins une transaction admet un
+franchissement possible du stop. **Aucun de ces scénarios n'est une borne garantie** du résultat
+réel (dépendance au chemin).
+
+Le contact (§4.3) et les pivots sont mesurés sur les extrêmes des bougies : pendant un trou, ils ne
+prouvent pas qu'une cotation a eu lieu ; les règles de données (§4.3) abandonnent d'ailleurs une
+configuration dont le repli contient une bougie inutilisable.
 
 ## 8. Abstentions (première cause journalisée)
 
 Ordre d'évaluation à chaque décision H1 sans entrée :
-1. **données** : H1 de déclenchement non `OK` ; bougie d'un pivot utilisé non utilisable ; `A`
+1. **données** : H1 de cassure non `OK` ; bougie d'un pivot utilisé non utilisable ; `A`
    indisponible ; D1 de contexte non utilisable ;
 2. **position déjà ouverte** (non évaluée) ;
 3. **pas de tendance D1** ;
 4. **pas de configuration** : pas de `E` confirmé ou pas de `K` ;
-5. **configuration abandonnée** : repli trop profond, reprise sans entrée, expirée, déjà utilisée ;
+5. **configuration abandonnée**, avec son motif : données du repli incomplètes
+   (`DONNÉES_REPLI_INCOMPLÈTES`), repli trop profond, reprise sans entrée, expirée, déjà utilisée ;
 6. **pas de contact** depuis `I` ;
-7. **pas de déclenchement** : pas de seuil H1 connu, ou clôture sous le seuil ;
+7. **pas de cassure** : pas de pivot de reprise confirmé après le contact, clôture sous le seuil, ou
+   seuil déjà consommé ;
 8. **cible trop proche** (`R_min`) ;
 9. **marché fermé** à `D` (signal expiré, y compris la dernière H1 avant la fermeture hebdomadaire) ;
 10. **taille** : 0,1 contrat au-dessus du budget ; distance de stop sous le minimum du courtier.
 
 Le journal garde une ligne par décision H1 : ce qui était connu (pivots, `E`, `K`, `A`, `PL`,
-seuil, tendance, cotation, compte, position) et l'action, sans résultat ultérieur (comme S1).
+contact, seuil, tendance, cotation, compte, position) et l'action, sans résultat ultérieur (comme
+S1).
 
 ## 9. Protocole de test et lecture des résultats
 
-**Étape 0 — figer la fiche.** L'opérateur relit la fiche complète et approuve ASSUMP-025, ou la
-modifie, **avant** toute implémentation.
+**Périmètre de l'expérience.** Aucun filtre horaire nouveau, aucune variante de sortie. Cotations
+bid / ask observées, règles existantes sur les fermetures et coûts de recherche de la référence S1
+(`RESEARCH_COSTS`).
 
-**Étape 1 — implémentation hors ligne et tests synthétiques**, sans données réelles : pivots connus
-seulement à `i + p` et égalités sans pivot ; ordre H1 / H4 / D1 aux clôtures communes ; contact
-avant `I` ignoré ; seuil connu avant la bougie qui le franchit ; invalidation sous la borne basse ;
-remplacement par un sommet supérieur ; compteurs `T_max` et `H_max` ; exemple du §5 reproduit tel
-quel ; premier prix au-delà du stop ou de la cible ; trous de cotation (§7) ; une entrée par
-configuration ; conventions du moteur S1 conservées et S1 inchangée (référence rejouée sur
-avril-juin 2019, transactions identiques).
+**Étape 0 — figer la fiche.** L'opérateur relit la fiche et approuve ASSUMP-025, ou la modifie,
+**avant** toute implémentation.
 
-**Étape 2 — disponibilité des données** (aucun résultat de stratégie) : part des décisions H1
-2015-2021 bloquées par les règles de données, par cause (comme S1 §10.4).
+**Étape 1 — implémentation hors ligne et tests synthétiques uniquement** (aucune donnée réelle) :
+pivots connus seulement à `i + p` et égalités sans pivot ; ordre H1 / H4 / D1 aux clôtures communes ;
+contact par recoupement de la zone, contact avant `I` ignoré, bougie entièrement hors de la zone
+refusée ; séquence contact → pivot de reprise → confirmation → cassure, pivot antérieur au contact
+refusé, une cassure par seuil ; abandon pour données du repli incomplètes ; invalidation sous la
+borne basse ; remplacement par un sommet supérieur ; compteurs `T_max` et `H_max` ; règles de vente
+symétriques ; exemples des §5 et §6.3 reproduits tels quels ; premier prix au-delà du stop ou de la
+cible ; trous de cotation et scénarios A, B et C (§7) ; une entrée par configuration ; conventions du
+moteur S1 conservées.
 
-**Étape 3 — passages pré-enregistrés** sur 2015-2021, trajectoire continue, 2 000 €, coûts, risque
+**Étape 2 — rejeu historique de non-régression de S1**, distinct de l'étape 1 : la référence S1
+rejouée sur avril-juin 2019 doit donner des transactions identiques avec le moteur modifié.
+
+**Étape 3 — disponibilité des données** (aucun résultat de stratégie) : part des décisions H1
+2015-2021 bloquées par les règles de données, et des configurations abandonnées pour données du
+repli incomplètes, par cause (comme S1 §10.4).
+
+**Étape 4 — passages pré-enregistrés** sur 2015-2021, trajectoire continue, 2 000 €, coûts, risque
 (0,25 %) et taille (minimum et pas de 0,1) de la référence S1 :
-- **référence S2 : déclenchement H1** ; scénario A, puis scénario B seulement si une transaction
-  indéterminée apparaît ; rejet à l'exécution seulement si un stop est déjà dépassé au premier tick ;
-- **comparaison enregistrée à l'avance : déclenchement H4** (clôture H4 au-dessus du dernier sommet
-  H4 confirmé après `E`, connu avant cette H4), mêmes `E`, `K`, `A`, stop, cible et sorties. Elle
-  sert à mesurer l'apport de l'unité H1 (cahier §6.5) ; elle ne remplace pas la référence, même si
-  son résultat est meilleur ;
+- **référence S2 : déclenchement H1** ; scénario A, puis B et C selon les conditions du §7 ; rejet à
+  l'exécution seulement si un stop est déjà dépassé au premier tick ;
+- **comparaison secondaire enregistrée à l'avance : déclenchement H4** (§4.6). Elle mesure l'apport
+  de l'unité H1 (cahier §6.5) ; elle ne remplace pas la référence, même si son résultat est
+  meilleur ;
 - protocole et diff de lancement copiés avec les sorties ; journaux et rapports locaux, hors Git ;
   bilan agrégé dans `docs/experiments/`.
 
 **Rapporté pour chaque passage** : nombre de transactions ; net après coûts, avec brut et coûts ;
-résultats annuels ; drawdown maximal au tick en euros et en pourcentage du sommet ; dépassements
-du budget ; **net sans la meilleure transaction**, qui mesure la concentration des gains.
-Propre à S2 : configurations créées, abandonnées par motif, déclenchées, refusées (cible, taille,
-stop) ; sorties par motif (cible, stop, temps) ; entrées au-delà d'une borne au premier tick ;
-transactions indéterminées ; résultats en multiples du risque. Comparaison à la référence S1 :
-chevauchement des positions dans le temps et résultats annuels côte à côte.
+résultats annuels ; drawdown maximal au tick en euros et **maximum relatif au tick** ; dépassements
+du budget ; net sans la meilleure transaction. Propre à S2 : configurations créées, abandonnées par
+motif, déclenchées, refusées (cible, taille, stop) ; sorties par motif (cible, stop, temps) ; entrées
+au-delà d'une borne au premier tick ; transactions indéterminées et issues possibles ; résultats en
+multiples du risque. Comparaison à la référence S1 : chevauchement des positions dans le temps et
+résultats annuels côte à côte.
 
-**Critères de lecture proposés, à approuver avant tout lancement :**
-1. net après coûts positif dans chaque scénario publié (A et, s'il existe, B) ;
-2. net sans la meilleure transaction encore positif ;
-3. **drawdown au tick inférieur à 6 % du sommet**.
-   - *Valeur* : 6 %.
-   - *Justification* : c'est le seuil de « baisse depuis le sommet entraînant une revue » du cahier
-     des charges (§8). Une trajectoire qui le franchit aurait, en fonctionnement, arrêté les
-     nouvelles entrées pour revue ; elle ne peut pas être présentée comme admissible sans ce constat.
-     La référence S1 est à 2,25 %.
+**Lecture des résultats.**
+1. **Net après coûts** dans chaque scénario publié : critère de lecture proposé, net positif
+   attendu.
+2. **Net sans la meilleure transaction** : indicateur de **concentration des gains**, rapporté et
+   commenté, **pas un motif automatique de rejet**.
+3. **Seuil de revue de 6 % du drawdown relatif au tick.**
+   - *Origine* : seuil de « baisse depuis le sommet entraînant une revue » du cahier des charges (§8).
    - *Définition exacte* : fonds propres au tick `F(t)` = solde réalisé + valeur de liquidation de
      la position (ASSUMP-024) ; sommet `S(t)` = maximum de `F` depuis le début de la trajectoire
-     (2 000 € au départ) jusqu'à `t` inclus ; drawdown relatif = `max sur t de (S(t) − F(t)) / S(t)`,
-     sur toute la trajectoire continue 2015-2021, dans chaque scénario publié, pour le
-     déclenchement H1. Les creux pendant les trous de cotation restent inconnus.
-   - *Implémentation requise* : le moteur suit aujourd'hui l'épisode de plus forte baisse **en
-     euros** ; le maximum **en pourcentage** devra être suivi séparément.
+     (2 000 € au départ) jusqu'à `t` inclus ; drawdown relatif = **véritable maximum sur `t` de
+     `(S(t) − F(t)) / S(t)`**, sur toute la trajectoire continue 2015-2021, dans chaque scénario
+     publié. Les creux pendant les trous de cotation restent inconnus.
+   - *En backtest de recherche* : le **premier franchissement** éventuel (instant, sommet, fonds
+     propres, transaction ouverte) est rapporté et **la trajectoire continue** sans interruption.
+   - *En exploitation* (cahier §8, distinct de ce backtest) : le franchissement bloquerait les
+     nouvelles entrées jusqu'à une revue et une reprise explicites. Ce blocage n'est pas simulé ;
+     les seuils de perte journalière et hebdomadaire non plus.
+   - *Implémentation requise* : le moteur suit aujourd'hui l'épisode de plus forte baisse en euros ;
+     le maximum relatif devra être suivi séparément.
+   - *Comparaison avec S1* : les 2,25 % de la référence S1 sont son pire recul **en euros** rapporté
+     au sommet de cet épisode, pas son maximum relatif ; ils ne sont **pas directement
+     comparables** au chiffre de S2.
 
-Un résultat qui ne remplit pas ces critères est rapporté tel quel ; aucun paramètre n'est ajusté
-pour les remplir. Les seuils de perte journalière et hebdomadaire du cahier (§8) ne sont pas
-simulés, comme pour S1.
+Un résultat défavorable est rapporté tel quel ; aucun paramètre n'est ajusté.
 
 **Interdits.** Aucune donnée 2022-2025 ; aucun réglage après lecture des résultats ; aucun
 entraînement ; aucun ordre ; le sélecteur IA n'est pas concerné.
@@ -329,13 +426,15 @@ entraînement ; aucun ordre ; le sélecteur IA n'est pas concerné.
 
 ## 11. Arbitrages encore ouverts
 
-1. Trajectoire « cible d'abord » pour les transactions indéterminées : publiée en plus de A et B,
-   ou seulement listée transaction par transaction (proposition : listée seulement).
-2. Contact détecté sur H1 (proposé) plutôt que sur H4 : plus précoce, et cohérent avec le
-   déclenchement.
-3. Égalités sans pivot (proposé) : prudent, mais un double sommet exact ne crée aucun `E`.
-4. Exécution de la cible au bid observé (écart favorable conservé) plutôt qu'au niveau `E`.
-5. Critères de lecture du §9, dont le plafond de 6 %.
-6. Variantes non enregistrées pour l'instant : sortie sur perte de la tendance D1, filtre de
-   moyenne mobile (« si utile », cahier §6.2), continuation suiveuse au lieu de la cible.
-7. Décisions aux heures de spread élargi (21 h-24 h UTC) ; fermetures particulières (comme S1).
+Retenus par l'opérateur le 2026-11-03 (revue du commit `647d709`) : valeurs numériques proposées,
+contact sur H1, pivots stricts sans égalité, ATR figé à l'identification, déclenchement H4 comme
+comparaison secondaire, sortie à la cible à la première cotation exécutable, scénarios A, B et C,
+seuil de revue de 6 %. Hors de cette expérience : filtre horaire, sortie sur perte de la tendance
+D1, filtre de moyenne mobile, continuation suiveuse.
+
+Points de détail introduits par cette révision, à confirmer :
+1. Un seuil consommé par une cassure refusée (cible trop proche, taille, marché fermé) ne peut plus
+   servir ; seul un nouveau pivot de reprise le peut (§4.4).
+2. Vente : extrême du repli mesuré sur `ask_high` et cible comparée à l'ask (§4.5).
+3. Scénario C : sortie au niveau `E` à l'instant de fin du trou (§7).
+4. Le critère « net après coûts positif » reste une proposition de lecture (§9).
