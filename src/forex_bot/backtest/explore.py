@@ -8,6 +8,9 @@ Candles from --init-start only initialise the indicators; decisions and ticks ar
 `--decisions-out` writes one JSON line per H4 decision of the study, with only what was known at
 the decision and what was decided; executions and later results go to `outcomes_after_decision`
 in the report, never into those lines. `--reference` compares the trades with an earlier report.
+The report also gives a breakdown per calendar year (UTC): entries by entry date, closed trades
+by exit date, decisions and abstention reasons by decision date, and the maximum drawdown
+observable at the tick within each year, from the equity at the start of that year.
 `--compare` first runs the in-memory reference reader and checks that the streaming reader
 gives identical trades, costs, journal and equity (memory figures are then not representative).
 """
@@ -15,8 +18,11 @@ gives identical trades, costs, journal and equity (memory figures are then not r
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import resource
+import shutil
+import subprocess
 import sys
 import time
 from collections import Counter
@@ -37,6 +43,7 @@ from forex_bot.backtest.engine import (
     ScenarioPolicy,
     StopAtExecution,
     StopType,
+    TickDrawdown,
 )
 from forex_bot.backtest.feed import Tick
 from forex_bot.backtest.s1 import S1Params
@@ -124,6 +131,13 @@ def summarize(result: BacktestResult) -> dict[str, Any]:
             "equity_eur": result.equity,
             "equity_min_eur": min((p.equity for p in curve), default=None),
             "max_drawdown_on_samples_eur": drawdown,
+            "closed_trade_totals": _trade_totals(result.trades),
+            "entries": {
+                "buys": sum(1 for t in trades if t.side.value == "LONG"),
+                "sells": sum(1 for t in trades if t.side.value == "SHORT"),
+            },
+            "unobservable_crossings_h0": kinds["SCÉNARIO_H0"],
+            "first_fully_usable_decision": first_fully_usable_decision(result),
             "tick_drawdown": asdict(result.tick_drawdown) if result.tick_drawdown else None,
             "decisions": {
                 "count": len(result.decisions),
@@ -135,6 +149,114 @@ def summarize(result: BacktestResult) -> dict[str, Any]:
             "end_utc": result.end_utc,
         }
     )
+
+
+class YearlyBacktest(S1Backtest):
+    """The verified engine, plus a tick-level drawdown per calendar year (observation only)."""
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.yearly_drawdown: dict[int, TickDrawdown] = {}
+        self._equity_before = self.config.initial_equity
+
+    def _observe(self, tick: Tick) -> None:
+        equity = self.balance + self._unrealized(tick)  # computed once per tick for both measures
+        self.drawdown.observe(tick.ts_utc, equity)
+        year = tick.ts_utc.year
+        if year not in self.yearly_drawdown:  # each year starts from the equity at its first tick
+            self.yearly_drawdown[year] = TickDrawdown(self._equity_before, None)
+        self.yearly_drawdown[year].observe(tick.ts_utc, equity)
+        self._equity_before = equity
+
+
+def _gross_and_costs(trade: Any) -> tuple[Decimal, Decimal]:
+    """EUR price result and EUR costs of a closed trade (net = gross - costs)."""
+    gross = trade.price_pnl_quote * trade.conversion_rate
+    costs = sum(trade.costs_quote.values(), Decimal(0)) * trade.conversion_rate + trade.conversion_fee
+    return gross, costs
+
+
+def _trade_totals(trades: list[Any]) -> dict[str, Any]:
+    totals: dict[str, Any] = {
+        "closed": len(trades),
+        "winners": sum(1 for t in trades if t.net_account > 0),
+        "losers": sum(1 for t in trades if t.net_account <= 0),
+        "gross_eur": Decimal(0),
+        "costs_eur": Decimal(0),
+        "net_eur": Decimal(0),
+        "exit_reasons": dict(sorted(Counter(t.exit_reason for t in trades).items())),
+        "cost_lines_usd": {},
+        "conversion_fees_eur": sum((t.conversion_fee for t in trades), Decimal(0)),
+    }
+    for trade in trades:
+        gross, costs = _gross_and_costs(trade)
+        totals["gross_eur"] += gross
+        totals["costs_eur"] += costs
+        totals["net_eur"] += trade.net_account
+        for name, amount in trade.costs_quote.items():
+            totals["cost_lines_usd"][name] = totals["cost_lines_usd"].get(name, Decimal(0)) + amount
+    return totals
+
+
+def _abstentions(records: list[DecisionRecord]) -> dict[str, int]:
+    reasons: Counter[str] = Counter()
+    for record in records:
+        if record.entry_action in (EntryAction.SIGNAL_REFUSED, EntryAction.NOT_COMPUTABLE) or (
+            record.position_action is PositionAction.HELD_EXIT_NOT_COMPUTABLE
+        ):
+            reasons.update(f"{record.entry_action} : {reason}" for reason in record.reasons)
+    return dict(reasons.most_common())
+
+
+def first_fully_usable_decision(result: BacktestResult) -> datetime | None:
+    """First decision at which channels, ATR and the D1 context channel were all computable."""
+    for record in result.decisions:
+        known = record.known
+        d1 = known["d1_context"]
+        if (
+            known["entry_channel"]
+            and known["exit_channel"]
+            and known["atr"] is not None
+            and d1
+            and d1["channel_middle"] is not None
+        ):
+            return record.decision_utc
+    return None
+
+
+def by_year(result: BacktestResult, yearly_drawdown: dict[int, TickDrawdown]) -> dict[int, dict[str, Any]]:
+    trades = [*result.trades, *([result.open_trade] if result.open_trade else [])]
+    years = sorted({r.decision_utc.year for r in result.decisions} | set(yearly_drawdown))
+    report = {}
+    for year in years:
+        records = [r for r in result.decisions if r.decision_utc.year == year]
+        entered = [t for t in trades if t.entry_utc.year == year]
+        closed = [t for t in result.trades if t.exit_utc is not None and t.exit_utc.year == year]
+        points = [p for p in result.equity_curve if p.utc.year == year]
+        journal = Counter(e.kind for e in result.journal if e.utc.year == year)
+        report[year] = _json(
+            {
+                "decisions": len(records),
+                "by_action": dict(sorted(Counter(f"{r.position_action} / {r.entry_action}" for r in records).items())),
+                "breakouts": sum(
+                    1 for r in records if r.entry_action in (EntryAction.ENTRY_DECIDED, EntryAction.SIGNAL_REFUSED)
+                ),
+                "entries": {
+                    "buys": sum(1 for t in entered if t.side.value == "LONG"),
+                    "sells": sum(1 for t in entered if t.side.value == "SHORT"),
+                },
+                "closed_trades": _trade_totals(closed),
+                "risk_overruns": sum(1 for t in entered if t.risk_overrun),
+                "stop_beyond_at_execution": journal["STOP_DÉPASSÉ_À_L'EXÉCUTION"],
+                "unobservable_crossings_h0": journal["SCÉNARIO_H0"],
+                "abstention_reasons": _abstentions(records),
+                "tick_drawdown": asdict(yearly_drawdown[year]) if year in yearly_drawdown else None,
+                "year_end": None
+                if not points
+                else {"balance": points[-1].balance, "unrealized": points[-1].unrealized, "equity": points[-1].equity},
+            }
+        )
+    return report
 
 
 def decision_line(record: DecisionRecord) -> dict[str, Any]:
@@ -201,6 +323,28 @@ def _identical(a: BacktestResult, b: BacktestResult) -> list[str]:
     return [name for name, same in checks.items() if not same]
 
 
+def _provenance(argv: list[str] | None) -> dict[str, Any]:
+    """Commit and state of the working tree the run used, and its command line."""
+
+    executable = shutil.which("git")
+
+    def git(*command: str) -> str:
+        if executable is None:
+            return ""
+        # Fixed read-only git arguments, no user input.
+        done = subprocess.run([executable, *command], capture_output=True, text=True, check=False)  # noqa: S603
+        return done.stdout.strip()
+
+    diff = git("diff", "HEAD")
+    return {
+        "commit": git("rev-parse", "HEAD"),
+        "branch": git("rev-parse", "--abbrev-ref", "HEAD"),
+        "uncommitted_diff_sha256": hashlib.sha256(diff.encode()).hexdigest() if diff else None,
+        "uncommitted_files": git("diff", "HEAD", "--name-only").splitlines(),
+        "command": ["forex-backtest-explore", *(sys.argv[1:] if argv is None else argv)],
+    }
+
+
 def _peak_rss_mib() -> float:
     peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
     return peak / 2**20 if sys.platform == "darwin" else peak / 2**10  # bytes on macOS, KiB on Linux
@@ -242,8 +386,14 @@ def main(argv: list[str] | None = None) -> int:
     )
     params = S1Params()  # fixed reference (ASSUMP-020): N 20, M 10, ATR 14, k 2, D1 filter 55 days
 
+    yearly: dict[int, TickDrawdown] = {}
+
     def run(ticks: Any) -> BacktestResult:
-        return S1Backtest(h4, d1, ticks, gaps, params, config, start_utc=args.start, end_utc=args.end).run()
+        engine = YearlyBacktest(h4, d1, ticks, gaps, params, config, start_utc=args.start, end_utc=args.end)
+        result = engine.run()
+        yearly.clear()
+        yearly.update(engine.yearly_drawdown)
+        return result
 
     comparison: dict[str, Any] | None = None
     if args.compare:
@@ -277,7 +427,8 @@ def main(argv: list[str] | None = None) -> int:
                 out.write(json.dumps(decision_line(record), ensure_ascii=False) + "\n")
     report = {
         "generated_at_utc": datetime.now(UTC).isoformat(),
-        "notice": "passage exploratoire hors ligne : ni validation de performance ni autorisation de trading",
+        "notice": "passage hors ligne : ni validation de performance ni autorisation de trading",
+        "provenance": _provenance(argv),
         "window": {"init_start": args.init_start, "start": args.start, "end": args.end},
         "config": {
             "stop_type": config.stop_type.value,
@@ -295,6 +446,7 @@ def main(argv: list[str] | None = None) -> int:
         "result": summary,
         "expected_decisions": sum(1 for b in h4 if args.start <= b["end_utc"] + config.latency < args.end),
         "reference_differences": reference_differences,
+        "by_year": by_year(result, yearly),
         "outcomes_after_decision": outcomes_after_decision(result),
         "streaming_run_seconds": round(elapsed, 1),
         "total_seconds": round(time.perf_counter() - began, 1),
@@ -304,7 +456,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.out:
         args.out.parent.mkdir(parents=True, exist_ok=True)
         args.out.write_text(text)
-    print(text)
+        print(f"rapport écrit : {args.out} ({report['streaming_run_seconds']} s, {report['peak_rss_mib']} Mio)")
+    else:
+        print(text)
     return 0
 
 

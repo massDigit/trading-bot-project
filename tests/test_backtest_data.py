@@ -31,8 +31,17 @@ from test_backtest import (
 
 from forex_bot.backtest.data import load_ticks, require_development_window, stream_ticks, tick_files
 from forex_bot.backtest.engine import BacktestResult, ResearchConfig, S1Backtest
-from forex_bot.backtest.explore import decision_line, outcomes_after_decision
+from forex_bot.backtest.explore import (
+    YearlyBacktest,
+    _gross_and_costs,
+    _trade_totals,
+    by_year,
+    decision_line,
+    first_fully_usable_decision,
+    outcomes_after_decision,
+)
 from forex_bot.backtest.feed import Tick, TickFeed
+from forex_bot.backtest.s1 import S1Params
 from forex_bot.history.calendar import Timeframe
 from forex_bot.history.store import TICK_SCHEMA
 
@@ -173,3 +182,50 @@ def test_decision_lines_hold_no_later_result_and_outcomes_are_linked_apart() -> 
     reversal = next(r for r in result.decisions if r.order and r.order["side"] == "SHORT")
     linked = outcomes[reversal.decision_utc.isoformat()]
     assert linked["exit"]["reason"] == "SORTIE_CANAL" and linked["entry"]["utc"] == linked["exit"]["utc"]
+
+
+# ---------------------------------------------------------------- yearly report (observation)
+
+
+def _both(ticks: list[Tick], params: Any = WIDE, **config: Any) -> tuple[BacktestResult, YearlyBacktest]:
+    feed = TickFeed(ticks)
+    args = (candles(ticks, Timeframe.H4), candles(ticks, Timeframe.D1), feed, feed.gaps(timedelta(minutes=10)), params)
+    plain = S1Backtest(*args, ResearchConfig(costs=COSTS, **config)).run()
+    return plain, YearlyBacktest(*args, ResearchConfig(costs=COSTS, **config))
+
+
+def test_yearly_engine_changes_no_trade_and_matches_the_global_drawdown_within_one_year() -> None:
+    after = (D("1.0990"), D("1.0988"), D("1.0985"), D("1.0988"))
+    ticks = ticks_for([FLAT] * 25 + [BREAKOUT] + [HOLD] * 10 + [REVERSE, after, after])
+    plain, engine = _both(ticks, min_size=FINE["min_size"], size_increment=FINE["size_increment"])
+    yearly = engine.run()
+    assert (yearly.trades, yearly.open_trade, yearly.journal) == (plain.trades, plain.open_trade, plain.journal)
+    assert yearly.equity_curve == plain.equity_curve and yearly.decisions == plain.decisions
+    assert yearly.tick_drawdown == plain.tick_drawdown
+    assert list(engine.yearly_drawdown) == [2019] and engine.yearly_drawdown[2019] == plain.tick_drawdown
+    report = by_year(yearly, engine.yearly_drawdown)[2019]
+    totals = _trade_totals(yearly.trades)
+    assert report["closed_trades"]["net_eur"] == str(totals["net_eur"])
+    assert report["entries"] == {"buys": 1, "sells": 1} and report["decisions"] == len(yearly.decisions)
+    for trade in yearly.trades:
+        gross, costs = _gross_and_costs(trade)
+        assert gross - costs == trade.net_account
+
+
+def test_each_year_starts_its_drawdown_from_the_equity_at_its_first_tick() -> None:
+    start = datetime(2019, 12, 31, 12, tzinfo=UTC)
+    ticks = [Tick(start + i * timedelta(minutes=5), D("1.1200"), D("1.1201")) for i in range(24 * 12 * 2)]
+    feed = TickFeed(ticks)
+    engine = YearlyBacktest([], [], feed, [], S1Params(use_d1_filter=False), ResearchConfig(costs=COSTS))
+    engine.run()
+    assert sorted(engine.yearly_drawdown) == [2019, 2020]
+    first_2020 = next(t for t in ticks if t.ts_utc.year == 2020)
+    assert engine.yearly_drawdown[2020].observed_ticks == sum(1 for t in ticks if t.ts_utc >= first_2020.ts_utc)
+    assert all(d.max_drawdown_eur == 0 and d.peak_eur == D("2000") for d in engine.yearly_drawdown.values())
+
+
+def test_first_fully_usable_decision_waits_for_channels_atr_and_d1() -> None:
+    params = S1Params(use_d1_filter=True, d1_channel=1)
+    ticks = ticks_for([FLAT] * 25)
+    plain, _ = _both(ticks, params)
+    assert first_fully_usable_decision(plain) == candles(ticks, Timeframe.H4)[20]["end_utc"]

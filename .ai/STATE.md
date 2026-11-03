@@ -9,20 +9,21 @@
 ## 🚀 Phase Actuelle
 Historique de recherche EUR/USD acquis (2015-2023, avec exceptions connues) ; règles de données
 de S1 validées comme référence expérimentale ; moteur de backtest S1 hors ligne **implémenté**,
-conventions validées (ADR-009), PR #4 en brouillon ; **un seul passage exploratoire** réalisé
-(2019-04-01 → 2019-07-01), sans valeur de validation de performance.
+validé comme moteur de recherche hors ligne et fusionné (PR #4, `d52f24f`) ; référence S1 seule
+2015-2021 mesurée (ADR-010), sans valeur de validation de performance.
 
 ## 🎯 Focus Courant
-Observation du passage exploratoire (branche `feat/s1-backtest-engine`, PR #4 en brouillon) :
-journal d'une ligne par décision H4 et drawdown observable au tick, à présenter avant commit.
+Référence S1 seule sur la période de développement 2015-2021 (branche
+`feat/s1-reference-2015-2021`, depuis `main` = `d52f24f`) : protocole figé
+(`docs/experiments/S1_REFERENCE_2015_2021.md`), passage H0 terminé, à présenter avant commit.
 
 ## 🧾 Synthèse vérifiée (2026-11-03)
-- PR #1, #2 et #3 fusionnées dans `main` par commits de fusion, sur autorisation de l'opérateur
-  (`main` = `aa69503`). Une branche depuis `main`, une PR vers `main`.
-- **PR #4 ouverte en brouillon** (`feat/s1-backtest-engine` → `main`) : moteur S1 (`9b38118`),
+- PR #1 à #4 fusionnées dans `main` par commits de fusion, sur autorisation de l'opérateur
+  (`main` = `d52f24f`). Une branche depuis `main`, une PR vers `main`.
+- **PR #4 fusionnée** (`d52f24f`, 2026-11-03) après revue d'Astra sur `4c6f01a` : moteur S1 (`9b38118`),
   revues d'Astra corrigées (`b8506b0`, `cf4d0b4`) ; ASSUMP-024 validée (ADR-009) ; lecteur en
   flux et passage exploratoire (`8681a6e`) vérifiés par Astra. Journal des décisions et drawdown
-  au tick dans l'arbre de travail, non commités. 211 tests réussis ; `ruff check`, `ruff format --check` et `uv run mypy src tests` sans erreur.
+  au tick (`4c6f01a`). Branche `feat/s1-reference-2015-2021` : bilan annuel, non commité ; 214 tests réussis ; `ruff check`, `ruff format --check` et `uv run mypy src tests` sans erreur.
 - Comparaison sur l'échantillon réel 2019-04-01 → 2019-07-01 (7 707 234 ticks, 91 fichiers) :
   lecteurs en mémoire et en flux **identiques** (transactions, coûts, journal, fonds propres, fin).
   Passage en flux seul : 164 s, pic de mémoire 195 Mio (Mac M4) ; avec la référence en mémoire : 3,7 Gio.
@@ -30,6 +31,12 @@ journal d'une ligne par décision H4 et drawdown observable au tick, à présent
   H1 nécessaire pour cette fenêtre). Rejeu avec observation : 6 transactions identiques au JSON de
   référence ; 390 lignes de décision pour 390 décisions H4 ; drawdown au tick 13,77 € (échantillonné
   11,79 €) ; 190 s, pic 188 Mio.
+- Référence S1 seule 2015-2021, H0 (ADR-010) : 10 912 décisions H4, 53 transactions (19 achats,
+  34 ventes ; 18 gagnantes), brut +46,95 €, coûts 29,31 €, net +17,63 € ; fonds propres finaux
+  2 017,63 €, aucune position ouverte ; drawdown au tick 46,34 € (échantillonné 44,85 €) ; aucun
+  franchissement non observable, aucun stop dépassé à l'exécution, aucun dépassement du budget ;
+  215 signaux refusés car la taille minimale de 0,1 contrat dépasse le budget de risque.
+  Indicateurs tous calculables à partir du 2015-03-19 21:00 UTC. 4 848 s, pic 307 Mio.
 - Branches fusionnées `feat/ig-demo-diagnostic`, `feat/eurusd-mini-risk-guard`,
   `feat/eurusd-history-s1` supprimées (locales et GitHub) après vérification.
 
@@ -60,7 +67,7 @@ journal d'une ligne par décision H4 et drawdown observable au tick, à présent
   Ces valeurs ne sont pas transposées au compte réel.
 
 ## 🔄 En Cours
-- [ ] PR #4 en brouillon : journal des décisions H4 et drawdown au tick à présenter, non commités
+- [ ] Référence S1 seule 2015-2021 (ADR-010) : H0 terminé ; H1 et rejet non nécessaires (aucun cas) ; lot à présenter, non commité
 - [ ] Recherche d'une source applicable pour les fermetures particulières (non bloquante)
 - [ ] Demande au support IG préparée, non envoyée (`docs/IG_SUPPORT_REQUEST.md`)
 
@@ -82,6 +89,6 @@ journal d'une ligne par décision H4 et drawdown observable au tick, à présent
 - Authentification SSH vers GitHub intermittente le 2026-10-30 (clé enregistrée et chargée) ; une nouvelle tentative a suffi.
 
 ## 🏁 Prochaine Étape / Milestone
-1. Revue du passage exploratoire par l'opérateur et Astra ; suite (autres fenêtres 2015-2021, variantes) uniquement sur décision, coûts paramétrés (non confirmés chez IG), sans optimisation.
+1. Terminer et présenter la référence S1 2015-2021 ; ensuite seulement, sur décision, un modèle de sélection des signaux comparé à cette référence (aucun entraînement avant).
 2. En parallèle : fermetures particulières et confirmations IG.
 3. Garder 2022-2023 pour l'évaluation des variantes figées, puis 2024-2025 pour le test final (ADR-007).

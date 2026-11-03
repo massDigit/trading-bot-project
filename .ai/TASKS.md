@@ -10,7 +10,8 @@
   - [x] journal d'une ligne par décision H4 (connu à la décision / action, résultats reliés à part) et drawdown observable au tick (2026-11-03)
   - [x] lecteur de ticks en flux (un fichier journalier à la fois, Parquet) et référence en mémoire (DuckDB) ; équivalence vérifiée sur données synthétiques et sur l'échantillon réel (2026-11-03)
   - [x] premier passage exploratoire 2019-04-01 → 2019-07-01, dates fixées avant résultats, paramètres fixes, coûts de recherche explicites (ADR-009)
-  - [ ] revue du passage exploratoire ; suite uniquement sur décision de l'opérateur
+  - [x] revue du passage exploratoire et fusion de la PR #4 (2026-11-03)
+- [ ] Référence S1 seule 2015-2021 (ADR-010, protocole `docs/experiments/S1_REFERENCE_2015_2021.md`) : H0, puis H1 / rejet à l'exécution si le journal l'exige ; bilan global et annuel
 - [ ] Fermetures particulières (jours fériés, fermetures anticipées) : rechercher une source applicable, en parallèle ; sans preuve, le classement actuel est conservé (ASSUMP-016)
 
 ### 📋 A Faire
