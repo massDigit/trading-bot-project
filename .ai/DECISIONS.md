@@ -98,3 +98,17 @@
 - **Source** : message de l'opérateur du 2026-11-03, après la revue de la PR #4 (commit `4c6f01a`) par Astra ; PR #4 fusionnée (`d52f24f`) sur son autorisation, le lot étant validé comme moteur de recherche hors ligne.
 - **Décision** : mesurer S1 Donchian seule sur une trajectoire continue du 2015-01-01 inclus au 2022-01-01 exclu, avec le moteur vérifié, les données locales et le lecteur en flux, la configuration du passage d'avril-juin 2019 (canaux 20/10, ATR 14, stop à 2 ATR, filtre D1 strict de 55 jours, stop garanti simulé, 2 000 EUR, 0,25 %, mêmes coûts). H0 d'abord ; H1 seulement si un franchissement non observable apparaît ; comparaison « exécutée puis liquidée » / « rejetée » seulement si un stop est déjà dépassé au premier tick d'entrée ; aucun scénario retenu pour sa rentabilité. Protocole figé avant lancement : `docs/experiments/S1_REFERENCE_2015_2021.md`.
 - **Portée** : référence pour comparer plus tard un modèle de sélection des signaux. Aucune optimisation, aucun entraînement, aucune donnée 2022-2025, aucun ordre ni téléchargement ; ni validation de performance ni autorisation de trading.
+
+### ADR-011 : Expérience de granularité de taille (0,01 contrat) sur 2015-2021
+- **Date** : 2026-11-03
+- **Statut** : `ACCEPTED` (décision de l'opérateur)
+- **Source** : message de l'opérateur du 2026-11-03, après la référence S1 seule (PR #5).
+- **Décision** : S1 Donchian, avec les paramètres et coûts du passage initial, est retenue comme référence de développement 2015-2021. Une variante unique rejoue toute la trajectoire avec une taille minimale et un incrément de 0,01 contrat au lieu de 0,1, tout le reste identique, dans des fichiers distincts ; protocole figé avant lancement : `docs/experiments/S1_GRANULARITY_001.md`. Aucune autre taille ni budget testé après les résultats.
+- **Portée** : hypothèse de recherche ; 0,01 contrat n'est pas confirmé chez IG. Aucune donnée 2022-2025, aucun ordre, aucun entraînement ; ni validation de performance ni autorisation de trading.
+
+### ADR-012 : Publication des résultats des passages 2015-2021 dans la PR #5
+- **Date** : 2026-11-03
+- **Statut** : `ACCEPTED` (décision de l'opérateur)
+- **Source** : message de l'opérateur du 2026-11-03, pour qu'Astra lise les résultats directement ; l'opérateur a été informé que le dépôt est **public** et que les journaux de décisions contiennent les bougies H4 et cotations EUR/USD 2015-2021 dérivées de Dukascopy (licence ambiguë, ASSUMP-018), et a choisi de tout publier, journaux compris.
+- **Décision** : versionner, par ajout explicite (`git add -f`), les sorties des passages de référence (`s1_ref_2015_2021_*`) et de granularité (`s1_gran001_*`) de `data/reports/backtests/` : rapports JSON, journaux de décisions, journaux d'exécution, diffs de lancement, protocoles et comparaisons. La règle `data/` de `.gitignore` reste inchangée : historique de marché, Parquet et autres sorties ne sont pas versionnés.
+- **Portée** : ces seuls fichiers. **Dérogation explicite** à ADR-004 (« données locales hors Git, jamais redistribuées ») pour ces données dérivées. Ne résout pas l'ambiguïté de licence (ASSUMP-018). En cas d'avertissement de Dukascopy, la purge devra aussi retirer ces fichiers du dépôt et de son historique ; `forex-history purge-dukascopy` ne le fait pas, et une publication sur un dépôt public peut avoir été copiée ou mise en cache entre-temps.

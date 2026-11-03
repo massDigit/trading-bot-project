@@ -29,6 +29,7 @@ from test_backtest import (
     ticks_for,
 )
 
+from forex_bot.backtest.compare import compare
 from forex_bot.backtest.data import load_ticks, require_development_window, stream_ticks, tick_files
 from forex_bot.backtest.engine import BacktestResult, ResearchConfig, S1Backtest
 from forex_bot.backtest.explore import (
@@ -39,6 +40,7 @@ from forex_bot.backtest.explore import (
     decision_line,
     first_fully_usable_decision,
     outcomes_after_decision,
+    summarize,
 )
 from forex_bot.backtest.feed import Tick, TickFeed
 from forex_bot.backtest.s1 import S1Params
@@ -229,3 +231,48 @@ def test_first_fully_usable_decision_waits_for_channels_atr_and_d1() -> None:
     ticks = ticks_for([FLAT] * 25)
     plain, _ = _both(ticks, params)
     assert first_fully_usable_decision(plain) == candles(ticks, Timeframe.H4)[20]["end_utc"]
+
+
+# ---------------------------------------------------------------- comparison of two runs
+
+
+def _write_run(prefix: Path, result: BacktestResult, yearly: dict[int, Any]) -> None:
+    report = {"result": summarize(result), "by_year": by_year(result, yearly)}
+    prefix.with_suffix(".json").write_text(json.dumps(report, ensure_ascii=False))
+    with prefix.with_name(prefix.name + "_decisions.jsonl").open("w") as out:
+        for record in result.decisions:
+            out.write(json.dumps(decision_line(record), ensure_ascii=False) + "\n")
+
+
+def test_comparison_explains_size_refusals_and_the_net_difference(tmp_path: Path) -> None:
+    ticks = ticks_for([FLAT] * 25 + [BREAKOUT, HOLD, HOLD])
+    runs = {}
+    for name, config in (("ref", {"min_size": D("5")}), ("var", {})):
+        _, engine = _both(ticks, S1Params(use_d1_filter=False), **config)
+        result = engine.run()
+        _write_run(tmp_path / name, result, engine.yearly_drawdown)
+        runs[name] = result
+    report = compare(tmp_path / "ref", tmp_path / "var")
+    fate = report["fate_of_size_refusals"]
+    assert fate["reference_size_refusals"] == 1 and fate["fates"] == {"exécuté": 1}
+    matching = report["trade_matching"]
+    assert matching["common"] == 0 and matching["only_reference"] == 0 and matching["only_variant"] == 1
+    assert D(matching["net_difference_eur"]) == D(report["account_effect"]["variant"]["net_eur"]) - D(
+        report["account_effect"]["reference"]["net_eur"]
+    )
+    assert report["account_effect"]["variant"]["open_trade_at_end"] is True
+
+
+def test_common_trades_with_a_finer_size_are_matched_by_decision_and_side(tmp_path: Path) -> None:
+    after = (D("1.0990"), D("1.0988"), D("1.0985"), D("1.0988"))
+    ticks = ticks_for([FLAT] * 25 + [BREAKOUT] + [HOLD] * 10 + [REVERSE, after, after])
+    coarse = {"min_size": D("0.03"), "size_increment": D("0.03")}  # the wide stop still fits the minimum
+    for name, config in (("ref", coarse), ("var", {"min_size": D("0.01"), "size_increment": D("0.01")})):
+        _, engine = _both(ticks, WIDE, **config)
+        _write_run(tmp_path / name, engine.run(), engine.yearly_drawdown)
+    matching = compare(tmp_path / "ref", tmp_path / "var")["trade_matching"]
+    assert matching["only_reference"] == matching["only_variant"] == 0 and matching["common"] == 2
+    long = next(r for r in matching["common_trades"] if r["side"] == "LONG")
+    assert D(long["size_variant"]) > D(long["size_reference"])  # finer increment: closer to the budget
+    total = sum(D(r["difference"]) for r in matching["common_trades"])
+    assert D(matching["net_difference_eur"]) == total == D(matching["common_net_difference_eur"])

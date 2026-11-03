@@ -365,6 +365,12 @@ def main(argv: list[str] | None = None) -> int:
         choices=[s.name for s in StopAtExecution],
         default=StopAtExecution.FILL_THEN_LIQUIDATE.name,
     )
+    parser.add_argument(
+        "--min-size", type=Decimal, default=ResearchConfig.min_size, help="taille minimale (scénario de recherche)"
+    )
+    parser.add_argument(
+        "--size-increment", type=Decimal, default=ResearchConfig.size_increment, help="incrément de taille (scénario)"
+    )
     parser.add_argument("--compare", action="store_true", help="vérifier d'abord l'égalité mémoire / flux")
     parser.add_argument("--out", type=Path, help="fichier JSON du résultat (hors Git, sous data/)")
     parser.add_argument("--decisions-out", type=Path, help="journal JSONL des décisions H4 (hors Git, sous data/)")
@@ -373,6 +379,7 @@ def main(argv: list[str] | None = None) -> int:
     if not args.init_start <= args.start < args.end:
         parser.error("dates attendues : init-start <= start < end")
 
+    provenance = _provenance(argv)  # at launch: the code and tree the run actually starts from
     began = time.perf_counter()
     h4 = load_bars(args.data_dir, SOURCE, INSTRUMENT, Timeframe.H4, args.init_start, args.end)
     d1 = load_bars(args.data_dir, SOURCE, INSTRUMENT, Timeframe.D1, args.init_start, args.end)
@@ -383,6 +390,8 @@ def main(argv: list[str] | None = None) -> int:
         stop_type=StopType[args.stop_type],
         policy=ScenarioPolicy[args.policy],
         stop_at_execution=StopAtExecution[args.stop_at_execution],
+        min_size=args.min_size,
+        size_increment=args.size_increment,
     )
     params = S1Params()  # fixed reference (ASSUMP-020): N 20, M 10, ATR 14, k 2, D1 filter 55 days
 
@@ -428,7 +437,7 @@ def main(argv: list[str] | None = None) -> int:
     report = {
         "generated_at_utc": datetime.now(UTC).isoformat(),
         "notice": "passage hors ligne : ni validation de performance ni autorisation de trading",
-        "provenance": _provenance(argv),
+        "provenance": provenance,
         "window": {"init_start": args.init_start, "start": args.start, "end": args.end},
         "config": {
             "stop_type": config.stop_type.value,

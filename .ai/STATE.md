@@ -10,12 +10,14 @@
 Historique de recherche EUR/USD acquis (2015-2023, avec exceptions connues) ; règles de données
 de S1 validées comme référence expérimentale ; moteur de backtest S1 hors ligne **implémenté**,
 validé comme moteur de recherche hors ligne et fusionné (PR #4, `d52f24f`) ; référence S1 seule
-2015-2021 mesurée (ADR-010), sans valeur de validation de performance.
+2015-2021 mesurée (ADR-010) et variante de granularité 0,01 contrat mesurée (ADR-011), sans
+valeur de validation de performance.
 
 ## 🎯 Focus Courant
 Référence S1 seule sur la période de développement 2015-2021 (branche
-`feat/s1-reference-2015-2021`, depuis `main` = `d52f24f`) : protocole figé
-(`docs/experiments/S1_REFERENCE_2015_2021.md`), passage H0 terminé, à présenter avant commit.
+`feat/s1-reference-2015-2021`, PR #5 en brouillon, depuis `main` = `d52f24f`) : référence commitée
+(`7414378`) ; expérience de granularité 0,01 contrat (`docs/experiments/S1_GRANULARITY_001.md`)
+terminée, à présenter avant commit. Fusion de la PR #5 réservée à l'opérateur.
 
 ## 🧾 Synthèse vérifiée (2026-11-03)
 - PR #1 à #4 fusionnées dans `main` par commits de fusion, sur autorisation de l'opérateur
@@ -23,7 +25,7 @@ Référence S1 seule sur la période de développement 2015-2021 (branche
 - **PR #4 fusionnée** (`d52f24f`, 2026-11-03) après revue d'Astra sur `4c6f01a` : moteur S1 (`9b38118`),
   revues d'Astra corrigées (`b8506b0`, `cf4d0b4`) ; ASSUMP-024 validée (ADR-009) ; lecteur en
   flux et passage exploratoire (`8681a6e`) vérifiés par Astra. Journal des décisions et drawdown
-  au tick (`4c6f01a`). Branche `feat/s1-reference-2015-2021` : bilan annuel, non commité ; 214 tests réussis ; `ruff check`, `ruff format --check` et `uv run mypy src tests` sans erreur.
+  au tick (`4c6f01a`). Branche `feat/s1-reference-2015-2021` : bilan annuel (`7414378`), comparaison de passages, non commitée ; 216 tests réussis ; `ruff check`, `ruff format --check` et `uv run mypy src tests` sans erreur.
 - Comparaison sur l'échantillon réel 2019-04-01 → 2019-07-01 (7 707 234 ticks, 91 fichiers) :
   lecteurs en mémoire et en flux **identiques** (transactions, coûts, journal, fonds propres, fin).
   Passage en flux seul : 164 s, pic de mémoire 195 Mio (Mac M4) ; avec la référence en mémoire : 3,7 Gio.
@@ -35,8 +37,23 @@ Référence S1 seule sur la période de développement 2015-2021 (branche
   34 ventes ; 18 gagnantes), brut +46,95 €, coûts 29,31 €, net +17,63 € ; fonds propres finaux
   2 017,63 €, aucune position ouverte ; drawdown au tick 46,34 € (échantillonné 44,85 €) ; aucun
   franchissement non observable, aucun stop dépassé à l'exécution, aucun dépassement du budget ;
-  215 signaux refusés car la taille minimale de 0,1 contrat dépasse le budget de risque.
+  refus de taille (minimum 0,1 contrat au-dessus du budget de 0,25 %) : 215 sur 1 024 cassures
+  détectées (21,0 %), ou 215 sur 268 signaux arrivés au dimensionnement (80,2 %) ; filtre D1 :
+  33 refus pour historique D1 initial insuffisant, distincts des 445 refus pour canal D1 inutilisable.
   Indicateurs tous calculables à partir du 2015-03-19 21:00 UTC. 4 848 s, pic 307 Mio.
+  Journal : 10 912 lignes valides, distinctes, chronologiques. Empreinte de provenance du rapport
+  (`0231c857…`) différente du diff de lancement (`1515cac3…`) : calculée à l'écriture du rapport,
+  après des modifications de STATE, TASKS et CHANGELOG pendant le passage (arbre de fin reconstitué
+  = `0231c857…`) ; partie code (`src`, `tests`) identique au lancement et à la fin. Provenance
+  désormais relevée au lancement.
+- Granularité 0,01 contrat (ADR-011), même trajectoire 2015-2021 : 1 franchissement non observable,
+  donc H0 et H1 (H1 : une seule transaction diffère, +0,15 €). H0 : 132 transactions (39 gagnantes),
+  brut −45,62 €, coûts 60,26 €, net **−105,88 €** (H1 −105,73 €), drawdown au tick 136,64 €,
+  1 dépassement du budget (0,008 €). Des 215 refus de taille : 84 exécutés (−147,09 € nets, déjà
+  −117,61 € bruts), 131 non évalués (position ouverte par l'une de ces entrées), 0 toujours refusé.
+  Écart −123,51 € = −147,09 (propres à la variante) + 24,69 (5 pertes de la référence évitées)
+  − 1,10 (48 communes, taille modifiée). Sur 2015-2021 et sous ces hypothèses, le minimum de
+  0,1 contrat a protégé le compte. 4 790 s / 321 Mio (H0), 4 859 s / 313 Mio (H1).
 - Branches fusionnées `feat/ig-demo-diagnostic`, `feat/eurusd-mini-risk-guard`,
   `feat/eurusd-history-s1` supprimées (locales et GitHub) après vérification.
 
@@ -67,7 +84,7 @@ Référence S1 seule sur la période de développement 2015-2021 (branche
   Ces valeurs ne sont pas transposées au compte réel.
 
 ## 🔄 En Cours
-- [ ] Référence S1 seule 2015-2021 (ADR-010) : H0 terminé ; H1 et rejet non nécessaires (aucun cas) ; lot à présenter, non commité
+- [ ] Granularité 0,01 contrat (ADR-011) : H0 et H1 terminés, comparaison faite ; lot à présenter, non commité
 - [ ] Recherche d'une source applicable pour les fermetures particulières (non bloquante)
 - [ ] Demande au support IG préparée, non envoyée (`docs/IG_SUPPORT_REQUEST.md`)
 
@@ -89,6 +106,6 @@ Référence S1 seule sur la période de développement 2015-2021 (branche
 - Authentification SSH vers GitHub intermittente le 2026-10-30 (clé enregistrée et chargée) ; une nouvelle tentative a suffi.
 
 ## 🏁 Prochaine Étape / Milestone
-1. Terminer et présenter la référence S1 2015-2021 ; ensuite seulement, sur décision, un modèle de sélection des signaux comparé à cette référence (aucun entraînement avant).
+1. Revue de la PR #5 (référence S1 2015-2021 et granularité) par l'opérateur ; ensuite seulement, sur décision, un modèle de sélection des signaux comparé à cette référence (aucun entraînement avant).
 2. En parallèle : fermetures particulières et confirmations IG.
 3. Garder 2022-2023 pour l'évaluation des variantes figées, puis 2024-2025 pour le test final (ADR-007).

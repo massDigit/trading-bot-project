@@ -11,7 +11,8 @@
   - [x] lecteur de ticks en flux (un fichier journalier à la fois, Parquet) et référence en mémoire (DuckDB) ; équivalence vérifiée sur données synthétiques et sur l'échantillon réel (2026-11-03)
   - [x] premier passage exploratoire 2019-04-01 → 2019-07-01, dates fixées avant résultats, paramètres fixes, coûts de recherche explicites (ADR-009)
   - [x] revue du passage exploratoire et fusion de la PR #4 (2026-11-03)
-- [ ] Référence S1 seule 2015-2021 (ADR-010, protocole `docs/experiments/S1_REFERENCE_2015_2021.md`) : H0, puis H1 / rejet à l'exécution si le journal l'exige ; bilan global et annuel
+- [x] Référence S1 seule 2015-2021 (ADR-010, protocole `docs/experiments/S1_REFERENCE_2015_2021.md`) : H0 ; ni H1 ni rejet nécessaires ; retenue comme référence de développement (2026-11-03)
+- [ ] Granularité 0,01 contrat (ADR-011, protocole `docs/experiments/S1_GRANULARITY_001.md`) : H0 et H1 (1 franchissement non observable) ; minimum de 0,1 contrat protecteur sur 2015-2021 ; à présenter avant commit
 - [ ] Fermetures particulières (jours fériés, fermetures anticipées) : rechercher une source applicable, en parallèle ; sans preuve, le classement actuel est conservé (ASSUMP-016)
 
 ### 📋 A Faire
