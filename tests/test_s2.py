@@ -34,7 +34,7 @@ from forex_bot.backtest.s2 import (
     pivot_kinds,
 )
 from forex_bot.backtest.s2_engine import RelativeDrawdown, S2Backtest, S2Result
-from forex_bot.history.calendar import MarketState, Timeframe, candle_end, candle_start, market_state
+from forex_bot.history.calendar import MarketState, Timeframe, candle_end, candle_start, market_state, trading_day
 from forex_bot.risk import Side
 
 Spec = tuple[D, D, D, D]  # open, high, low, close of one H1 candle (bid)
@@ -766,3 +766,44 @@ def test_an_unusable_trigger_candle_without_configuration_is_not_computable_not_
     assert valid.entry_action is EntryAction.NO_SIGNAL and valid.reasons == ["pas de configuration"]
     # The configuration lifecycle is unchanged: the same entry as BASE follows.
     assert decided(result) == [at(4)]
+
+
+def test_a_breakout_on_a_documented_closure_candle_is_not_computable_not_refused() -> None:
+    ticks = ticks_for(BASE)
+    h1_bars = candles(ticks, Timeframe.H1)
+    breakout = len(PRE) + 3  # BREAK: an active configuration, a contact, a known threshold, a close above it
+    h1_bars[breakout] = {**h1_bars[breakout], "complete_at_close": False, "flags_at_close": ["jour férié probable"]}
+    feed = TickFeed(ticks)
+    result = S2Backtest(
+        h1_bars,
+        candles(ticks, Timeframe.H4),
+        d1_context(),
+        feed,
+        feed.gaps(timedelta(minutes=10)),
+        P,
+        ResearchConfig(
+            costs=COSTS, documented_closures=frozenset({trading_day(h1_bars[breakout]["start_utc"])}), **FINE
+        ),
+    ).run()
+    line = next(r for r in result.decisions if r.decision_utc == at(4))
+    assert line.known["setup"] is not None and line.signal is not None  # an effective breakout
+    assert line.entry_action is EntryAction.NOT_COMPUTABLE
+    assert line.reasons[0] == "bougie de déclenchement FERMETURE_DOCUMENTÉE"
+    assert decided(result) == []
+    assert not [r for r in result.decisions if r.entry_action is EntryAction.SIGNAL_REFUSED]
+
+
+def test_an_economic_refusal_on_an_ok_candle_stays_signal_refused() -> None:
+    specs = [
+        *PRE,
+        CONTACT,
+        h1("1.1072", "1.1180", "1.1068", "1.1170"),  # recovery pivot 1.1180
+        h1("1.1170", "1.1175", "1.1150", "1.1160"),  # confirms it
+        h1("1.1160", "1.1195", "1.1158", "1.1190"),  # breakout on an OK candle: target too close
+        *flat("1.1190", 2),
+    ]
+    result = run(specs)
+    line = next(r for r in result.decisions if r.decision_utc == at(4))
+    assert line.known["trigger_candle"]["state"] == BarState.OK.value
+    assert line.entry_action is EntryAction.SIGNAL_REFUSED
+    assert line.reasons[0].startswith("cible trop proche")

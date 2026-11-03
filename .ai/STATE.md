@@ -15,12 +15,12 @@ validé comme moteur de recherche hors ligne et fusionné (PR #4, `d52f24f`) ; r
 
 ## 🎯 Focus Courant
 Fiche S2 (`docs/strategies/S2_PULLBACK.md`) approuvée pour la recherche hors ligne (ADR-015, PR #6
-fusionnée, `46439fb`). Étape 1 sur `feat/s2-pullback-engine` : moteur S2 hors ligne
-(`backtest/s2.py`, `backtest/s2_engine.py`, S1 inchangé) et 25 tests synthétiques ; 242 tests réussis,
-à présenter avant commit. Aucun passage historique, pas de rejeu 2019 (étape 2).
+fusionnée, `46439fb`). Étape 1 (PR #7) : moteur S2 hors ligne
+(`backtest/s2.py`, `backtest/s2_engine.py`, S1 inchangé) et 27 tests synthétiques ; 244 tests réussis.
+Une cassure sur une bougie de déclenchement non `OK` est journalisée `ÉVALUATION_IMPOSSIBLE` (§8).
 Étape 2 faite (2026-11-03) : rejeu S1 H0 du 2019-04-01 au 2019-07-01 sur `7b9a1f1`, identique à la
 référence `s1_2019Q2_stream.json` (6 transactions une par une, solde 1 992,04 €, journal des 390
-décisions identique octet pour octet) ; 194 s, 175 Mio. Étapes 3 et 4 non lancées.
+décisions identique octet pour octet) ; 194 s, 175 Mio. Étape 3 (disponibilité des données 2015-2021) autorisée ; étape 4 non lancée.
 
 ## 🧾 Synthèse vérifiée (2026-11-03)
 - PR #1 à #4 fusionnées dans `main` par commits de fusion, sur autorisation de l'opérateur
@@ -96,7 +96,7 @@ décisions identique octet pour octet) ; 194 s, 175 Mio. Étapes 3 et 4 non lanc
   Ces valeurs ne sont pas transposées au compte réel.
 
 ## 🔄 En Cours
-- [ ] S2 étape 1 : moteur et 25 tests synthétiques prêts, à présenter avant commit ; aucun passage historique
+- [ ] S2 étape 3 : disponibilité des données 2015-2021 (sans transaction ni résultat)
 - [ ] Recherche d'une source applicable pour les fermetures particulières (non bloquante)
 - [ ] Demande au support IG préparée, non envoyée (`docs/IG_SUPPORT_REQUEST.md`)
 

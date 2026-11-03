@@ -282,8 +282,12 @@ class S2Backtest(S1Backtest):
             record.entry_action = EntryAction.NOT_EVALUATED
             record.reasons.append("cassure pendant une position ouverte : seuil consommé")
             return record
-        if states[trigger](t) is not BarState.OK:
-            self._refuse(record, decision, f"bougie de cassure {states[trigger](t).value}")
+        if any(data for _, data in self._notes):
+            # Sheet §8: a breakout on a candle that is not OK (or without a usable D1 context) is not
+            # computable, not refused; the data reason already leads the line. The threshold stays consumed.
+            self._log(decision, "ABSTENTION", self._notes[0][0])
+            record.entry_action = EntryAction.NOT_COMPUTABLE
+            record.reasons.append("cassure non évaluable : seuil consommé")
             return record
         if trend is not setup.side:
             self._refuse(record, decision, "tendance D1 perdue à la cassure")
