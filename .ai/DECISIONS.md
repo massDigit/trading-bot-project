@@ -80,3 +80,14 @@
   - ASSUMP-021 : découpage des requêtes JForex ;
   - ASSUMP-022 : heure vide = acquisition incomplète, sauf exceptions d'ADR-005.
 - **Portée** : choix du projet uniquement. Les **faits extérieurs** restent ouverts et ne sont pas confirmés par cette approbation : ASSUMP-005 (unités IG), ASSUMP-008 (stops et distances), ASSUMP-018 (licence Dukascopy), ASSUMP-019 (formats et heure Dukascopy), ainsi que les parts « fait extérieur » des entrées mixtes (valeur de l'incrément, montants des coûts, conversion facturée, signification de `DLG_FLAG`, fermetures particulières). Aucun paramètre n'est démontré rentable ; aucune autorisation de trading.
+
+### ADR-009 : Conventions du moteur S1 et premier passage exploratoire
+- **Date** : 2026-11-03
+- **Statut** : `ACCEPTED` (décision de l'opérateur)
+- **Source** : réponse de l'opérateur du 2026-11-03, après la seconde revue externe du moteur (commit `cf4d0b4`).
+- **Décision** :
+  1. ASSUMP-024 est validée **pour le backtest hors ligne**. Stop déjà dépassé au premier tick d'exécution : « exécutée puis liquidée » par défaut, parce que la transaction et son coût restent visibles. La liquidation sur le même tick est une **hypothèse de simulation**, ni une garantie de prudence ni une confirmation du comportement d'IG sur le compte à stop garanti obligatoire. La variante « rejetée » est conservée ; les cas sont comptés et, s'il y en a, les résultats des deux scénarios sont présentés. La perte estimée au stop est distinguée de la perte simulée effectivement comptabilisée.
+  2. Le lecteur de ticks en flux et un petit passage exploratoire sont autorisés. Préalable : sur le même échantillon, lecteurs en mémoire et en flux produisent les mêmes transactions, coûts, journaux et fonds propres, y compris avec des ticks de même horodatage et à la frontière de deux fichiers. Si la comparaison passe, le passage est enchaîné sans nouvelle confirmation.
+  3. Dates fixées **avant** de consulter les résultats : une courte fenêtre dans 2015-2021, précédée d'une période réservée à l'initialisation des indicateurs ; lectures bornées à ces dates ; données locales ; paramètres S1 fixes ; 2022-2025 jamais consultés. Un échantillon sans transaction reste un résultat : la fenêtre n'est pas changée pour en obtenir une.
+- **Fenêtre retenue par l'agent avant tout passage** (2026-11-03) : initialisation `[2019-01-01T00:00Z, 2019-04-01T00:00Z)` (bougies seulement, aucune décision) ; étude `[2019-04-01T00:00Z, 2019-07-01T00:00Z)` (décisions et ticks). Choix : environ 64 D1 avant l'étude (canal de 55 jours avec la D1 de contexte), trois mois au milieu de la partition de développement, sans regarder les prix.
+- **Portée** : recherche hors ligne. Ni validation de performance, ni autorisation de trading, ni passage d'ordre ; PR #4 en brouillon, sans fusion.

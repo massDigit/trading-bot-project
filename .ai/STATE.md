@@ -2,23 +2,36 @@
 
 > **Ce fichier donne à l'agent une image précise de l'état du projet en temps réel à chaque début de session.**
 
-**Dernière mise à jour** : 2026-10-30
+**Dernière mise à jour** : 2026-11-03
 **Version de l'application** : 0.1.0 (`pyproject.toml`), non publiée
 **Modèle de dépôt IA** : v0.2.0 (`massDigit/ai-project-template`, structure `AGENTS.md`, `.ai/`, `.agents/`)
 
 ## 🚀 Phase Actuelle
 Historique de recherche EUR/USD acquis (2015-2023, avec exceptions connues) ; règles de données
-de S1 validées comme référence expérimentale ; moteur de backtest S1 à écrire hors ligne.
+de S1 validées comme référence expérimentale ; moteur de backtest S1 hors ligne **implémenté**,
+conventions validées (ADR-009), PR #4 en brouillon ; **un seul passage exploratoire** réalisé
+(2019-04-01 → 2019-07-01), sans valeur de validation de performance.
 
 ## 🎯 Focus Courant
-Remise en ordre de la mémoire `.ai/` (décisions, suppositions classées par nature, tâches), puis
-moteur S1 sur une branche distincte dépendant de la PR #3. Aucune PR n'est fusionnée avant la fin
-des retours de la revue externe (décision de l'opérateur).
+Observation du passage exploratoire (branche `feat/s1-backtest-engine`, PR #4 en brouillon) :
+journal d'une ligne par décision H4 et drawdown observable au tick, à présenter avant commit.
 
-## 🧾 Synthèse vérifiée (branche `feat/eurusd-history-s1`, commit `7484426`, 2026-10-30)
-- 166 tests réussis ; `ruff check`, `ruff format --check` et `uv run mypy src tests` sans erreur.
-- PR #1 ouverte ; PR #2 brouillon (base PR #1) ; PR #3 brouillon (base PR #2), synchronisée avec
-  `b28daa6`. Aucune fusion.
+## 🧾 Synthèse vérifiée (2026-11-03)
+- PR #1, #2 et #3 fusionnées dans `main` par commits de fusion, sur autorisation de l'opérateur
+  (`main` = `aa69503`). Une branche depuis `main`, une PR vers `main`.
+- **PR #4 ouverte en brouillon** (`feat/s1-backtest-engine` → `main`) : moteur S1 (`9b38118`),
+  revues d'Astra corrigées (`b8506b0`, `cf4d0b4`) ; ASSUMP-024 validée (ADR-009) ; lecteur en
+  flux et passage exploratoire (`8681a6e`) vérifiés par Astra. Journal des décisions et drawdown
+  au tick dans l'arbre de travail, non commités. 211 tests réussis ; `ruff check`, `ruff format --check` et `uv run mypy src tests` sans erreur.
+- Comparaison sur l'échantillon réel 2019-04-01 → 2019-07-01 (7 707 234 ticks, 91 fichiers) :
+  lecteurs en mémoire et en flux **identiques** (transactions, coûts, journal, fonds propres, fin).
+  Passage en flux seul : 164 s, pic de mémoire 195 Mio (Mac M4) ; avec la référence en mémoire : 3,7 Gio.
+- Passage H0 2019-04-01 → 2019-07-01 : aucun franchissement de stop non observable (aucun passage
+  H1 nécessaire pour cette fenêtre). Rejeu avec observation : 6 transactions identiques au JSON de
+  référence ; 390 lignes de décision pour 390 décisions H4 ; drawdown au tick 13,77 € (échantillonné
+  11,79 €) ; 190 s, pic 188 Mio.
+- Branches fusionnées `feat/ig-demo-diagnostic`, `feat/eurusd-mini-risk-guard`,
+  `feat/eurusd-history-s1` supprimées (locales et GitHub) après vérification.
 
 ## ✅ Réalisé
 - [x] Structure IA-Native (modèle de dépôt v0.2.0)
@@ -35,6 +48,9 @@ des retours de la revue externe (décision de l'opérateur).
 - [x] Règles de données de S1 validées comme référence expérimentale (ADR-006) ; fiche S1 harmonisée
 - [x] Choix du projet ASSUMP-001 à 022 approuvés dans leur portée (ADR-008) ; faits extérieurs ouverts : ASSUMP-005, 008, 018, 019 et parts extérieures des entrées mixtes
 - [x] ADR-002 : conteneurisation Docker différée jusqu'au besoin d'exécution continue
+- [x] Moteur S1 hors ligne implémenté (`src/forex_bot/backtest/`) ; conventions ASSUMP-024 validées (ADR-009)
+- [x] Lecture bornée de l'historique : lecteur en flux (un fichier journalier à la fois) et référence en mémoire, fenêtre limitée à 2015-2021
+- [x] Passage exploratoire S1 sur 2019-04-01 → 2019-07-01 (initialisation depuis 2019-01-01), dates fixées avant résultats (ADR-009)
 
 ## 📊 Résultat du diagnostic démo (2026-10-27, observations démo uniquement)
 - 2 comptes CFD en EUR (« CFD » actif/par défaut, « Barrières et Options ») ; solde fictif 10 000 €.
@@ -44,7 +60,7 @@ des retours de la revue externe (décision de l'opérateur).
   Ces valeurs ne sont pas transposées au compte réel.
 
 ## 🔄 En Cours
-- [ ] Moteur S1 hors ligne (ADR-006), tests synthétiques d'abord
+- [ ] PR #4 en brouillon : journal des décisions H4 et drawdown au tick à présenter, non commités
 - [ ] Recherche d'une source applicable pour les fermetures particulières (non bloquante)
 - [ ] Demande au support IG préparée, non envoyée (`docs/IG_SUPPORT_REQUEST.md`)
 
@@ -53,7 +69,8 @@ des retours de la revue externe (décision de l'opérateur).
 - Coûts IG inconnus (commission, conversion, financement, prime de stop garanti) : ASSUMP-006. Ils bloquent une conclusion réaliste sur IG, pas le moteur hors ligne.
 - Déclenchement des stops et référence des distances minimales non confirmés : ASSUMP-008.
 - Compte réel cible à risque limité : stop garanti obligatoire, rapprochable mais jamais éloigné, prime au déclenchement (`docs/CONFIRMATIONS.md` §5, DÉCL) ; ses valeurs ne sont pas observées.
-- Pas encore de suivi des fonds propres du robot ; flux `PRICE` validé par sonde seulement.
+- Pas encore de suivi des fonds propres du robot en fonctionnement (le moteur de recherche les valorise, ASSUMP-024) ; flux `PRICE` validé par sonde seulement.
+- Moteur S1 : la taille est fixée avant l'exécution simulée ; l'entrée exécutée peut dépasser le budget de risque, dépassement enregistré et jamais supprimé. Drawdown mesuré sur des échantillons (décisions H4 et sorties), pas tick par tick.
 - Mot de passe chiffré non géré si IG l'exige.
 - Dukascopy : ambiguïté de licence **non résolue** (ASSUMP-018) ; acquisition par décision de l'opérateur (ADR-004), arrêt et purge en cas d'avertissement ; convention temporelle non documentée, cohérente sur 2015-2023 (ASSUMP-019).
 - SDK JForex : une réponse HTTP 503 devient une heure vide mise en cache, sans erreur ; traitée comme acquisition incomplète (ASSUMP-022). Compte démo valable 14 jours.
@@ -65,6 +82,6 @@ des retours de la revue externe (décision de l'opérateur).
 - Authentification SSH vers GitHub intermittente le 2026-10-30 (clé enregistrée et chargée) ; une nouvelle tentative a suffi.
 
 ## 🏁 Prochaine Étape / Milestone
-1. Écrire et tester S1 hors ligne : données synthétiques, puis 2015-2021 uniquement, coûts paramétrés, sans optimisation.
+1. Revue du passage exploratoire par l'opérateur et Astra ; suite (autres fenêtres 2015-2021, variantes) uniquement sur décision, coûts paramétrés (non confirmés chez IG), sans optimisation.
 2. En parallèle : fermetures particulières et confirmations IG.
 3. Garder 2022-2023 pour l'évaluation des variantes figées, puis 2024-2025 pour le test final (ADR-007).

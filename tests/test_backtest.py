@@ -1,0 +1,732 @@
+"""Synthetic tests of the offline S1 engine: chronology, bid/ask execution, stops, sizing, scenarios.
+
+Candles are built from ticks whose open, high, low and close are set exactly: in each H4 candle a
+tick every 5 minutes, the first at the open, the second at the high, the third at the low, all the
+others at the close. Spread: 1 pip. Week of 2019-03-11, US summer time: H4 at 21, 01, 05, 09, 13,
+17 UTC; trading days start at 21:00 UTC; the weekly closure runs Friday 21:00 → Sunday 21:00 UTC.
+"""
+
+from __future__ import annotations
+
+from collections import defaultdict
+from datetime import UTC, date, datetime, timedelta
+from decimal import Decimal as D
+from typing import Any
+
+import pytest
+
+from forex_bot.backtest.bar_state import BarState, GapIndex, bar_state
+from forex_bot.backtest.engine import (
+    BacktestResult,
+    EntryAction,
+    PositionAction,
+    ResearchConfig,
+    S1Backtest,
+    ScenarioPolicy,
+    StopAtExecution,
+    StopType,
+)
+from forex_bot.backtest.feed import Silence, Tick, TickFeed, classify_silence
+from forex_bot.backtest.s1 import S1Params, WilderAtr, evaluate_entry
+from forex_bot.history.bars import Gap
+from forex_bot.history.calendar import (
+    MarketState,
+    Timeframe,
+    candle_end,
+    candle_start,
+    market_state,
+    trading_day,
+)
+from forex_bot.risk import Cost, CostModel, CostStatus, Side
+
+SPREAD = D("0.0001")
+STEP = timedelta(minutes=5)
+FIRST_H4 = datetime(2019, 3, 10, 21, tzinfo=UTC)  # Sunday 17:00 New York: Monday's first H4
+
+FLAT = (D("1.1000"), D("1.1005"), D("1.0995"), D("1.1000"))
+BREAKOUT = (D("1.1000"), D("1.1030"), D("1.0998"), D("1.1025"))  # close above the flat highs
+HOLD = (D("1.1025"), D("1.1030"), D("1.1020"), D("1.1025"))
+
+COSTS = CostModel(
+    slippage_pips=Cost(CostStatus.ASSUMED, D("0.5"), "scénario de test"),
+    commission_per_contract=Cost(CostStatus.ASSUMED, D("0"), "scénario de test"),
+    financing_per_contract_per_night=Cost(CostStatus.ASSUMED, D("0.10"), "scénario de test"),
+    conversion_fee_rate=Cost(CostStatus.ASSUMED, D("0"), "scénario de test"),
+    guaranteed_stop_premium_per_contract=Cost(CostStatus.ASSUMED, D("0.30"), "scénario de test"),
+)
+NO_FILTER = S1Params(use_d1_filter=False)
+
+
+def utc(year: int, month: int, day: int, hour: int = 0, minute: int = 0) -> datetime:
+    return datetime(year, month, day, hour, minute, tzinfo=UTC)
+
+
+def h4_starts(count: int) -> list[datetime]:
+    starts: list[datetime] = []
+    moment = FIRST_H4
+    while len(starts) < count:
+        if candle_start(moment, Timeframe.H4) == moment and market_state(moment) is MarketState.OPEN:
+            starts.append(moment)
+        moment += timedelta(hours=1)
+    return starts
+
+
+def ticks_for(spec: list[tuple[D, D, D, D]]) -> list[Tick]:
+    ticks = []
+    for start, (o, h, low, c) in zip(h4_starts(len(spec)), spec, strict=True):
+        for j in range(48):
+            bid = o if j == 0 else h if j == 1 else low if j == 2 else c
+            ticks.append(Tick(start + j * STEP, bid, bid + SPREAD))
+    return ticks
+
+
+def candles(ticks: list[Tick], timeframe: Timeframe) -> list[dict[str, Any]]:
+    groups: dict[datetime, list[Tick]] = defaultdict(list)
+    for tick in ticks:
+        groups[candle_start(tick.ts_utc, timeframe)].append(tick)
+    return [
+        {
+            "start_utc": start,
+            "end_utc": candle_end(start, timeframe),
+            "bid_open": g[0].bid,
+            "bid_high": max(t.bid for t in g),
+            "bid_low": min(t.bid for t in g),
+            "bid_close": g[-1].bid,
+            "ask_open": g[0].ask,
+            "ask_high": max(t.ask for t in g),
+            "ask_low": min(t.ask for t in g),
+            "ask_close": g[-1].ask,
+            "complete_at_close": True,
+            "flags_at_close": [],
+        }
+        for start, g in sorted(groups.items())
+    ]
+
+
+def run(ticks: list[Tick], params: S1Params = NO_FILTER, **config: Any) -> tuple[BacktestResult, list[dict[str, Any]]]:
+    feed = TickFeed(ticks)
+    h4 = candles(ticks, Timeframe.H4)
+    result = S1Backtest(
+        h4,
+        candles(ticks, Timeframe.D1),
+        feed,
+        feed.gaps(timedelta(minutes=10)),
+        params,
+        ResearchConfig(costs=config.pop("costs", COSTS), **config),
+    ).run()
+    return result, h4
+
+
+def kinds(result: BacktestResult, kind: str) -> list[str]:
+    return [e.detail for e in result.journal if e.kind == kind]
+
+
+def first_trade(result: BacktestResult) -> Any:
+    return result.trades[0] if result.trades else result.open_trade
+
+
+# ---------------------------------------------------------------- chronology and bid/ask execution
+
+
+def test_decision_at_close_executes_at_the_first_tick_strictly_after_it_at_the_ask() -> None:
+    result, h4 = run(ticks_for([FLAT] * 25 + [BREAKOUT, HOLD, HOLD]))
+    decision = h4[25]["end_utc"]
+    (decided,) = [e for e in result.journal if e.kind == "ENTRÉE_DÉCIDÉE"]
+    assert decided.utc == decision
+    trade = first_trade(result)
+    # The tick stamped exactly at the decision instant (open of the next candle) is not used.
+    assert trade.entry_utc == decision + STEP
+    assert trade.side is Side.LONG and trade.entry_price == HOLD[1] + SPREAD  # ask of that tick
+
+
+def test_sizing_quote_is_the_last_tick_strictly_before_the_decision() -> None:
+    result, _ = run(ticks_for([FLAT] * 25 + [BREAKOUT, HOLD, HOLD]))
+    trade = first_trade(result)
+    # Last tick of the breakout candle (its close), not the tick stamped at the decision instant.
+    assert trade.estimate.entry_estimate == BREAKOUT[3] + SPREAD
+
+
+def test_latency_moves_the_decision_and_the_execution() -> None:
+    latency = timedelta(minutes=12)
+    result, h4 = run(ticks_for([FLAT] * 25 + [BREAKOUT, HOLD, HOLD]), latency=latency)
+    (decided,) = [e for e in result.journal if e.kind == "ENTRÉE_DÉCIDÉE"]
+    assert decided.utc == h4[25]["end_utc"] + latency
+    assert first_trade(result).entry_utc == h4[25]["end_utc"] + 3 * STEP  # first tick after 12 min
+    assert first_trade(result).entry_price == HOLD[3] + SPREAD
+
+
+def test_channel_exit_sells_at_the_bid_of_the_first_tick_after_the_decision() -> None:
+    drop = (D("1.1025"), D("1.1026"), D("1.1015"), D("1.1016"))  # close below the 10-candle low (1.1020)
+    spec = [FLAT] * 25 + [BREAKOUT] + [HOLD] * 10 + [drop, HOLD]
+    result, h4 = run(spec_ticks := ticks_for(spec))
+    trade = result.trades[0]
+    assert trade.exit_reason == "SORTIE_CANAL"
+    assert trade.exit_utc == h4[36]["end_utc"] + STEP
+    tick = next(t for t in spec_ticks if t.ts_utc == trade.exit_utc)
+    assert trade.exit_price == tick.bid
+
+
+def test_signal_on_the_last_candle_before_the_weekend_expires() -> None:
+    result, _ = run(ticks_for([FLAT] * 29 + [BREAKOUT] + [HOLD] * 3))  # candle 29: Friday 17:00-21:00 UTC
+    assert kinds(result, "SIGNAL_EXPIRÉ") and not result.trades and result.open_trade is None
+
+
+def test_d1_context_is_the_last_available_d1_never_a_calendar_date_join() -> None:
+    params = S1Params(use_d1_filter=True, d1_channel=1)
+    # Breakout on Thursday's last H4 (ends 21:00 UTC with Thursday's D1): that D1 is available and bullish.
+    at_boundary, _ = run(ticks_for([FLAT] * 23 + [BREAKOUT, HOLD]), params)
+    assert first_trade(at_boundary) is not None
+    # Breakout on Thursday 09:00-13:00 UTC: Thursday's D1 is not closed; Wednesday's (flat) is the context.
+    midday, _ = run(ticks_for([FLAT] * 21 + [BREAKOUT, HOLD, HOLD]), params)
+    assert first_trade(midday) is None
+    assert "cassure haussière contre le contexte D1" in kinds(midday, "ABSTENTION")
+
+
+# ---------------------------------------------------------------- stops
+
+
+def _guaranteed_and_normal(spec_ticks: list[Tick]) -> tuple[Any, Any]:
+    guaranteed, _ = run(spec_ticks, stop_type=StopType.GUARANTEED)
+    normal, _ = run(spec_ticks, stop_type=StopType.NORMAL)
+    return guaranteed.trades[0], normal.trades[0]
+
+
+def test_observed_crossing_on_the_bid_closes_a_long_position() -> None:
+    probe, _ = run(ticks_for([FLAT] * 25 + [BREAKOUT, HOLD]))
+    stop = first_trade(probe).stop
+    near = (D("1.1025"), D("1.1026"), stop + D("0.00001"), D("1.1025"))  # bid just above: no trigger
+    through = (D("1.1025"), D("1.1026"), stop - D("0.0004"), D("1.1025"))
+    spec_ticks = ticks_for([FLAT] * 25 + [BREAKOUT, HOLD, near, through, HOLD])
+    guaranteed, normal = _guaranteed_and_normal(spec_ticks)
+    trigger = h4_starts(29)[28] + 2 * STEP  # low tick of the `through` candle
+    for trade in (guaranteed, normal):
+        assert trade.exit_reason == "STOP_OBSERVÉ" and trade.exit_utc == trigger
+    assert guaranteed.exit_price == stop  # execution at S; the premium is a separate cost line
+    assert guaranteed.costs_quote["prime de stop garanti"] == D("0.30") * guaranteed.size
+    assert normal.exit_price == stop - D("0.0004")  # first observable bid at the trigger
+    assert "prime de stop garanti" not in normal.costs_quote
+
+
+def test_short_stop_is_triggered_on_the_ask() -> None:
+    fall = (D("1.1000"), D("1.1002"), D("1.0970"), D("1.0975"))
+    hold = (D("1.0975"), D("1.0980"), D("1.0970"), D("1.0975"))
+    probe, _ = run(ticks_for([FLAT] * 25 + [fall, hold]))
+    trade = first_trade(probe)
+    assert trade.side is Side.SHORT and trade.entry_price == hold[1]  # sold at the bid
+    ask_touch = (D("1.0975"), trade.stop - SPREAD / 2, D("1.0970"), D("1.0975"))  # bid below S, ask above
+    result, _ = run(ticks_for([FLAT] * 25 + [fall, hold, ask_touch, hold]))
+    assert result.trades[0].exit_reason == "STOP_OBSERVÉ"
+
+
+def test_gap_through_the_stop_at_the_weekly_reopening() -> None:
+    reopen = (D("1.0980"), D("1.0985"), D("1.0975"), D("1.0980"))  # Sunday open below the stop
+    spec_ticks = ticks_for([FLAT] * 25 + [BREAKOUT] + [HOLD] * 4 + [reopen, reopen])
+    guaranteed, normal = _guaranteed_and_normal(spec_ticks)
+    sunday = h4_starts(31)[30]
+    for trade in (guaranteed, normal):
+        assert trade.exit_reason == "STOP_FERMETURE_CONNUE" and trade.exit_utc == sunday
+        assert not trade.indeterminate
+    assert guaranteed.exit_price == guaranteed.stop
+    assert normal.exit_price == D("1.0980")  # first price after the closure, gap included
+    assert guaranteed.costs_quote["financement overnight"] == D("0.10") * guaranteed.size * 3  # Thu → Mon
+
+
+def _with_interruption(spec: list[tuple[D, D, D, D]], candle: int, first: int, last: int) -> list[Tick]:
+    """Removes ticks j = first..last of an H4 candle: an unexplained silence during expected opening."""
+    start = h4_starts(len(spec))[candle]
+    hole = {start + j * STEP for j in range(first, last + 1)}
+    return [t for t in ticks_for(spec) if t.ts_utc not in hole]
+
+
+def test_unexplained_interruption_followed_by_a_price_beyond_the_stop_is_a_certain_trigger() -> None:
+    after = (D("1.1025"), D("1.1026"), D("1.0980"), D("1.0980"))
+    spec_ticks = _with_interruption([FLAT] * 25 + [BREAKOUT, HOLD, after, HOLD], candle=27, first=0, last=20)
+    guaranteed, normal = _guaranteed_and_normal(spec_ticks)
+    assert guaranteed.exit_reason == normal.exit_reason == "STOP_APRÈS_INTERRUPTION"
+    assert guaranteed.exit_price == guaranteed.stop
+    assert normal.exit_price == D("1.0980")
+    assert any("exécution supposée" in h for h in normal.hypotheses)
+
+
+def test_stop_crossed_on_the_tick_that_executes_a_channel_exit_takes_precedence() -> None:
+    probe, _ = run(ticks_for([FLAT] * 25 + [BREAKOUT, HOLD]))
+    stop = first_trade(probe).stop
+    drop = (D("1.1025"), D("1.1026"), D("1.1015"), D("1.1016"))  # exit decided, stop not reached
+    crash = (D("1.1016"), stop - D("0.0010"), D("1.0990"), D("1.0995"))  # first tick after D: bid below S
+    spec_ticks = ticks_for([FLAT] * 25 + [BREAKOUT] + [HOLD] * 10 + [drop, crash, HOLD])
+    for stop_type in StopType:
+        result, h4 = run(spec_ticks, stop_type=stop_type)
+        (trade,) = result.trades
+        assert trade.exit_reason == "STOP_OBSERVÉ" and trade.exit_utc == h4[36]["end_utc"] + STEP
+        assert kinds(result, "SORTIE_DÉCIDÉE") and kinds(result, "SORTIE_CANAL_ABANDONNÉE")
+        if stop_type is StopType.GUARANTEED:
+            assert trade.exit_price == stop and "prime de stop garanti" in trade.costs_quote
+        else:
+            assert trade.exit_price == stop - D("0.0010") and "prime de stop garanti" not in trade.costs_quote
+
+
+# ---------------------------------------------------------------- reversal
+
+WIDE = S1Params(use_d1_filter=False, stop_atr_multiple=D(10))  # long stop far below the 20-candle low
+FINE = {"min_size": D("0.01"), "size_increment": D("0.01")}
+REVERSE = (D("1.1025"), D("1.1026"), D("1.0985"), D("1.0990"))  # below the exit and the 20-candle lows
+
+
+def test_reversal_sizes_the_new_entry_on_equity_including_the_position_being_exited() -> None:
+    after = (D("1.0990"), D("1.0988"), D("1.0985"), D("1.0988"))
+    result, h4 = run(ticks_for([FLAT] * 25 + [BREAKOUT] + [HOLD] * 10 + [REVERSE, after, after]), WIDE, **FINE)
+    decision = h4[36]["end_utc"]
+    (closed,) = result.trades
+    reopened = result.open_trade
+    assert closed.side is Side.LONG and closed.exit_reason == "SORTIE_CANAL"
+    assert reopened is not None and reopened.side is Side.SHORT and reopened.decided_utc == decision
+    assert closed.exit_utc == reopened.entry_utc == decision + STEP  # exit then entry on the same tick
+    (point,) = [p for p in result.equity_curve if p.utc == decision]
+    assert point.balance == D("2000") and point.unrealized < 0  # the exit is not booked yet at D
+    assert reopened.risk_budget == point.equity * D("0.0025") < D("2000") * D("0.0025")
+
+
+def test_reversal_with_the_stop_crossed_on_the_execution_tick_still_opens_the_new_entry() -> None:
+    probe, _ = run(ticks_for([FLAT] * 25 + [BREAKOUT, HOLD]), WIDE, **FINE)
+    stop = first_trade(probe).stop
+    gap = (D("1.0990"), stop - D("0.0010"), stop - D("0.0012"), stop - D("0.0011"))
+    result, _ = run(ticks_for([FLAT] * 25 + [BREAKOUT] + [HOLD] * 10 + [REVERSE, gap, gap]), WIDE, **FINE)
+    (closed,) = result.trades
+    reopened = result.open_trade
+    assert closed.exit_reason == "STOP_OBSERVÉ" and closed.exit_price == stop
+    assert kinds(result, "SORTIE_CANAL_ABANDONNÉE")
+    assert reopened is not None and reopened.side is Side.SHORT
+    assert reopened.entry_utc == closed.exit_utc and reopened.entry_price == stop - D("0.0010")
+
+
+def test_a_tick_stamped_at_the_decision_instant_does_not_enter_the_decision_state() -> None:
+    probe, _ = run(ticks_for([FLAT] * 25 + [BREAKOUT, HOLD]), WIDE, **FINE)
+    stop = first_trade(probe).stop
+    after = (D("1.0990"), D("1.0988"), D("1.0985"), D("1.0988"))
+    base = ticks_for([FLAT] * 25 + [BREAKOUT] + [HOLD] * 10 + [REVERSE, after, after])
+    h4 = candles(base, Timeframe.H4)
+    decision = h4[36]["end_utc"]
+    crossing = [Tick(t.ts_utc, stop - D("0.0010"), stop - D("0.0009")) if t.ts_utc == decision else t for t in base]
+    results = []
+    for feed_ticks in (base, crossing):  # same candles and earlier ticks; only the tick at D differs
+        feed = TickFeed(feed_ticks)
+        results.append(
+            S1Backtest(
+                h4,
+                candles(base, Timeframe.D1),
+                feed,
+                feed.gaps(timedelta(minutes=10)),
+                WIDE,
+                ResearchConfig(costs=COSTS, min_size=FINE["min_size"], size_increment=FINE["size_increment"]),
+            ).run()
+        )
+    plain, crossed = results
+    (point_plain,) = [p for p in plain.equity_curve if p.utc == decision and p.unrealized]
+    (point_crossed,) = [p for p in crossed.equity_curve if p.utc == decision and p.unrealized]
+    assert point_plain == point_crossed  # state strictly before D in both runs
+    assert plain.open_trade is not None and crossed.open_trade is not None
+    assert plain.open_trade.risk_budget == crossed.open_trade.risk_budget == point_plain.equity * D("0.0025")
+    # The tick at D is replayed after the decision: it triggers the stop, never executes the orders.
+    (stopped,) = crossed.trades
+    assert stopped.exit_reason == "STOP_OBSERVÉ" and stopped.exit_utc == decision and stopped.exit_price == stop
+    assert kinds(crossed, "SORTIE_CANAL_ABANDONNÉE")
+    assert crossed.open_trade.entry_utc == decision + STEP
+    assert _chronological(crossed)
+
+
+# ---------------------------------------------------------------- stop already beyond at execution
+
+
+def _beyond_at_execution() -> list[Tick]:
+    probe, _ = run(ticks_for([FLAT] * 25 + [BREAKOUT, HOLD]))
+    stop = first_trade(probe).stop
+    crash = (D("1.1025"), stop - D("0.0010"), stop - D("0.0012"), stop - D("0.0011"))  # j=1: first tick after D
+    return ticks_for([FLAT] * 25 + [BREAKOUT, crash, crash])
+
+
+def test_market_entry_beyond_its_stop_is_filled_then_liquidated_by_default() -> None:
+    result, h4 = run(_beyond_at_execution())
+    (trade,) = result.trades
+    execution = h4[25]["end_utc"] + STEP
+    assert trade.entry_utc == trade.exit_utc == execution
+    assert trade.entry_price == trade.stop - D("0.0010") + SPREAD and trade.exit_price == trade.stop - D("0.0010")
+    assert trade.exit_reason == "STOP_FRANCHI_À_L'EXÉCUTION" and "prime de stop garanti" not in trade.costs_quote
+    assert trade.net_account is not None and trade.liquidation_loss == trade.simulated_loss == -trade.net_account > 0
+    assert (
+        trade.stop_loss_at_execution is None and trade.exposure_measure == "perte simulée de la liquidation immédiate"
+    )
+    assert kinds(result, "STOP_DÉPASSÉ_À_L'EXÉCUTION")
+    assert kinds(result, "ENTRÉE") and not kinds(result, "ENTRÉE_ANNULÉE")
+
+
+def test_rejection_of_an_entry_beyond_its_stop_is_an_explicit_modelled_condition() -> None:
+    result, h4 = run(_beyond_at_execution(), stop_at_execution=StopAtExecution.REJECT)
+    decided = h4[25]["end_utc"]
+    booked = [*result.trades, *([result.open_trade] if result.open_trade else [])]
+    assert all(t.decided_utc != decided for t in booked)  # later signals are unaffected
+    (rejected,) = kinds(result, "ENTRÉE_REJETÉE")
+    assert len(kinds(result, "STOP_DÉPASSÉ_À_L'EXÉCUTION")) == 1  # counted in both scenarios
+    assert "condition d'acceptation modélisée" in rejected and "ASSUMP-008" in rejected
+
+
+# ---------------------------------------------------------------- equity
+
+
+def test_open_position_is_valued_in_equity_without_being_closed() -> None:
+    spec_ticks = ticks_for([FLAT] * 25 + [BREAKOUT, HOLD, HOLD])
+    result, h4 = run(spec_ticks)
+    trade, last = result.open_trade, spec_ticks[-1]
+    assert trade is not None and not result.trades and trade.entry_price == D("1.1031")
+    units = trade.size * D("10000")
+    nights = (trading_day(last.ts_utc) - trading_day(trade.entry_utc)).days
+    net_quote = (last.bid - trade.entry_price - D("0.00005")) * units - D("0.10") * trade.size * nights
+    assert result.balance == D("2000")
+    assert result.unrealized == net_quote / last.bid < 0  # loss: converted at 1/bid
+    assert result.equity == D("2000") + result.unrealized
+    # The last tick (12:55) precedes the last H4 close (13:00): the study ends at the close.
+    assert result.equity_curve[-1].utc == result.end_utc == h4[-1]["end_utc"]
+
+
+def _chronological(result: BacktestResult) -> bool:
+    times = [p.utc for p in result.equity_curve]
+    return times == sorted(times)
+
+
+def test_equity_curve_is_chronological_and_ends_at_the_end_of_the_study() -> None:
+    spec_ticks = ticks_for([FLAT] * 25 + [BREAKOUT, HOLD, HOLD])
+    after_last_close, h4 = run(spec_ticks)
+    assert _chronological(after_last_close) and spec_ticks[-1].ts_utc < h4[-1]["end_utc"]
+    assert after_last_close.end_utc == h4[-1]["end_utc"]
+    # Ticks after the last decision: the study ends at the last tick, which is replayed and valued.
+    feed = TickFeed(spec_ticks)
+    truncated = S1Backtest(
+        h4[:-1],
+        candles(spec_ticks, Timeframe.D1),
+        feed,
+        feed.gaps(timedelta(minutes=10)),
+        NO_FILTER,
+        ResearchConfig(costs=COSTS),
+    ).run()
+    assert _chronological(truncated) and truncated.end_utc == spec_ticks[-1].ts_utc
+    assert truncated.equity_curve[-1].utc == spec_ticks[-1].ts_utc
+    assert truncated.unrealized == after_last_close.unrealized  # both valued with the same last tick
+
+
+def test_equity_curve_shows_a_drawdown_the_balance_does_not() -> None:
+    dip = (D("1.1025"), D("1.1026"), D("1.1008"), D("1.1010"))  # above the stop, below the entry
+    result, h4 = run(ticks_for([FLAT] * 25 + [BREAKOUT, HOLD, dip, HOLD]))
+    (point,) = [p for p in result.equity_curve if p.utc == h4[27]["end_utc"]]
+    assert point.balance == D("2000") and point.equity < D("2000")
+    assert all(p.balance == D("2000") for p in result.equity_curve)
+
+
+# ---------------------------------------------------------------- estimated vs executed entry
+
+
+def test_entry_executed_beyond_the_estimate_is_kept_with_its_risk_overrun() -> None:
+    jump = (D("1.1025"), D("1.1060"), D("1.1055"), D("1.1058"))  # first tick after D far above the estimate
+    result, _ = run(ticks_for([FLAT] * 25 + [BREAKOUT, jump, jump]))
+    trade = result.open_trade
+    assert trade is not None and trade.entry_price == D("1.1061")
+    assert trade.size * trade.estimate.loss_account_per_contract <= trade.risk_budget  # sized before sending
+    assert trade.stop_loss_at_execution is not None and trade.stop_loss_at_execution > trade.risk_budget
+    assert trade.risk_overrun > 0 and trade.exposure_measure == "perte estimée au stop après exécution"
+    (overrun,) = kinds(result, "DÉPASSEMENT_RISQUE")
+    assert "exécution conservée" in overrun
+
+
+# ---------------------------------------------------------------- scenarios
+
+
+def _scenario_ticks() -> list[Tick]:
+    """Long entry, then a 55-minute unexplained silence with both bounding quotes above the stop,
+    then a second breakout once 20 usable candles have passed again."""
+    second = (D("1.1025"), D("1.1065"), D("1.1024"), D("1.1060"))
+    hold_high = (D("1.1060"), D("1.1065"), D("1.1055"), D("1.1060"))
+    spec = [FLAT] * 25 + [BREAKOUT] + [HOLD] * 23 + [second, hold_high, hold_high]
+    return _with_interruption(spec, candle=28, first=10, last=20)
+
+
+def test_unobservable_crossing_gives_distinct_trajectories_propagated_to_later_decisions() -> None:
+    spec_ticks = _scenario_ticks()
+    h0, _ = run(spec_ticks, policy=ScenarioPolicy.NONE_TRIGGERED)
+    h1, _ = run(spec_ticks, policy=ScenarioPolicy.ALL_TRIGGERED)
+    # H0: the position survives the silence, is kept, flagged INDÉTERMINÉE, and blocks the second entry.
+    assert not h0.trades and h0.open_trade is not None and h0.open_trade.indeterminate
+    assert kinds(h0, "SCÉNARIO_H0")
+    # H1: stop assumed triggered during the silence, exit at S when quotes resume; the flat
+    # position lets the second breakout be taken: the scenario changes the later decisions.
+    first, *_ = h1.trades
+    assert first.exit_reason == "STOP_SCÉNARIO_H1" and first.indeterminate
+    assert first.exit_price == first.stop and first.exit_utc == h4_starts(29)[28] + 21 * STEP
+    assert h1.open_trade is not None and h1.open_trade.entry_utc > first.exit_utc
+    assert h1.balance < h0.balance == D("2000")  # the H1 loss is booked; H0 books nothing yet
+    # Same indeterminate event in both trajectories; nothing is removed.
+    assert h0.open_trade.unobservable_crossings == first.unobservable_crossings
+
+
+def test_second_entry_waits_for_twenty_usable_candles_after_the_interruption() -> None:
+    early = (D("1.1025"), D("1.1065"), D("1.1024"), D("1.1060"))
+    spec = [FLAT] * 25 + [BREAKOUT] + [HOLD] * 10 + [early, HOLD]  # breakout 8 candles after the hole
+    result, _ = run(_with_interruption(spec, 28, 10, 20), policy=ScenarioPolicy.ALL_TRIGGERED)
+    assert len(result.trades) == 1 and result.open_trade is None
+    assert any("non utilisable dans les canaux" in d for d in kinds(result, "ABSTENTION"))
+
+
+# ---------------------------------------------------------------- sizing
+
+
+def test_size_is_rounded_down_on_the_up_to_date_equity() -> None:
+    result, _ = run(_scenario_ticks(), policy=ScenarioPolicy.ALL_TRIGGERED)
+    equity = D("2000")
+    assert result.open_trade is not None
+    for trade in [*result.trades, result.open_trade]:
+        budget = equity * D("0.0025")
+        loss = trade.estimate.loss_account_per_contract
+        assert trade.size * loss <= budget < (trade.size + D("0.1")) * loss
+        assert trade.estimate.complete
+        if trade.net_account is not None:
+            equity += trade.net_account
+    assert equity == result.balance  # the second budget used the equity after the first (losing) trade
+
+
+def test_unknown_cost_blocks_the_entry_instead_of_counting_zero() -> None:
+    result, _ = run(ticks_for([FLAT] * 25 + [BREAKOUT, HOLD]), costs=CostModel())
+    assert first_trade(result) is None
+    assert any(d.startswith("coût inconnu") for d in kinds(result, "ABSTENTION"))
+
+
+def test_minimum_size_above_the_budget_refuses_the_signal() -> None:
+    result, _ = run(ticks_for([FLAT] * 25 + [BREAKOUT, HOLD]), min_size=D("5"))
+    assert first_trade(result) is None
+    assert any(d.startswith("taille minimale") for d in kinds(result, "ABSTENTION"))
+
+
+# ---------------------------------------------------------------- data rules (S1 sheet §10)
+
+
+def test_exit_not_computable_on_an_unusable_candle_keeps_the_stop() -> None:
+    spec_ticks = ticks_for([FLAT] * 25 + [BREAKOUT, HOLD, HOLD, HOLD])
+    feed = TickFeed(spec_ticks)
+    h4 = candles(spec_ticks, Timeframe.H4)
+    h4[27]["complete_at_close"], h4[27]["flags_at_close"] = False, ["1 tick(s) invalides exclus"]
+    result = S1Backtest(h4, [], feed, [], NO_FILTER, ResearchConfig(costs=COSTS)).run()
+    entry = next(e for e in result.journal if e.kind == "SORTIE_NON_CALCULABLE")
+    assert entry.utc == h4[27]["end_utc"] and result.open_trade is not None
+
+
+def _flat_bars(count: int) -> list[dict[str, Any]]:
+    return candles(ticks_for([FLAT] * count), Timeframe.H4)
+
+
+def test_atr_is_unavailable_then_reseeded_on_fourteen_valid_true_ranges() -> None:
+    bars = _flat_bars(40)
+    degraded = 10
+
+    def state(i: int) -> BarState:
+        return BarState.UNEXPLAINED_INTERRUPTION if i == degraded else BarState.OK
+
+    def all_ok(i: int) -> BarState:
+        return BarState.OK
+
+    start = WilderAtr(bars, 14)
+    assert start.at(13, all_ok) is None and start.at(14, all_ok) is not None  # 15th candle of the history
+    atr = WilderAtr(bars, 14)
+    available = [t for t in range(40) if atr.at(t, state) is not None]
+    assert available[0] == degraded + 15
+    assert all(atr.at(t, state) is None for t in range(degraded, degraded + 15))
+    assert WilderAtr(bars, 14).at(degraded + 15, state) == D("0.0010")  # mean of TR(d+2..d+15)
+
+
+def test_entry_needs_twenty_usable_candles_after_an_unusable_one() -> None:
+    bars = _flat_bars(40) + candles(ticks_for([FLAT] * 40 + [BREAKOUT]), Timeframe.H4)[40:]
+    degraded = 15
+
+    def state(i: int) -> BarState:
+        return BarState.UNEXPLAINED_INTERRUPTION if i == degraded else BarState.OK
+
+    refused = evaluate_entry(degraded + 20, bars, state, WilderAtr(bars, 14), [], None, state, NO_FILTER)
+    assert refused is not None and "non utilisable dans les canaux" in getattr(refused, "reason", "")
+
+
+def test_bar_state_uses_only_what_is_known_at_the_decision() -> None:
+    bar = _flat_bars(1)[0]
+    end = bar["end_utc"]
+    gap = Gap(end - timedelta(minutes=1), end + timedelta(minutes=19), 20.0)
+    index, ten = GapIndex([gap]), timedelta(minutes=10)
+    assert bar_state(bar, end, index, ten) is BarState.OK
+    assert bar_state(bar, end + timedelta(minutes=19), index, ten) is BarState.UNEXPLAINED_INTERRUPTION
+    with pytest.raises(ValueError, match="non clôturée"):
+        bar_state(bar, end - timedelta(minutes=1), index, ten)
+
+
+def test_probable_holiday_is_unexplained_unless_a_documented_closure_is_recorded() -> None:
+    holiday: dict[str, Any] = {
+        "start_utc": utc(2019, 12, 24, 22),  # winter: 25 December's trading day starts 22:00 UTC
+        "end_utc": utc(2019, 12, 25, 2),
+        "complete_at_close": False,
+        "flags_at_close": ["jour férié probable"],
+    }
+    index, ten = GapIndex([]), timedelta(minutes=10)
+    assert bar_state(holiday, holiday["end_utc"], index, ten) is BarState.UNEXPLAINED_INTERRUPTION
+    documented = frozenset({date(2019, 12, 25)})
+    assert bar_state(holiday, holiday["end_utc"], index, ten, documented) is BarState.DOCUMENTED_CLOSURE
+    edge = {**holiday, "flags_at_close": ["hors couverture déclarée"]}
+    assert bar_state(edge, edge["end_utc"], index, ten) is BarState.PARTIAL_COVERAGE
+
+
+def test_silence_classification() -> None:
+    ten = timedelta(minutes=10)
+    assert classify_silence(utc(2019, 3, 13, 10), utc(2019, 3, 13, 10, 5), ten) is Silence.NONE
+    assert classify_silence(utc(2019, 3, 13, 10), utc(2019, 3, 13, 10, 15), ten) is Silence.UNEXPLAINED
+    weekend = (utc(2019, 3, 15, 20, 59), utc(2019, 3, 17, 21))
+    assert classify_silence(*weekend, ten) is Silence.KNOWN_CLOSURE
+    christmas = (utc(2019, 12, 24, 21, 59), utc(2019, 12, 25, 22, 1))  # 1 min open at each end
+    assert classify_silence(*christmas, ten) is Silence.UNEXPLAINED
+    assert classify_silence(*christmas, ten, frozenset({date(2019, 12, 25)})) is Silence.KNOWN_CLOSURE
+
+
+def test_engine_never_imports_an_order_path() -> None:
+    import forex_bot.backtest.engine as engine
+
+    source = engine.__loader__.get_source(engine.__name__) or ""  # type: ignore[union-attr]
+    for forbidden in ("ig_client", "submit", "/positions/otc", "dealReference", "IgClient"):
+        assert forbidden not in source
+
+
+# ---------------------------------------------------------------- decision journal (observation)
+
+
+def _decisions(result: BacktestResult) -> dict[datetime, Any]:
+    return {r.decision_utc: r for r in result.decisions}
+
+
+def test_one_record_per_h4_decision_with_both_actions_on_a_reversal() -> None:
+    after = (D("1.0990"), D("1.0988"), D("1.0985"), D("1.0988"))
+    result, h4 = run(ticks_for([FLAT] * 25 + [BREAKOUT] + [HOLD] * 10 + [REVERSE, after, after]), WIDE, **FINE)
+    assert [r.decision_utc for r in result.decisions] == [b["end_utc"] for b in h4]  # one line per decision
+    records = _decisions(result)
+    first = records[h4[0]["end_utc"]]
+    assert first.position_action is PositionAction.FLAT and first.entry_action is EntryAction.NOT_COMPUTABLE
+    assert records[h4[24]["end_utc"]].entry_action is EntryAction.NO_SIGNAL
+    entry = records[h4[25]["end_utc"]]
+    assert entry.entry_action is EntryAction.ENTRY_DECIDED and entry.order is not None
+    assert entry.order["size"] == result.trades[0].size and entry.order["side"] == "LONG"
+    held = records[h4[30]["end_utc"]]
+    assert held.position_action is PositionAction.HELD and held.entry_action is EntryAction.NOT_EVALUATED
+    assert held.known["position"]["side"] == "LONG"
+    reversal = records[h4[36]["end_utc"]]
+    assert reversal.position_action is PositionAction.EXIT_DECIDED
+    assert reversal.entry_action is EntryAction.ENTRY_DECIDED and reversal.signal is not None
+    assert reversal.signal["side"] == "SHORT" and reversal.known["position"]["side"] == "LONG"
+
+
+def test_refused_signals_are_told_apart_from_the_absence_of_signal() -> None:
+    params = S1Params(use_d1_filter=True, d1_channel=1)
+    midday, h4 = run(ticks_for([FLAT] * 21 + [BREAKOUT, HOLD, HOLD]), params)
+    refused = _decisions(midday)[h4[21]["end_utc"]]
+    assert refused.entry_action is EntryAction.SIGNAL_REFUSED and refused.signal == {"side": "LONG"}
+    assert refused.reasons == ["cassure haussière contre le contexte D1"]
+    friday, h4 = run(ticks_for([FLAT] * 29 + [BREAKOUT] + [HOLD] * 3))
+    expired = _decisions(friday)[h4[29]["end_utc"]]
+    assert expired.entry_action is EntryAction.SIGNAL_REFUSED and "marché fermé" in expired.reasons[0]
+    assert expired.known["market"] != "OPEN"
+    small, h4 = run(ticks_for([FLAT] * 25 + [BREAKOUT, HOLD]), min_size=D("5"))
+    sized_out = _decisions(small)[h4[25]["end_utc"]]
+    assert sized_out.entry_action is EntryAction.SIGNAL_REFUSED and sized_out.reasons[0].startswith("taille minimale")
+
+
+def test_exit_not_computable_is_recorded_as_a_held_position() -> None:
+    spec_ticks = ticks_for([FLAT] * 25 + [BREAKOUT, HOLD, HOLD, HOLD])
+    feed = TickFeed(spec_ticks)
+    h4 = candles(spec_ticks, Timeframe.H4)
+    h4[27]["complete_at_close"], h4[27]["flags_at_close"] = False, ["1 tick(s) invalides exclus"]
+    result = S1Backtest(h4, [], feed, [], NO_FILTER, ResearchConfig(costs=COSTS)).run()
+    record = _decisions(result)[h4[27]["end_utc"]]
+    assert record.position_action is PositionAction.HELD_EXIT_NOT_COMPUTABLE
+    assert record.known["h4"]["state"] == "INTERRUPTION_INEXPLIQUÉE"
+
+
+def test_records_hold_only_what_was_known_at_the_decision() -> None:
+    base = ticks_for([FLAT] * 25 + [BREAKOUT, HOLD, HOLD, HOLD])
+    result, h4 = run(base)
+    for record in result.decisions:
+        assert record.known["h4"]["end_utc"] <= record.decision_utc
+        assert record.known["quote"] is None or record.known["quote"]["ts_utc"] < record.decision_utc
+    # Changing every tick after the breakout decision leaves the records up to it unchanged.
+    cut = h4[25]["end_utc"]
+    shifted = [t if t.ts_utc < cut else Tick(t.ts_utc, t.bid + D("0.0007"), t.ask + D("0.0007")) for t in base]
+    feed = TickFeed(shifted)
+    other = S1Backtest(
+        h4, candles(base, Timeframe.D1), feed, feed.gaps(timedelta(minutes=10)), NO_FILTER, ResearchConfig(costs=COSTS)
+    ).run()
+    upto = [r for r in result.decisions if r.decision_utc <= cut]
+    assert upto == [r for r in other.decisions if r.decision_utc <= cut]
+    assert upto[-1].entry_action is EntryAction.ENTRY_DECIDED
+
+
+def test_window_records_only_the_decisions_of_the_study() -> None:
+    ticks = ticks_for([FLAT] * 25 + [BREAKOUT, HOLD, HOLD])
+    feed = TickFeed(ticks)
+    h4 = candles(ticks, Timeframe.H4)
+    start, end = h4[10]["end_utc"], h4[20]["end_utc"]
+    result = S1Backtest(
+        h4, candles(ticks, Timeframe.D1), feed, feed.gaps(timedelta(minutes=10)), NO_FILTER,
+        ResearchConfig(costs=COSTS), start_utc=start, end_utc=end,
+    ).run()  # fmt: skip
+    assert [r.decision_utc for r in result.decisions] == [b["end_utc"] for b in h4[10:20]]
+
+
+# ---------------------------------------------------------------- tick-level drawdown (observation)
+
+
+class _EveryTick(S1Backtest):
+    """Reference for the test only: stores the equity of every tick."""
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.seen: list[tuple[datetime, D]] = []
+
+    def _observe(self, tick: Tick) -> None:
+        super()._observe(tick)
+        self.seen.append((tick.ts_utc, self.balance + self._unrealized(tick)))
+
+
+def _brute_force_drawdown(seen: list[tuple[datetime, D]]) -> tuple[D, datetime | None, datetime | None]:
+    peak, peak_at, worst, worst_peak_at, worst_at = D("2000"), None, D(0), None, None
+    for moment, equity in seen:
+        if equity > peak:
+            peak, peak_at = equity, moment
+        elif peak - equity > worst:
+            worst, worst_peak_at, worst_at = peak - equity, peak_at, moment
+    return worst, worst_peak_at, worst_at
+
+
+def test_tick_drawdown_matches_a_stored_reference_and_sees_more_than_the_samples() -> None:
+    dip = (D("1.1025"), D("1.1026"), D("1.1004"), D("1.1024"))  # deep low tick inside the candle, above the stop
+    up = (D("1.1024"), D("1.1060"), D("1.1023"), D("1.1055"))
+    down = (D("1.1055"), D("1.1056"), D("1.1030"), D("1.1032"))
+    ticks = ticks_for([FLAT] * 25 + [BREAKOUT, HOLD, dip, up, down, HOLD])
+    feed = TickFeed(ticks)
+    engine = _EveryTick(
+        candles(ticks, Timeframe.H4), candles(ticks, Timeframe.D1), feed, feed.gaps(timedelta(minutes=10)),
+        NO_FILTER, ResearchConfig(costs=COSTS),
+    )  # fmt: skip
+    result = engine.run()
+    drawdown = result.tick_drawdown
+    assert drawdown is not None and drawdown.observed_ticks == len(ticks) == len(engine.seen)
+    worst, peak_at, trough_at = _brute_force_drawdown(engine.seen)
+    assert (drawdown.max_drawdown_eur, drawdown.drawdown_peak_utc, drawdown.trough_utc) == (worst, peak_at, trough_at)
+    assert drawdown.peak_eur == max([D("2000"), *(e for _, e in engine.seen)])
+    sampled_peak, sampled = D("2000"), D(0)
+    for point in result.equity_curve:
+        sampled_peak = max(sampled_peak, point.equity)
+        sampled = max(sampled, sampled_peak - point.equity)
+    assert drawdown.max_drawdown_eur > sampled > 0  # the low tick of `dip` falls between two samples
+
+
+def test_tick_drawdown_without_trade_stays_at_zero_from_the_initial_equity() -> None:
+    result, _ = run(ticks_for([FLAT] * 10))
+    drawdown = result.tick_drawdown
+    assert drawdown is not None and drawdown.max_drawdown_eur == 0 and drawdown.peak_eur == D("2000")
+    assert drawdown.trough_utc is None

@@ -3,16 +3,19 @@
 ## 🎯 Backlog Prioritaire
 
 ### 🏃 En Cours
-- [ ] Moteur de backtest S1 hors ligne, sur une branche distincte dépendant de la PR #3 (ADR-006) :
-  - [ ] tests synthétiques d'abord : chronologie et disponibilité des bougies, exécution bid/ask au premier tick après la décision, stops (observé, non observable, garanti, normal), dimensionnement, propagation des scénarios H0 / H1 aux fonds propres et aux décisions suivantes
-  - [ ] journal détaillé de chaque décision, abstention et transaction (motifs, données lues, scénarios)
-  - [ ] premier passage exploratoire sur 2015-2021 uniquement, coûts paramétrés explicitement, sans optimisation
+- [ ] Moteur de backtest S1 hors ligne (ADR-006), PR #4 en brouillon vers `main` :
+  - [x] moteur et tests synthétiques (branche `feat/s1-backtest-engine`, 2026-10-30) : chronologie et disponibilité des bougies, exécution bid/ask au premier tick après la décision, stops (observé, non observable, garanti, normal), dimensionnement, propagation des scénarios H0 / H1 aux fonds propres et aux décisions suivantes
+  - [x] corrections de la revue d'Astra (2026-10-31) : stop prioritaire sur une sortie au canal en attente, solde / latent / fonds propres, risque au prix exécuté et dépassement conservé, taille d'un retournement ; 6 tests ciblés (ASSUMP-024, validée par ADR-009)
+  - [x] seconde revue (2026-11-03) : fin d'étude et courbe chronologique, état strictement avant `D`, règle explicite pour une entrée au-delà du stop ; 4 tests ciblés
+  - [x] journal d'une ligne par décision H4 (connu à la décision / action, résultats reliés à part) et drawdown observable au tick (2026-11-03)
+  - [x] lecteur de ticks en flux (un fichier journalier à la fois, Parquet) et référence en mémoire (DuckDB) ; équivalence vérifiée sur données synthétiques et sur l'échantillon réel (2026-11-03)
+  - [x] premier passage exploratoire 2019-04-01 → 2019-07-01, dates fixées avant résultats, paramètres fixes, coûts de recherche explicites (ADR-009)
+  - [ ] revue du passage exploratoire ; suite uniquement sur décision de l'opérateur
 - [ ] Fermetures particulières (jours fériés, fermetures anticipées) : rechercher une source applicable, en parallèle ; sans preuve, le classement actuel est conservé (ASSUMP-016)
 
 ### 📋 A Faire
 - [ ] Critères de passage du développement (2015-2021) à la validation (2022-2023) : règles et paramètres figés et versionnés, variantes enregistrées, journal complet, aucune donnée 2022-2023 consultée pour régler (ADR-007)
 - [ ] Sauvegarde des données Dukascopy (environ 28 Go, uniquement sur le poste de l'opérateur) : support à choisir par l'opérateur ; la purge devra aussi couvrir la copie
-- [ ] Bascule du dossier principal sur la branche de travail et déplacement de `data/` (fin du worktree séparé)
 - [ ] Confirmer unité de taille, taille minimale et incrément IG (ASSUMP-004, ASSUMP-005)
 - [ ] Vérifier la grille de coûts IG (commission, conversion, financement, prime de stop garanti) — ASSUMP-006
 - [ ] Confirmer le déclenchement des stops et la référence des distances minimales — ASSUMP-008

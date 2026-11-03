@@ -99,6 +99,19 @@ def market_state(moment: datetime) -> MarketState:
     return MarketState.OPEN
 
 
+def expected_open_minutes(start: datetime, end: datetime) -> float:
+    """Minutes of [start, end) during which the market is expected open (minute resolution)."""
+    minutes = 0.0
+    cursor = require_utc(start)
+    end = require_utc(end)
+    while cursor < end:
+        step = min(end, cursor.replace(second=0, microsecond=0) + timedelta(minutes=1))
+        if market_state(cursor) is MarketState.OPEN:
+            minutes += (step - cursor).total_seconds() / 60
+        cursor = step
+    return minutes
+
+
 def expected_open_hours(start: datetime, end: datetime) -> list[datetime]:
     """UTC hour starts in [start, end) during which the market is expected to be open."""
     hour = floor_hour(start)

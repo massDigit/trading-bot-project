@@ -33,6 +33,7 @@ from forex_bot.history.calendar import (
     candle_end,
     candle_start,
     expected_open_hours,
+    expected_open_minutes,
     market_state,
     trading_day,
     trading_day_start_utc,
@@ -169,18 +170,6 @@ def _covered(start: datetime, end: datetime, coverage: list[tuple[datetime, date
     return any(c_start <= start and end <= c_end for c_start, c_end in coverage)
 
 
-def _open_minutes(start: datetime, end: datetime) -> float:
-    """Minutes of [start, end) during which the market is expected open (minute resolution)."""
-    minutes = 0.0
-    cursor = start
-    while cursor < end:
-        step = min(end, cursor.replace(second=0, microsecond=0) + timedelta(minutes=1))
-        if market_state(cursor) is MarketState.OPEN:
-            minutes += (step - cursor).total_seconds() / 60
-        cursor = step
-    return minutes
-
-
 def summarize_ticks(
     store: HistoryStore, source: str, instrument: str, gap_threshold: timedelta = DEFAULT_GAP_THRESHOLD
 ) -> TickSummary:
@@ -244,7 +233,7 @@ def summarize_ticks(
             ]
         for before, after in pairs:
             if after - before > gap_threshold:
-                summary.gaps.append(Gap(before, after, _open_minutes(before, after)))
+                summary.gaps.append(Gap(before, after, expected_open_minutes(before, after)))
 
     closes = expected_weekly_closes(summary.coverage)
     if closes:
@@ -315,8 +304,8 @@ def overlaps_gap(
     for gap in gaps:
         gap_end = gap.end_utc if known_until is None else min(gap.end_utc, known_until)
         lo, hi = max(start, gap.start_utc), min(end, gap_end)
-        if lo < hi and _open_minutes(gap.start_utc, gap_end) * 60 > threshold.total_seconds():
-            if _open_minutes(lo, hi) > 0:
+        if lo < hi and expected_open_minutes(gap.start_utc, gap_end) * 60 > threshold.total_seconds():
+            if expected_open_minutes(lo, hi) > 0:
                 return True
     return False
 
