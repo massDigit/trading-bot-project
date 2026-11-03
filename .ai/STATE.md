@@ -16,9 +16,11 @@ validé comme moteur de recherche hors ligne et fusionné (PR #4, `d52f24f`) ; r
 ## 🎯 Focus Courant
 Référence S1 seule sur la période de développement 2015-2021 (branche
 `feat/s1-reference-2015-2021`, PR #5 en brouillon, depuis `main` = `d52f24f`) : référence commitée
-(`7414378`) ; granularité 0,01 contrat commitée (`3477689`, `d316d31`), conclusion retenue par
-l'opérateur après revue d'Astra ; risque 1 % (`docs/experiments/S1_RISK_1PCT_001.md`) terminé, à
-présenter avant commit. Fusion de la PR #5 réservée à l'opérateur.
+(`7414378`) ; granularité 0,01 contrat (`3477689`), conclusion retenue par l'opérateur après revue
+d'Astra ; risque 1 % (`docs/experiments/S1_RISK_1PCT_001.md`) terminé et clos (ADR-014) : S1 à
+0,25 % reste la référence de développement. Sorties de passage retirées de l'historique de la
+branche ; fusion de la PR #5 par l'agent autorisée par l'opérateur. Suite : protocole S2 (aucun
+backtest).
 
 ## 🧾 Synthèse vérifiée (2026-11-03)
 - PR #1 à #4 fusionnées dans `main` par commits de fusion, sur autorisation de l'opérateur
@@ -63,7 +65,7 @@ présenter avant commit. Fusion de la PR #5 réservée à l'opérateur.
   (−495,03 €), 131 non évalués, 0 toujours refusé. Écart −376,35 € = +94,00 (48 communes, tailles
   plus élevées) − 495,03 (84 ajoutées) + 24,69 (5 évitées). Plus gros gain : vente du 2018-04-20 ;
   sans elle, la référence passe de +17,63 € à −12,98 €, la variante de −358,71 € à −450,54 €. Sur
-  2015-2021 et sous ces hypothèses, 1 % n'améliore pas S1. 4 849 s / 321 Mio (H0), 4 891 s / 311 Mio (H1).
+  2015-2021 et sous ces hypothèses, 1 % n'améliore pas S1. 4 849 s / 321 Mio (H0), 4 891 s / 311 Mio (H1). Expérience close (ADR-014).
 - Branches fusionnées `feat/ig-demo-diagnostic`, `feat/eurusd-mini-risk-guard`,
   `feat/eurusd-history-s1` supprimées (locales et GitHub) après vérification.
 
@@ -94,7 +96,7 @@ présenter avant commit. Fusion de la PR #5 réservée à l'opérateur.
   Ces valeurs ne sont pas transposées au compte réel.
 
 ## 🔄 En Cours
-- [ ] Risque 1 % (ADR-013) : H0 et H1 terminés, comparaison faite ; lot à présenter, non commité
+- [ ] Protocole S2 (reprise de tendance après repli) : à présenter, aucun backtest
 - [ ] Recherche d'une source applicable pour les fermetures particulières (non bloquante)
 - [ ] Demande au support IG préparée, non envoyée (`docs/IG_SUPPORT_REQUEST.md`)
 
@@ -116,6 +118,6 @@ présenter avant commit. Fusion de la PR #5 réservée à l'opérateur.
 - Authentification SSH vers GitHub intermittente le 2026-10-30 (clé enregistrée et chargée) ; une nouvelle tentative a suffi.
 
 ## 🏁 Prochaine Étape / Milestone
-1. Revue de la PR #5 (référence S1 2015-2021 et granularité) par l'opérateur ; ensuite seulement, sur décision, un modèle de sélection des signaux comparé à cette référence (aucun entraînement avant).
+1. Protocole S2, sans backtest ; ensuite seulement, sur décision, un modèle de sélection des signaux comparé à cette référence (aucun entraînement avant).
 2. En parallèle : fermetures particulières et confirmations IG.
 3. Garder 2022-2023 pour l'évaluation des variantes figées, puis 2024-2025 pour le test final (ADR-007).

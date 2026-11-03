@@ -51,8 +51,9 @@ Fichiers distincts de la référence, hors Git, avec copie du protocole et du di
 
 ## 5. Résultats (2026-11-03)
 
-Les sections 1 à 4 sont restées inchangées après le lancement. Fichiers versionnés sur décision de
-l'opérateur (ADR-012), dans `data/reports/backtests/` : `s1_gran001_2015_2021_h0*` et `_h1*` (rapport, journal des décisions,
+Les sections 1 à 4 sont restées inchangées après le lancement. Fichiers locaux, hors Git (publiés
+temporairement dans la PR #5, puis retirés de son historique avant fusion, ADR-014), dans
+`data/reports/backtests/` : `s1_gran001_2015_2021_h0*` et `_h1*` (rapport, journal des décisions,
 journal d'exécution, diff de lancement), `s1_gran001_vs_ref.json` et `s1_gran001_h1_vs_ref.json`
 (comparaisons).
 

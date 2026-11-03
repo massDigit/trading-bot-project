@@ -52,6 +52,7 @@ Le format suit [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/) et le pr
 - Documentation adaptée au projet Robot Forex : `README.md`, `docs/`, `.ai/`.
 
 ### Fixed
+- PR #5 : les sorties de passage publiées par `d316d31` (journaux de décisions, rapports et comparaisons contenant des bougies, cotations et prix dérivés de Dukascopy) sont retirées de la branche et de son historique avant fusion (ADR-014) ; elles restent locales, hors Git.
 - `forex-backtest-explore` : la provenance (commit, empreinte du diff, commande) était calculée à l'écriture du rapport, donc après les modifications faites pendant le passage ; elle est désormais relevée au lancement. Pour la référence 2015-2021, l'empreinte du rapport correspond à l'arbre de fin de passage (reconstitué) ; le code exécuté est identique au commit `7414378`.
 - Moteur S1 : un stop franchi sur le tick qui exécutait une sortie au canal en attente était ignoré au profit de la sortie au canal (stop garanti sans prime) ; le stop est désormais prioritaire.
 - Moteur S1 : la courbe de fonds propres pouvait revenir en arrière à la fin (point au dernier tick ajouté après la dernière décision) ; les ticks horodatés exactement à `D` entraient dans le solde lu par la décision mais pas dans la cotation de dimensionnement ; une entrée dont le premier tick d'exécution dépassait le stop était annulée au vu de ce prix futur.
