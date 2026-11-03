@@ -14,10 +14,10 @@ validé comme moteur de recherche hors ligne et fusionné (PR #4, `d52f24f`) ; r
 (ADR-013) mesurées, sans valeur de validation de performance.
 
 ## 🎯 Focus Courant
-PR #5 fusionnée dans `main` (`d9d7089`, 2026-11-03) par l'agent sur autorisation de l'opérateur,
-après retrait des sorties de passage de l'historique de la branche (ADR-014) ; S1 à 0,25 % reste la
-référence de développement. Protocole S2 (`docs/strategies/S2_PULLBACK.md`, ASSUMP-025) sur la
-branche `docs/s2-pullback-protocol` : proposé, à approuver ; aucun backtest.
+PR #5 fusionnée dans `main` (`d9d7089`, 2026-11-03) ; S1 à 0,25 % reste la référence de
+développement. Fiche S2 (`docs/strategies/S2_PULLBACK.md`) spécifiée, ASSUMP-025 approuvée pour la
+recherche hors ligne (ADR-015). Suite : étape 1 de S2 (implémentation et tests synthétiques) sur une
+branche distincte ; aucun passage historique.
 
 ## 🧾 Synthèse vérifiée (2026-11-03)
 - PR #1 à #4 fusionnées dans `main` par commits de fusion, sur autorisation de l'opérateur
@@ -93,7 +93,7 @@ branche `docs/s2-pullback-protocol` : proposé, à approuver ; aucun backtest.
   Ces valeurs ne sont pas transposées au compte réel.
 
 ## 🔄 En Cours
-- [ ] Protocole S2 (reprise de tendance après repli) : à présenter, aucun backtest
+- [ ] S2 étape 1 : implémentation et tests synthétiques (ADR-015) ; aucun passage historique
 - [ ] Recherche d'une source applicable pour les fermetures particulières (non bloquante)
 - [ ] Demande au support IG préparée, non envoyée (`docs/IG_SUPPORT_REQUEST.md`)
 
@@ -115,6 +115,6 @@ branche `docs/s2-pullback-protocol` : proposé, à approuver ; aucun backtest.
 - Authentification SSH vers GitHub intermittente le 2026-10-30 (clé enregistrée et chargée) ; une nouvelle tentative a suffi.
 
 ## 🏁 Prochaine Étape / Milestone
-1. Protocole S2, sans backtest ; ensuite seulement, sur décision, un modèle de sélection des signaux comparé à cette référence (aucun entraînement avant).
+1. S2 : étape 1 (tests synthétiques), puis étapes 2 à 4 sur décision ; ensuite seulement, sur décision, un modèle de sélection des signaux comparé à cette référence (aucun entraînement avant).
 2. En parallèle : fermetures particulières et confirmations IG.
 3. Garder 2022-2023 pour l'évaluation des variantes figées, puis 2024-2025 pour le test final (ADR-007).

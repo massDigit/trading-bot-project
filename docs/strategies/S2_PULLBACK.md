@@ -1,10 +1,9 @@
 # Fiche S2 — Reprise de tendance après repli (swing)
 
-> Identifiant code : `SWING_02`. Statut : **candidate en cours de spécification** (cahier des
-> charges §6.2, §6.6). Principe approuvé par l'opérateur le 2026-11-03 ; règles et valeurs
-> numériques **proposées** (ASSUMP-025, statut `PROPOSED` jusqu'à la revue de la fiche complète).
-> Documentation seulement : **aucun code, aucun backtest, aucun entraînement, aucune donnée
-> 2022-2025**. Les valeurs sont choisies a priori et ne seront pas optimisées.
+> Identifiant code : `SWING_02`. Statut : **spécifiée** (cahier des charges §6.2, §6.6). Règles et
+> valeurs numériques **approuvées pour la recherche hors ligne** (ASSUMP-025, ADR-015, 2026-11-03),
+> au commit `a10a779` complété des décisions du §11. Ni validation de performance ni autorisation
+> de trading. Valeurs choisies a priori, jamais optimisées ; aucune donnée 2022-2025.
 
 **Libellés.** Dans cette fiche, **H1, H4 et D1 désignent toujours des unités de temps** (bougies
 d'une heure, de quatre heures, d'un jour). Les deux scénarios de stop non observable du moteur
@@ -138,19 +137,27 @@ précédente :
 
 1. **configuration identifiée** à `I` (§4.2) ;
 2. **contact** sur une H1 `c` qui commence à `I` ou après (§4.3) ;
-3. **pivot de reprise** : un sommet H1 (ordre 2) formé sur une bougie `r` **postérieure à `c`**
-   (`r` commence après la fin de `c`) ;
+3. **pivot de reprise** : un sommet H1 (ordre 2) formé sur une bougie `r` postérieure à `c` ;
 4. **confirmation** de ce sommet, à la fin de la bougie `r + 2` : son niveau devient le **seuil** ;
 5. **clôture de cassure** : la première H1 `h` qui commence à la confirmation ou après et dont
-   `bid_close[h]` est strictement supérieur au seuil. Le seuil est donc connu au début de `h`.
+   `bid_close[h]` est strictement supérieur au seuil.
+
+**Bornes temporelles** (mêmes conventions en H1 et en H4) :
+- `début(c) ≥ I` ;
+- `début(r) ≥ fin(c)` : la bougie de contact ne peut pas être le pivot, la bougie qui la suit
+  immédiatement peut l'être ;
+- `confirmation(seuil) = fin(r + p) ≤ début(h)` : le seuil est connu au début de la bougie de
+  cassure ;
+- après une cassure refusée à l'instant `D_refus` : `début(r') ≥ D_refus` pour tout nouveau pivot
+  de reprise `r'`, qui doit ensuite être confirmé avant sa propre bougie de cassure.
 
 Précisions :
 - s'il existe plusieurs pivots de reprise confirmés, le seuil est le **dernier** confirmé avant le
   début de `h` ;
-- **un seuil ne produit qu'une cassure** : la première clôture au-dessus. Une clôture qui reste
-  ensuite au-dessus d'un seuil déjà franchi n'est pas une nouvelle cassure. Si l'entrée est refusée
-  à cette cassure (cible trop proche, taille, marché fermé), le seuil est consommé ; seul un
-  nouveau pivot de reprise, formé et confirmé ensuite, peut produire une nouvelle cassure ;
+- **un seuil ne produit qu'une cassure** : la première clôture au-dessus **consomme** le seuil,
+  même si l'entrée est refusée (cible trop proche, taille, marché fermé). Une clôture qui reste
+  ensuite au-dessus d'un seuil déjà franchi n'est pas une nouvelle cassure. Une nouvelle tentative
+  exige un nouveau pivot de reprise **formé puis confirmé après ce refus** ;
 - un pivot formé avant le contact, ou sur la bougie de contact, ne sert jamais de seuil.
 
 À `D` = fin de `h`, l'entrée est décidée si, en plus :
@@ -180,16 +187,19 @@ Exécution : ordre au marché au premier tick strictement postérieur à `D` (ac
 | Cible | `E`, atteinte quand le **bid** ≥ `E` | `E`, atteinte quand l'**ask** ≤ `E` |
 | Exécution d'entrée | ask du premier tick après `D` | bid du premier tick après `D` |
 
-Asymétrie assumée : `E` est mesuré sur la série bid, mais la cible d'une vente est comparée à
-l'ask (côté de sortie). Une vente doit donc dépasser `E` d'environ un spread pour atteindre sa
-cible ; c'est la même convention de côté de sortie que pour les stops de S1.
+Asymétrie assumée (approuvée, ADR-015) : la structure et `E` sont calculés sur la série bid ; le
+stop d'une vente utilise l'extrême `ask_high` du repli et sa cible est atteinte quand ask ≤ `E`.
+Une vente doit donc dépasser `E` du spread observé pour atteindre sa cible ; **aucune correction
+forfaitaire du spread** n'est ajoutée. C'est la convention de côté de sortie des stops de S1.
 
 ### 4.6 Comparaison enregistrée : déclenchement H4
 
 Même configuration (`E`, `K`, `A`, zone, invalidation, délai, données), même stop et mêmes sorties.
-La séquence du §4.4 est appliquée aux bougies **H4** : contact sur une H4 commençant à `I` ou après ;
-pivot de reprise H4 (ordre 3) formé sur une H4 postérieure à la H4 de contact ; confirmation ;
-première clôture H4 au-delà du seuil, connu au début de cette H4. Un sommet H4 inférieur ou égal à
+La comparaison change **l'unité du contact, du pivot de reprise et de la cassure** : toute la
+séquence du §4.4 est appliquée aux bougies **H4**, avec les mêmes bornes temporelles (contact sur une
+H4 commençant à `I` ou après ; pivot de reprise H4 d'ordre 3 avec `début(r) ≥ fin(c)` ;
+confirmation à `fin(r + 3) ≤ début(h)` ; première clôture H4 au-delà du seuil). Elle compare donc
+**deux séquences complètes**, pas seulement deux heures d'entrée. Un sommet H4 inférieur ou égal à
 `E` peut servir de seuil dans cette comparaison sans changer la configuration (§4.3). Les décisions
 de cette comparaison ont lieu à la disponibilité de chaque H4.
 
@@ -306,7 +316,13 @@ plus tôt et peut changer les entrées suivantes, les fonds propres et les taill
 |---|---|---|
 | **A — observé seulement** (`NONE_TRIGGERED`) | seule la première cotation après le trou compte ; au-delà d'une borne, cette borne s'exécute ; sinon la position continue | stop : niveau garanti ; cible : cotation observée |
 | **B — stop d'abord** (`ALL_TRIGGERED`) | tout franchissement du stop possible pendant le trou a eu lieu, avant la cible | niveau du stop garanti, à la fin du trou |
-| **C — cible d'abord** (à implémenter) | toute atteinte de la cible possible pendant le trou a eu lieu, avant le stop | **niveau `E`**, à la fin du trou, sans amélioration de prix invisible |
+| **C — cible d'abord** | toute atteinte de la cible possible pendant le trou a eu lieu, avant le stop | **niveau `E`**, comptabilisé au premier tick qui clôt le trou, sans amélioration de prix invisible |
+
+Scénario C (ADR-015) : la sortie est comptabilisée au niveau `E` au **premier tick qui clôt le
+trou**. Le journal enregistre séparément l'intervalle du trou et l'instant de comptabilisation :
+l'heure réelle du franchissement reste inconnue. Le capital n'est **pas libéré rétroactivement**
+pour une décision antérieure à cette comptabilisation (une décision prise pendant le trou voit
+encore la position ouverte). Même règle pour B.
 
 C est publié seulement si au moins une transaction indéterminée admet une atteinte possible de la
 cible et si C diffère alors de A. B est publié seulement si au moins une transaction admet un
@@ -344,8 +360,8 @@ S1).
 bid / ask observées, règles existantes sur les fermetures et coûts de recherche de la référence S1
 (`RESEARCH_COSTS`).
 
-**Étape 0 — figer la fiche.** L'opérateur relit la fiche et approuve ASSUMP-025, ou la modifie,
-**avant** toute implémentation.
+**Étape 0 — fiche figée** : ASSUMP-025 approuvée pour la recherche hors ligne (ADR-015,
+2026-11-03).
 
 **Étape 1 — implémentation hors ligne et tests synthétiques uniquement** (aucune donnée réelle) :
 pivots connus seulement à `i + p` et égalités sans pivot ; ordre H1 / H4 / D1 aux clôtures communes ;
@@ -383,10 +399,13 @@ multiples du risque. Comparaison à la référence S1 : chevauchement des positi
 résultats annuels côte à côte.
 
 **Lecture des résultats.**
-1. **Net après coûts** dans chaque scénario publié : critère de lecture proposé, net positif
-   attendu.
+1. **Net après coûts** : un net **strictement positif dans chaque scénario publié** (A, et B ou C
+   s'ils existent) est un résultat favorable sur la période de développement, sans plus. Si le signe
+   change entre A, B et C, la conclusion est que **le résultat dépend du traitement des trous**.
+   Tous les résultats sont publiés.
 2. **Net sans la meilleure transaction** : indicateur de **concentration des gains**, rapporté et
-   commenté, **pas un motif automatique de rejet**.
+   commenté, **pas un motif automatique de rejet**. Le seuil de 6 % ci-dessous est un **seuil de
+   revue**, pas un critère d'exclusion.
 3. **Seuil de revue de 6 % du drawdown relatif au tick.**
    - *Origine* : seuil de « baisse depuis le sommet entraînant une revue » du cahier des charges (§8).
    - *Définition exacte* : fonds propres au tick `F(t)` = solde réalisé + valeur de liquidation de
@@ -410,9 +429,9 @@ Un résultat défavorable est rapporté tel quel ; aucun paramètre n'est ajust�
 **Interdits.** Aucune donnée 2022-2025 ; aucun réglage après lecture des résultats ; aucun
 entraînement ; aucun ordre ; le sélecteur IA n'est pas concerné.
 
-## 10. Paramètres proposés (ASSUMP-025)
+## 10. Paramètres approuvés pour la recherche hors ligne (ASSUMP-025)
 
-| Paramètre | Proposition | Rôle |
+| Paramètre | Valeur | Rôle |
 |---|---|---|
 | `p_D1` | 2 | ordre des pivots D1 (tendance) |
 | `p_H4` | 3 | ordre des pivots H4 (`E`, `K`) |
@@ -424,17 +443,26 @@ entraînement ; aucun ordre ; le sélecteur IA n'est pas concerné.
 | `R_min` | 1,0 | gain potentiel net / perte estimée au stop |
 | `H_max` | 60 H4 après l'exécution | sortie temporelle |
 
-## 11. Arbitrages encore ouverts
+## 11. Décisions de l'opérateur (2026-11-03)
 
-Retenus par l'opérateur le 2026-11-03 (revue du commit `647d709`) : valeurs numériques proposées,
-contact sur H1, pivots stricts sans égalité, ATR figé à l'identification, déclenchement H4 comme
-comparaison secondaire, sortie à la cible à la première cotation exécutable, scénarios A, B et C,
-seuil de revue de 6 %. Hors de cette expérience : filtre horaire, sortie sur perte de la tendance
-D1, filtre de moyenne mobile, continuation suiveuse.
+Revue du commit `647d709` : valeurs numériques proposées, contact sur H1, pivots stricts sans
+égalité, ATR figé à l'identification, déclenchement H4 comme comparaison secondaire, sortie à la
+cible à la première cotation exécutable, scénarios A, B et C, seuil de revue de 6 %. Hors de cette
+expérience : filtre horaire, sortie sur perte de la tendance D1, filtre de moyenne mobile,
+continuation suiveuse.
 
-Points de détail introduits par cette révision, à confirmer :
-1. Un seuil consommé par une cassure refusée (cible trop proche, taille, marché fermé) ne peut plus
-   servir ; seul un nouveau pivot de reprise le peut (§4.4).
-2. Vente : extrême du repli mesuré sur `ask_high` et cible comparée à l'ask (§4.5).
-3. Scénario C : sortie au niveau `E` à l'instant de fin du trou (§7).
-4. Le critère « net après coûts positif » reste une proposition de lecture (§9).
+Revue du commit `a10a779` (ADR-015) :
+1. **Seuil consommé** : la première cassure consomme le seuil, même si l'entrée est refusée ; une
+   nouvelle tentative exige un nouveau pivot formé puis confirmé après ce refus (§4.4).
+2. **Vente** : structure et `E` sur le bid ; stop sur l'extrême `ask_high` du repli ; cible atteinte
+   quand ask ≤ `E` ; aucune correction forfaitaire du spread (§4.5).
+3. **Scénario C** : sortie au niveau `E` comptabilisée au premier tick qui clôt le trou ; intervalle
+   du trou et instant de comptabilisation journalisés séparément ; aucun capital libéré
+   rétroactivement (§7).
+4. **Lecture** : net strictement positif dans chaque scénario publié = résultat favorable sur la
+   période de développement ; signe différent entre A, B et C = résultat dépendant du traitement
+   des trous ; tous les résultats publiés ; net sans la meilleure transaction = indicateur de
+   concentration ; 6 % = seuil de revue (§9).
+5. **Bornes temporelles** : `début(pivot) ≥ fin(contact)` et `confirmation(seuil) ≤
+   début(bougie de cassure)`, en H1 et en H4 ; la comparaison H4 compare deux séquences complètes
+   (§4.4, §4.6).
