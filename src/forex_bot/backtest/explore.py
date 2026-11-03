@@ -323,7 +323,7 @@ def _identical(a: BacktestResult, b: BacktestResult) -> list[str]:
     return [name for name, same in checks.items() if not same]
 
 
-def _provenance(argv: list[str] | None) -> dict[str, Any]:
+def _provenance(argv: list[str] | None, prog: str = "forex-backtest-explore") -> dict[str, Any]:
     """Commit and state of the working tree the run used, and its command line."""
 
     executable = shutil.which("git")
@@ -341,7 +341,7 @@ def _provenance(argv: list[str] | None) -> dict[str, Any]:
         "branch": git("rev-parse", "--abbrev-ref", "HEAD"),
         "uncommitted_diff_sha256": hashlib.sha256(diff.encode()).hexdigest() if diff else None,
         "uncommitted_files": git("diff", "HEAD", "--name-only").splitlines(),
-        "command": ["forex-backtest-explore", *(sys.argv[1:] if argv is None else argv)],
+        "command": [prog, *(sys.argv[1:] if argv is None else argv)],
     }
 
 

@@ -31,6 +31,7 @@ ig-price-probe = "forex_bot.price_probe:main"
 forex-history = "forex_bot.history.cli:main"
 forex-backtest-explore = "forex_bot.backtest.explore:main"
 forex-backtest-compare = "forex_bot.backtest.compare:main"
+forex-s2-availability = "forex_bot.backtest.s2_availability:main"
 
 [tool.ruff]
 line-length = 120
