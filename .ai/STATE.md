@@ -8,22 +8,24 @@
 
 ## 🚀 Phase Actuelle
 Historique de recherche EUR/USD acquis (2015-2023, avec exceptions connues) ; règles de données
-de S1 validées comme référence expérimentale ; moteur de backtest S1 hors ligne **implémenté**
-(tests synthétiques), **en revue** (PR #4) ; **aucun passage sur données historiques réalisé**.
+de S1 validées comme référence expérimentale ; moteur de backtest S1 hors ligne **implémenté**,
+conventions validées (ADR-009), PR #4 en brouillon ; **un seul passage exploratoire** réalisé
+(2019-04-01 → 2019-07-01), sans valeur de validation de performance.
 
 ## 🎯 Focus Courant
-Seconde revue d'Astra du moteur S1 (branche `feat/s1-backtest-engine`, PR #4 en brouillon vers
-`main`) : fin d'étude et courbe chronologique, convention unique à l'instant `D`, entrée dont le
-premier tick d'exécution dépasse le stop. Ensuite : lecteur de ticks en flux, puis petit passage
-exploratoire sur 2015-2021 une fois les corrections validées.
+Lecteur de ticks en flux et premier passage exploratoire de S1 (branche `feat/s1-backtest-engine`,
+PR #4 en brouillon vers `main`), à présenter à l'opérateur avant commit.
 
 ## 🧾 Synthèse vérifiée (2026-11-03)
 - PR #1, #2 et #3 fusionnées dans `main` par commits de fusion, sur autorisation de l'opérateur
   (`main` = `aa69503`). Une branche depuis `main`, une PR vers `main`.
 - **PR #4 ouverte en brouillon** (`feat/s1-backtest-engine` → `main`) : moteur S1 (`9b38118`),
-  première revue d'Astra corrigée (`b8506b0`) ; seconde revue (2026-11-03, trois incohérences
-  chronologiques) corrigée dans l'arbre de travail, non commitée. 198 tests réussis ;
-  `ruff check`, `ruff format --check` et `uv run mypy src tests` sans erreur.
+  revues d'Astra corrigées (`b8506b0`, `cf4d0b4`) et confirmées par Astra ; ASSUMP-024 validée
+  (ADR-009). Lecteur en flux et passage exploratoire dans l'arbre de travail, non commités.
+  203 tests réussis ; `ruff check`, `ruff format --check` et `uv run mypy src tests` sans erreur.
+- Comparaison sur l'échantillon réel 2019-04-01 → 2019-07-01 (7 707 234 ticks, 91 fichiers) :
+  lecteurs en mémoire et en flux **identiques** (transactions, coûts, journal, fonds propres, fin).
+  Passage en flux seul : 164 s, pic de mémoire 195 Mio (Mac M4) ; avec la référence en mémoire : 3,7 Gio.
 - Branches fusionnées `feat/ig-demo-diagnostic`, `feat/eurusd-mini-risk-guard`,
   `feat/eurusd-history-s1` supprimées (locales et GitHub) après vérification.
 
@@ -42,7 +44,9 @@ exploratoire sur 2015-2021 une fois les corrections validées.
 - [x] Règles de données de S1 validées comme référence expérimentale (ADR-006) ; fiche S1 harmonisée
 - [x] Choix du projet ASSUMP-001 à 022 approuvés dans leur portée (ADR-008) ; faits extérieurs ouverts : ASSUMP-005, 008, 018, 019 et parts extérieures des entrées mixtes
 - [x] ADR-002 : conteneurisation Docker différée jusqu'au besoin d'exécution continue
-- [x] Moteur S1 hors ligne implémenté (`src/forex_bot/backtest/`), tests synthétiques uniquement ; jamais exécuté sur l'historique
+- [x] Moteur S1 hors ligne implémenté (`src/forex_bot/backtest/`) ; conventions ASSUMP-024 validées (ADR-009)
+- [x] Lecture bornée de l'historique : lecteur en flux (un fichier journalier à la fois) et référence en mémoire, fenêtre limitée à 2015-2021
+- [x] Passage exploratoire S1 sur 2019-04-01 → 2019-07-01 (initialisation depuis 2019-01-01), dates fixées avant résultats (ADR-009)
 
 ## 📊 Résultat du diagnostic démo (2026-10-27, observations démo uniquement)
 - 2 comptes CFD en EUR (« CFD » actif/par défaut, « Barrières et Options ») ; solde fictif 10 000 €.
@@ -52,8 +56,7 @@ exploratoire sur 2015-2021 une fois les corrections validées.
   Ces valeurs ne sont pas transposées au compte réel.
 
 ## 🔄 En Cours
-- [ ] Revue du moteur S1 (PR #4) : corrections des deux revues d'Astra appliquées, conventions ASSUMP-024 proposées à l'opérateur
-- [ ] Lecteur de ticks en flux (DuckDB) puis premier passage exploratoire 2015-2021 : **non réalisé**
+- [ ] PR #4 en brouillon : lecteur en flux et premier passage exploratoire (2019-04-01 → 2019-07-01) à présenter, non commités
 - [ ] Recherche d'une source applicable pour les fermetures particulières (non bloquante)
 - [ ] Demande au support IG préparée, non envoyée (`docs/IG_SUPPORT_REQUEST.md`)
 
@@ -75,6 +78,6 @@ exploratoire sur 2015-2021 une fois les corrections validées.
 - Authentification SSH vers GitHub intermittente le 2026-10-30 (clé enregistrée et chargée) ; une nouvelle tentative a suffi.
 
 ## 🏁 Prochaine Étape / Milestone
-1. Valider les corrections de la PR #4, puis lecteur de ticks en flux et petit passage sur 2015-2021 uniquement, coûts paramétrés (non confirmés chez IG), sans optimisation.
+1. Revue du passage exploratoire par l'opérateur et Astra ; suite (autres fenêtres 2015-2021, variantes) uniquement sur décision, coûts paramétrés (non confirmés chez IG), sans optimisation.
 2. En parallèle : fermetures particulières et confirmations IG.
 3. Garder 2022-2023 pour l'évaluation des variantes figées, puis 2024-2025 pour le test final (ADR-007).

@@ -90,20 +90,21 @@ exécution obtenue.
 Une décision prise à `E` n'est jamais réécrite, même si une information apparue après `E`
 montre qu'une bougie qu'elle a lue était dégradée.
 
-**Priorité des événements sur un même tick (ASSUMP-024, proposée).** 1) silence précédant le
+**Priorité des événements sur un même tick (ASSUMP-024, ADR-009).** 1) silence précédant le
 tick (§10.5) ; 2) stop de la position ouverte ; 3) sortie au canal en attente ; 4) entrée en
 attente. Si le premier tick après `E` franchit déjà le stop, le stop l'emporte (ordre déjà en
 place) : stop garanti exécuté au niveau `S` avec sa prime, stop normal au prix observé ; la
 sortie au canal est abandonnée et journalisée (`SORTIE_CANAL_ABANDONNÉE`). Une entrée en attente
 (retournement) est ensuite exécutée sur ce même tick.
 
-**Événements exactement à `D` (ASSUMP-024, proposée).** La décision lit l'état strictement avant
+**Événements exactement à `D` (ASSUMP-024, ADR-009).** La décision lit l'état strictement avant
 `D` (solde, positions, cotations). Un tick horodaté à `D` est rejoué après la décision : il peut
 déclencher le stop d'une position encore ouverte, jamais exécuter un ordre décidé à `D`.
 
 **Stop déjà franchi au premier tick d'exécution.** L'ordre au marché n'est pas annulé en silence.
 Par défaut, il est exécuté puis liquidé immédiatement au prix côté sortie du même tick, sans
-garantie ni prime. Variante explicite : rejet modélisé de l'ordre portant un stop attaché invalide
+garantie ni prime : hypothèse de simulation, ni garantie de prudence ni comportement IG confirmé
+(ADR-009). Chaque cas est compté (`STOP_DÉPASSÉ_À_L'EXÉCUTION`). Variante explicite : rejet modélisé de l'ordre portant un stop attaché invalide
 (comportement IG non confirmé, ASSUMP-008).
 
 ## 6. Stop initial, sorties et invalidation
@@ -152,7 +153,7 @@ Règles du contrôleur de risque existant (`risk.py`, `docs/BUSINESS_RULES.md`) 
 - résultat présenté comme une perte **estimée**, jamais garantie (sauf effet propre du stop garanti,
   à confirmer pour le compte réel).
 
-**Moteur hors ligne (ASSUMP-024, proposée).**
+**Moteur hors ligne (ASSUMP-024, ADR-009).**
 - *Fonds propres* = solde réalisé + résultat latent. Le latent est la valeur de liquidation de la
   position au dernier tick connu (prix côté sortie, coûts de sortie accumulés, conversion du côté
   défavorable, sans prime). Courbe échantillonnée à chaque décision H4 et à chaque sortie ; une
@@ -162,8 +163,9 @@ Règles du contrôleur de risque existant (`risk.py`, `docs/BUSINESS_RULES.md`) 
   strictement antérieur à `D` ; lors d'un retournement, ils incluent le latent de la position en
   cours de sortie, dont la sortie n'est pas encore comptabilisée.
 - *Écart entre entrée estimée et exécutée* : la taille n'est pas recalculée après l'exécution et
-  l'entrée n'est jamais supprimée au vu de son prix. Le risque au prix exécuté et le dépassement
-  du budget sont enregistrés (`DÉPASSEMENT_RISQUE`). Un refus sur écart d'exécution exigerait un
+  l'entrée n'est jamais supprimée au vu de son prix. La perte estimée au stop après exécution et
+  le dépassement du budget sont enregistrés (`DÉPASSEMENT_RISQUE`) ; la perte simulée effectivement
+  comptabilisée est distincte. Un refus sur écart d'exécution exigerait un
   ordre conditionnel modélisé explicitement (non implémenté).
 
 ## 9. Coûts nécessaires

@@ -42,6 +42,9 @@ class TickFeed:
     def __len__(self) -> int:
         return len(self._ticks)
 
+    def __iter__(self) -> Iterator[Tick]:
+        return iter(self._ticks)
+
     def __getitem__(self, index: int) -> Tick:
         return self._ticks[index]
 

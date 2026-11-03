@@ -349,7 +349,11 @@ def test_market_entry_beyond_its_stop_is_filled_then_liquidated_by_default() -> 
     assert trade.entry_utc == trade.exit_utc == execution
     assert trade.entry_price == trade.stop - D("0.0010") + SPREAD and trade.exit_price == trade.stop - D("0.0010")
     assert trade.exit_reason == "STOP_FRANCHI_À_L'EXÉCUTION" and "prime de stop garanti" not in trade.costs_quote
-    assert trade.net_account is not None and trade.risk_at_execution == -trade.net_account > 0
+    assert trade.net_account is not None and trade.liquidation_loss == trade.simulated_loss == -trade.net_account > 0
+    assert (
+        trade.stop_loss_at_execution is None and trade.exposure_measure == "perte simulée de la liquidation immédiate"
+    )
+    assert kinds(result, "STOP_DÉPASSÉ_À_L'EXÉCUTION")
     assert kinds(result, "ENTRÉE") and not kinds(result, "ENTRÉE_ANNULÉE")
 
 
@@ -359,6 +363,7 @@ def test_rejection_of_an_entry_beyond_its_stop_is_an_explicit_modelled_condition
     booked = [*result.trades, *([result.open_trade] if result.open_trade else [])]
     assert all(t.decided_utc != decided for t in booked)  # later signals are unaffected
     (rejected,) = kinds(result, "ENTRÉE_REJETÉE")
+    assert len(kinds(result, "STOP_DÉPASSÉ_À_L'EXÉCUTION")) == 1  # counted in both scenarios
     assert "condition d'acceptation modélisée" in rejected and "ASSUMP-008" in rejected
 
 
@@ -422,7 +427,8 @@ def test_entry_executed_beyond_the_estimate_is_kept_with_its_risk_overrun() -> N
     trade = result.open_trade
     assert trade is not None and trade.entry_price == D("1.1061")
     assert trade.size * trade.estimate.loss_account_per_contract <= trade.risk_budget  # sized before sending
-    assert trade.risk_at_execution > trade.risk_budget and trade.risk_overrun > 0
+    assert trade.stop_loss_at_execution is not None and trade.stop_loss_at_execution > trade.risk_budget
+    assert trade.risk_overrun > 0 and trade.exposure_measure == "perte estimée au stop après exécution"
     (overrun,) = kinds(result, "DÉPASSEMENT_RISQUE")
     assert "exécution conservée" in overrun
 

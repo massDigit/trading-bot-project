@@ -5,11 +5,12 @@
 ### 🏃 En Cours
 - [ ] Moteur de backtest S1 hors ligne (ADR-006), PR #4 en brouillon vers `main` :
   - [x] moteur et tests synthétiques (branche `feat/s1-backtest-engine`, 2026-10-30) : chronologie et disponibilité des bougies, exécution bid/ask au premier tick après la décision, stops (observé, non observable, garanti, normal), dimensionnement, propagation des scénarios H0 / H1 aux fonds propres et aux décisions suivantes
-  - [x] corrections de la revue d'Astra (2026-10-31) : stop prioritaire sur une sortie au canal en attente, solde / latent / fonds propres, risque au prix exécuté et dépassement conservé, taille d'un retournement ; 6 tests ciblés (ASSUMP-024 proposée)
+  - [x] corrections de la revue d'Astra (2026-10-31) : stop prioritaire sur une sortie au canal en attente, solde / latent / fonds propres, risque au prix exécuté et dépassement conservé, taille d'un retournement ; 6 tests ciblés (ASSUMP-024, validée par ADR-009)
   - [x] seconde revue (2026-11-03) : fin d'étude et courbe chronologique, état strictement avant `D`, règle explicite pour une entrée au-delà du stop ; 4 tests ciblés
   - [ ] journal détaillé de chaque décision, abstention et transaction (motifs, données lues, scénarios)
-  - [ ] lecteur de ticks en flux (DuckDB) pour l'historique réel : impossible de charger 190 millions de ticks en mémoire
-  - [ ] premier passage exploratoire sur 2015-2021 uniquement, coûts paramétrés explicitement, sans optimisation
+  - [x] lecteur de ticks en flux (un fichier journalier à la fois, Parquet) et référence en mémoire (DuckDB) ; équivalence vérifiée sur données synthétiques et sur l'échantillon réel (2026-11-03)
+  - [x] premier passage exploratoire 2019-04-01 → 2019-07-01, dates fixées avant résultats, paramètres fixes, coûts de recherche explicites (ADR-009)
+  - [ ] revue du passage exploratoire ; suite uniquement sur décision de l'opérateur
 - [ ] Fermetures particulières (jours fériés, fermetures anticipées) : rechercher une source applicable, en parallèle ; sans preuve, le classement actuel est conservé (ASSUMP-016)
 
 ### 📋 A Faire

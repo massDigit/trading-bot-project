@@ -29,6 +29,7 @@ dev = [
 ig-demo-diagnostic = "forex_bot.diagnostic:main"
 ig-price-probe = "forex_bot.price_probe:main"
 forex-history = "forex_bot.history.cli:main"
+forex-backtest-explore = "forex_bot.backtest.explore:main"
 
 [tool.ruff]
 line-length = 120
