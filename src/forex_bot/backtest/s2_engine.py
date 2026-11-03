@@ -215,11 +215,24 @@ class S2Backtest(S1Backtest):
         return d1_trend(tracker.of(PivotKind.HIGH), tracker.of(PivotKind.LOW), self.d1[context]), None
 
     def _decide_s2(self, t: int, decision: datetime) -> None:
+        record = self._evaluate(t, decision)
+        # Sheet §8: missing or degraded data comes first in the decision line, before an open
+        # position or the absence of a configuration (the lifecycle above was still updated).
+        if any(data for _, data in self._notes) and record.entry_action in (
+            EntryAction.NO_SIGNAL,
+            EntryAction.NOT_EVALUATED,
+        ):
+            record.entry_action = EntryAction.NOT_COMPUTABLE
+
+    def _evaluate(self, t: int, decision: datetime) -> DecisionRecord:
         states = self._states(decision)
         new_pivots = {
             tf: self.pivots[tf].update(decision, states[tf]) for tf in (Timeframe.H1, Timeframe.H4, Timeframe.D1)
         }
         self._notes = []
+        trigger_state = states[self.s2.trigger](t)
+        if trigger_state is not BarState.OK:
+            self._notes.append((f"bougie de déclenchement {trigger_state.value}", True))
         trend, trend_issue = self._trend(decision, states[Timeframe.D1])
         if trend_issue is not None:
             self._notes.append((trend_issue, True))
@@ -241,7 +254,7 @@ class S2Backtest(S1Backtest):
             if not self._notes:
                 record.reasons.append("pas de tendance D1" if trend is None else "pas de configuration")
             self._no_entry(record, EntryAction.NOT_COMPUTABLE if missing_data else EntryAction.NO_SIGNAL, None)
-            return
+            return record
         self._update_contact(setup, decision)
         trigger = self.s2.trigger
         threshold = self._threshold(setup, t)
@@ -252,12 +265,12 @@ class S2Backtest(S1Backtest):
                 EntryAction.NO_SIGNAL,
                 "pas de contact depuis I" if setup.contact is None else "pas de seuil de reprise connu",
             )
-            return
+            return record
         long = setup.side is Side.LONG
         broken = bar["bid_close"] > threshold.level if long else bar["bid_close"] < threshold.level
         if not broken:
             self._no_entry(record, EntryAction.NO_SIGNAL, "clôture en deçà du seuil")
-            return
+            return record
         # The first close beyond the threshold consumes it, whatever happens to the entry.
         setup.refused_utc = decision
         record.signal = {
@@ -268,26 +281,26 @@ class S2Backtest(S1Backtest):
         if self.position is not None:
             record.entry_action = EntryAction.NOT_EVALUATED
             record.reasons.append("cassure pendant une position ouverte : seuil consommé")
-            return
+            return record
         if states[trigger](t) is not BarState.OK:
             self._refuse(record, decision, f"bougie de cassure {states[trigger](t).value}")
-            return
+            return record
         if trend is not setup.side:
             self._refuse(record, decision, "tendance D1 perdue à la cassure")
-            return
+            return record
         stop = self._stop(setup, decision)
         record.signal.update({"stop": stop, "target": setup.target})
         ratio = self._reward_risk(setup.side, stop, setup.target)
         if isinstance(ratio, str):
             self._refuse(record, decision, ratio)
-            return
+            return record
         record.signal["reward_risk"] = ratio
         if ratio < self.s2.min_reward_risk:
             self._refuse(record, decision, f"cible trop proche : rapport {ratio:.2f} < {self.s2.min_reward_risk}")
-            return
+            return record
         if market_state(decision) is not MarketState.OPEN:
             self._refuse(record, decision, f"{setup.side.value} : marché fermé à l'instant de décision")
-            return
+            return record
         signal = EntrySignal(setup.side, stop, setup.atr, setup.extreme.level, setup.known_level.level)
         self._size(decision, signal, record)
         if record.entry_action is EntryAction.ENTRY_DECIDED:
@@ -295,6 +308,7 @@ class S2Backtest(S1Backtest):
             self._pending_target = setup.target
             setup.history.append(f"{decision.isoformat()} entrée décidée")
             self.setup = None
+        return record
 
     def _no_entry(self, record: DecisionRecord, action: EntryAction, reason: str | None) -> None:
         record.entry_action = EntryAction.NOT_EVALUATED if self.position is not None else action

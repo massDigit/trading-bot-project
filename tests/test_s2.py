@@ -738,3 +738,31 @@ def test_an_h4_hole_before_the_pullback_makes_the_atr_unavailable_at_i() -> None
     h4 = candles(ticks_for(specs), Timeframe.H4)
     i_bar = next(k for k, b in enumerate(h4) if b["end_utc"] == identified)
     assert WilderAtr(h4, 3).at(i_bar, ok) is not None
+
+
+# ---------------------------------------------------------------- decision line: data first (sheet §8)
+
+
+def test_an_unusable_trigger_candle_without_configuration_is_not_computable_not_no_signal() -> None:
+    ticks = ticks_for(BASE)
+    h1_bars = candles(ticks, Timeframe.H1)
+    degraded = 2  # Sunday 23:00-00:00, long before any configuration
+    h1_bars[degraded] = {**h1_bars[degraded], "complete_at_close": False, "flags_at_close": ["trou de cotation"]}
+    feed = TickFeed(ticks)
+    result = S2Backtest(
+        h1_bars,
+        candles(ticks, Timeframe.H4),
+        d1_context(),
+        feed,
+        feed.gaps(timedelta(minutes=10)),
+        P,
+        ResearchConfig(costs=COSTS, **FINE),
+    ).run()
+    line = next(r for r in result.decisions if r.decision_utc == h1_bars[degraded]["end_utc"])
+    assert line.position_action is PositionAction.FLAT and line.known["setup"] is None
+    assert line.entry_action is EntryAction.NOT_COMPUTABLE
+    assert line.reasons[0] == "bougie de déclenchement INTERRUPTION_INEXPLIQUÉE"
+    valid = next(r for r in result.decisions if r.decision_utc == h1_bars[degraded + 1]["end_utc"])
+    assert valid.entry_action is EntryAction.NO_SIGNAL and valid.reasons == ["pas de configuration"]
+    # The configuration lifecycle is unchanged: the same entry as BASE follows.
+    assert decided(result) == [at(4)]
