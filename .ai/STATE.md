@@ -14,10 +14,13 @@ validé comme moteur de recherche hors ligne et fusionné (PR #4, `d52f24f`) ; r
 (ADR-013) mesurées, sans valeur de validation de performance.
 
 ## 🎯 Focus Courant
-PR #5 fusionnée dans `main` (`d9d7089`, 2026-11-03) ; S1 à 0,25 % reste la référence de
-développement. Fiche S2 (`docs/strategies/S2_PULLBACK.md`) spécifiée, ASSUMP-025 approuvée pour la
-recherche hors ligne (ADR-015). Suite : étape 1 de S2 (implémentation et tests synthétiques) sur une
-branche distincte ; aucun passage historique.
+Fiche S2 (`docs/strategies/S2_PULLBACK.md`) approuvée pour la recherche hors ligne (ADR-015, PR #6
+fusionnée, `46439fb`). Étape 1 (PR #7) : moteur S2 hors ligne
+(`backtest/s2.py`, `backtest/s2_engine.py`, S1 inchangé) et 27 tests synthétiques ; 244 tests réussis.
+Une cassure sur une bougie de déclenchement non `OK` est journalisée `ÉVALUATION_IMPOSSIBLE` (§8).
+Étape 2 faite (2026-11-03) : rejeu S1 H0 du 2019-04-01 au 2019-07-01 sur `7b9a1f1`, identique à la
+référence `s1_2019Q2_stream.json` (6 transactions une par une, solde 1 992,04 €, journal des 390
+décisions identique octet pour octet) ; 194 s, 175 Mio. Étape 3 (disponibilité des données 2015-2021) autorisée ; étape 4 non lancée.
 
 ## 🧾 Synthèse vérifiée (2026-11-03)
 - PR #1 à #4 fusionnées dans `main` par commits de fusion, sur autorisation de l'opérateur
@@ -93,7 +96,7 @@ branche distincte ; aucun passage historique.
   Ces valeurs ne sont pas transposées au compte réel.
 
 ## 🔄 En Cours
-- [ ] S2 étape 1 : implémentation et tests synthétiques (ADR-015) ; aucun passage historique
+- [ ] S2 étape 3 : disponibilité des données 2015-2021 (sans transaction ni résultat)
 - [ ] Recherche d'une source applicable pour les fermetures particulières (non bloquante)
 - [ ] Demande au support IG préparée, non envoyée (`docs/IG_SUPPORT_REQUEST.md`)
 
@@ -103,6 +106,7 @@ branche distincte ; aucun passage historique.
 - Déclenchement des stops et référence des distances minimales non confirmés : ASSUMP-008.
 - Compte réel cible à risque limité : stop garanti obligatoire, rapprochable mais jamais éloigné, prime au déclenchement (`docs/CONFIRMATIONS.md` §5, DÉCL) ; ses valeurs ne sont pas observées.
 - Pas encore de suivi des fonds propres du robot en fonctionnement (le moteur de recherche les valorise, ASSUMP-024) ; flux `PRICE` validé par sonde seulement.
+- ATR de Wilder du moteur S1 (`WilderAtr`) : il enchaîne les true ranges d'une H4 présente à la suivante sans vérifier qu'aucune H4 attendue ne manque entre elles. S2 utilise une lecture qui respecte la continuité (`ContinuousWilderAtr`) ; S1 et sa référence 2015-2021 sont inchangés. Limite héritée, à revoir lors d'une future revue de la référence S1 (nombre de H4 absentes dans 2015-2021 non mesuré).
 - Moteur S1 : la taille est fixée avant l'exécution simulée ; l'entrée exécutée peut dépasser le budget de risque, dépassement enregistré et jamais supprimé. Drawdown mesuré au tick (depuis `4c6f01a`) et sur les échantillons (décisions H4 et sorties).
 - Mot de passe chiffré non géré si IG l'exige.
 - Dukascopy : ambiguïté de licence **non résolue** (ASSUMP-018) ; acquisition par décision de l'opérateur (ADR-004), arrêt et purge en cas d'avertissement ; convention temporelle non documentée, cohérente sur 2015-2023 (ASSUMP-019).

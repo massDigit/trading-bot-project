@@ -1,6 +1,8 @@
 # Fiche S2 — Reprise de tendance après repli (swing)
 
-> Identifiant code : `SWING_02`. Statut : **spécifiée** (cahier des charges §6.2, §6.6). Règles et
+> Identifiant code : `SWING_02`. Statut : **implémentée hors ligne** (`src/forex_bot/backtest/s2.py`,
+> `s2_engine.py`), **tests synthétiques uniquement** (`tests/test_s2.py`, étape 1) ; non évaluée
+> (cahier des charges §6.2, §6.6). Règles et
 > valeurs numériques **approuvées pour la recherche hors ligne** (ASSUMP-025, ADR-015, 2026-11-03),
 > au commit `a10a779` complété des décisions du §11. Ni validation de performance ni autorisation
 > de trading. Valeurs choisies a priori, jamais optimisées ; aucune donnée 2022-2025.
@@ -64,7 +66,10 @@ publication `L = 0` : une bougie est disponible à sa clôture.
 | H1 | 2 | 5 H1 | 2 heures de cotation |
 
 **ATR.** Wilder 14 sur les H4, true range bid, règles de disponibilité et de réamorçage de S1
-(§10.3). La configuration utilise **une seule valeur, `A`**, fixée à l'instant d'identification
+(§10.3), plus la **continuité des H4 prévues** : après une H4 attendue mais absente (hors fermeture
+hebdomadaire), la première H4 présente fournit la nouvelle clôture de référence et 14 true ranges
+valides sont de nouveau nécessaires (lecture propre à S2 ; le moteur S1 garde la sienne, voir
+`.ai/STATE.md`, problèmes connus). La configuration utilise **une seule valeur, `A`**, fixée à l'instant d'identification
 `I` (§4) : l'ATR de la dernière H4 disponible à `I`. Zone, invalidation et marge du stop utilisent
 cette même valeur jusqu'à la fin de la configuration. ATR indisponible à `I` : pas de
 configuration.
@@ -289,8 +294,10 @@ frais de 0,5 %). La transaction sort « à la cible » et perd.
   pour clôturer une vente (ask ≤ `E`). Un écart favorable observé est conservé. Ce n'est pas le
   comportement confirmé d'un ordre limite IG (ASSUMP-008).
 - **Sortie temporelle (`H_max = 60` H4)** : le compteur part de la **première H4 qui commence après
-  le tick d'exécution** ; à la disponibilité de la 60e, si la position est encore ouverte, sortie au
-  marché au premier tick suivant. Environ 10 jours de cotation.
+  le tick d'exécution** et suit le calendrier de cotation. L'**échéance** est la fin de la 60e H4
+  prévue (plus `L`) ; elle existe par elle-même, même si aucune bougie de décision ne clôture à cet
+  instant. Si la position est encore ouverte, sortie au marché au premier tick strictement postérieur
+  à l'échéance, après les règles de trou, le stop et la cible de ce tick. Environ 10 jours de cotation.
 - Pour un achat, stop et cible sont de part et d'autre du prix : un même tick ne peut pas franchir
   les deux. La priorité « stop, puis cible, puis sortie temporelle » ne départage que la sortie
   temporelle et une borne franchie au même instant ; elle ne sert pas à reconstituer un trou (§7).

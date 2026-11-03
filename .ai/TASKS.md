@@ -15,10 +15,13 @@
 - [x] Granularité 0,01 contrat (ADR-011, protocole `docs/experiments/S1_GRANULARITY_001.md`) : H0 et H1 ; minimum de 0,1 contrat protecteur sur 2015-2021 ; conclusion retenue après revue d'Astra (2026-11-03)
 - [x] Risque 1 % (ADR-013, protocole `docs/experiments/S1_RISK_1PCT_001.md`) : H0 et H1 ; 1 % n'améliore pas S1 sur 2015-2021 ; expérience close, S1 à 0,25 % reste la référence (ADR-014, 2026-11-03)
 - [x] Protocole S2 (reprise de tendance après repli) : fiche `docs/strategies/S2_PULLBACK.md`, ASSUMP-025 approuvée pour la recherche hors ligne (ADR-015, 2026-11-03)
-- [ ] S2 étape 1 : implémentation hors ligne et tests synthétiques uniquement (pas de rejeu 2019, aucun passage historique)
+- [x] S2 étape 1 : implémentation hors ligne et 27 tests synthétiques (PR #7)
+- [x] S2 étape 2 : rejeu de non-régression S1 sur avril-juin 2019 sur `7b9a1f1` : transactions, solde (1 992,04 €) et journal identiques à la référence (2026-11-03)
+- [ ] S2 étape 3 : disponibilité des données 2015-2021 (autorisée 2026-11-04)
 - [ ] Fermetures particulières (jours fériés, fermetures anticipées) : rechercher une source applicable, en parallèle ; sans preuve, le classement actuel est conservé (ASSUMP-016)
 
 ### 📋 A Faire
+- [ ] Revue future de la référence S1 : continuité des H4 prévues dans l'ATR (`WilderAtr` enchaîne les true ranges à travers une H4 absente) ; mesurer d'abord les H4 absentes de 2015-2021, sans changer S1 avant décision
 - [ ] Critères de passage du développement (2015-2021) à la validation (2022-2023) : règles et paramètres figés et versionnés, variantes enregistrées, journal complet, aucune donnée 2022-2023 consultée pour régler (ADR-007)
 - [ ] Sauvegarde des données Dukascopy (environ 28 Go, uniquement sur le poste de l'opérateur) : support à choisir par l'opérateur ; la purge devra aussi couvrir la copie
 - [ ] Confirmer unité de taille, taille minimale et incrément IG (ASSUMP-004, ASSUMP-005)
