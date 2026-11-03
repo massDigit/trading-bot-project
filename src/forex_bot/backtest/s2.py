@@ -15,6 +15,7 @@ from enum import StrEnum
 from typing import Any
 
 from forex_bot.backtest.bar_state import BarState
+from forex_bot.backtest.s1 import WilderAtr
 from forex_bot.history.calendar import Timeframe, expected_open_minutes
 from forex_bot.risk import Side
 
@@ -50,6 +51,38 @@ class S2Params:
 
     def pivot_order(self, timeframe: Timeframe) -> int:
         return {Timeframe.H1: self.pivot_h1, Timeframe.H4: self.pivot_h4, Timeframe.D1: self.pivot_d1}[timeframe]
+
+
+class ContinuousWilderAtr(WilderAtr):
+    """Wilder ATR of S2: the same rules as S1 (sheet S1 §10.3), plus the continuity of the expected candles.
+
+    After an expected candle that is absent (a hole in the quote calendar, not the weekly closure),
+    the first candle present provides the new reference close; `period` valid true ranges are then
+    needed before the ATR is available again. The S1 engine keeps its own `WilderAtr`, unchanged.
+    """
+
+    def __init__(self, bars: Sequence[dict[str, Any]], period: int) -> None:
+        super().__init__(bars, period)
+        self._holes = {
+            i
+            for i in range(1, len(bars))
+            if bars[i]["start_utc"] > bars[i - 1]["end_utc"]
+            and expected_open_minutes(bars[i - 1]["end_utc"], bars[i]["start_utc"]) > 0
+        }
+
+    def _run_anchor(self, t: int, state_of: StateOf) -> int:
+        cached = self._anchor is not None and self._checked <= t
+        lower = self._checked - self.RECHECK if cached else -1
+        i = t
+        while i > lower and i >= 0:
+            if not state_of(i).usable:
+                return i + 1
+            if i in self._holes:
+                return i  # candle i follows an absent one: its close is the new reference
+            i -= 1
+        if cached and lower >= 0 and self._anchor is not None:
+            return self._anchor
+        return 0
 
 
 class PivotKind(StrEnum):

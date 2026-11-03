@@ -16,7 +16,7 @@ validé comme moteur de recherche hors ligne et fusionné (PR #4, `d52f24f`) ; r
 ## 🎯 Focus Courant
 Fiche S2 (`docs/strategies/S2_PULLBACK.md`) approuvée pour la recherche hors ligne (ADR-015, PR #6
 fusionnée, `46439fb`). Étape 1 sur `feat/s2-pullback-engine` : moteur S2 hors ligne
-(`backtest/s2.py`, `backtest/s2_engine.py`, S1 inchangé) et 20 tests synthétiques ; 237 tests réussis,
+(`backtest/s2.py`, `backtest/s2_engine.py`, S1 inchangé) et 24 tests synthétiques ; 241 tests réussis,
 à présenter avant commit. Aucun passage historique, pas de rejeu 2019 (étape 2).
 
 ## 🧾 Synthèse vérifiée (2026-11-03)
@@ -93,7 +93,7 @@ fusionnée, `46439fb`). Étape 1 sur `feat/s2-pullback-engine` : moteur S2 hors 
   Ces valeurs ne sont pas transposées au compte réel.
 
 ## 🔄 En Cours
-- [ ] S2 étape 1 : moteur et 20 tests synthétiques prêts, à présenter avant commit ; aucun passage historique
+- [ ] S2 étape 1 : moteur et 24 tests synthétiques prêts, à présenter avant commit ; aucun passage historique
 - [ ] Recherche d'une source applicable pour les fermetures particulières (non bloquante)
 - [ ] Demande au support IG préparée, non envoyée (`docs/IG_SUPPORT_REQUEST.md`)
 
@@ -103,6 +103,7 @@ fusionnée, `46439fb`). Étape 1 sur `feat/s2-pullback-engine` : moteur S2 hors 
 - Déclenchement des stops et référence des distances minimales non confirmés : ASSUMP-008.
 - Compte réel cible à risque limité : stop garanti obligatoire, rapprochable mais jamais éloigné, prime au déclenchement (`docs/CONFIRMATIONS.md` §5, DÉCL) ; ses valeurs ne sont pas observées.
 - Pas encore de suivi des fonds propres du robot en fonctionnement (le moteur de recherche les valorise, ASSUMP-024) ; flux `PRICE` validé par sonde seulement.
+- ATR de Wilder du moteur S1 (`WilderAtr`) : il enchaîne les true ranges d'une H4 présente à la suivante sans vérifier qu'aucune H4 attendue ne manque entre elles. S2 utilise une lecture qui respecte la continuité (`ContinuousWilderAtr`) ; S1 et sa référence 2015-2021 sont inchangés. Limite héritée, à revoir lors d'une future revue de la référence S1 (nombre de H4 absentes dans 2015-2021 non mesuré).
 - Moteur S1 : la taille est fixée avant l'exécution simulée ; l'entrée exécutée peut dépasser le budget de risque, dépassement enregistré et jamais supprimé. Drawdown mesuré au tick (depuis `4c6f01a`) et sur les échantillons (décisions H4 et sorties).
 - Mot de passe chiffré non géré si IG l'exige.
 - Dukascopy : ambiguïté de licence **non résolue** (ASSUMP-018) ; acquisition par décision de l'opérateur (ADR-004), arrêt et purge en cas d'avertissement ; convention temporelle non documentée, cohérente sur 2015-2023 (ASSUMP-019).

@@ -23,7 +23,16 @@ from forex_bot.backtest.bar_state import BarState
 from forex_bot.backtest.engine import EntryAction, PositionAction, ResearchConfig
 from forex_bot.backtest.explore import RESEARCH_COSTS
 from forex_bot.backtest.feed import Tick, TickFeed
-from forex_bot.backtest.s2 import GapScenario, PivotKind, PivotTracker, S2Params, overlaps, pivot_kinds
+from forex_bot.backtest.s1 import WilderAtr
+from forex_bot.backtest.s2 import (
+    ContinuousWilderAtr,
+    GapScenario,
+    PivotKind,
+    PivotTracker,
+    S2Params,
+    overlaps,
+    pivot_kinds,
+)
 from forex_bot.backtest.s2_engine import RelativeDrawdown, S2Backtest, S2Result
 from forex_bot.history.calendar import MarketState, Timeframe, candle_end, candle_start, market_state
 from forex_bot.risk import Side
@@ -486,6 +495,12 @@ def test_an_absent_h4_with_its_h1_present_abandons_the_configuration_as_soon_as_
     assert abandon.utc == at(4)  # the end of the missing slot: knowable then, not before
     assert all(r.entry_action is not EntryAction.ENTRY_DECIDED for r in result.decisions)
     assert result.trades == [] and result.open_trade is None
+    # The decision line itself keeps the precise reason; a later one without configuration is "no signal".
+    line = next(r for r in result.decisions if r.decision_utc == at(4))
+    assert line.entry_action is EntryAction.NOT_COMPUTABLE
+    assert any("DONNÉES_REPLI_INCOMPLÈTES" in reason and at(0).isoformat() in reason for reason in line.reasons)
+    later = next(r for r in result.decisions if r.decision_utc == at(5))
+    assert later.entry_action is EntryAction.NO_SIGNAL and later.reasons == ["pas de configuration"]
 
 
 # ---------------------------------------------------------------- the sheet's §5 example, approved parameters
@@ -605,3 +620,121 @@ def test_the_sheet_example_is_reproduced_end_to_end_with_the_approved_parameters
     trade = result.open_trade
     assert trade is not None
     assert trade.entry_utc == decision + timedelta(milliseconds=180) and trade.entry_price == d("1.1484")
+
+
+# ---------------------------------------------------------------- time exit: a deadline of its own
+
+
+def test_time_exit_deadline_does_not_need_a_decision_candle() -> None:
+    params = S2Params(pivot_d1=1, pivot_h4=1, pivot_h1=1, atr_period=2, max_hold_h4=2)
+    # Deadline 21:00 (2nd H4 starting after the 09:05 execution). The H1 20:00-21:00 is absent: no
+    # decision closes at 21:00; quotes resume at 21:00 (a tick exactly at the deadline) then 21:05.
+    specs = [*PRE, CONTACT, RECOVERY, CONFIRM, BREAK, *flat("1.1100", 11), None, *flat("1.1100", 3)]
+    a = run(specs, params)
+    assert all(r.decision_utc != at(16) for r in a.decisions)
+    (trade,) = a.trades
+    assert trade.exit_reason == "SORTIE_TEMPORELLE" and trade.exit_utc == at(16) + STEP  # 21:05, not 22:05
+    assert kinds(a, "ÉCHÉANCE_TEMPORELLE") == [at(16).isoformat()]
+    # The gap scenarios keep their priority: the tick closing the gap (21:00) comes first.
+    (b_trade,) = run(specs, params, GapScenario.STOP_FIRST).trades
+    (c_trade,) = run(specs, params, GapScenario.TARGET_FIRST).trades
+    assert (b_trade.exit_reason, b_trade.exit_utc) == ("STOP_SCÉNARIO_B", at(16))
+    assert (c_trade.exit_reason, c_trade.exit_utc) == ("CIBLE_SCÉNARIO_C", at(16))
+    # Target and deadline on the same first tick after the deadline: the target comes first.
+    on_target = [
+        *PRE,
+        CONTACT,
+        RECOVERY,
+        CONFIRM,
+        BREAK,
+        *flat("1.1100", 12),
+        h1("1.1100", "1.1260", "1.1100", "1.1260"),
+    ]
+    (trade,) = run(on_target, params).trades
+    assert (trade.exit_reason, trade.exit_utc) == ("CIBLE", at(16) + STEP)
+
+
+def test_time_exit_deadline_in_the_h4_comparison_mode() -> None:
+    params = S2Params(pivot_d1=1, pivot_h4=1, pivot_h1=1, atr_period=2, trigger=Timeframe.H4, max_hold_h4=2)
+    specs = PRE + block("1.1090", "1.1092", "1.1070", "1.1072")
+    specs += block("1.1072", "1.1110", "1.1068", "1.1075")
+    specs += block("1.1075", "1.1080", "1.1060", "1.1065")
+    specs += block("1.1065", "1.1115", "1.1063", "1.1112")  # entry decided at 21:00, executed 21:05
+    holed: list[Spec | None] = [*specs, *flat("1.1112", 8), *[None] * 4, *flat("1.1112", 4)]  # H4 05-09 absent
+    result = run(holed, params)
+    (trade,) = result.trades
+    # Deadline: end of the 2nd H4 starting after 21:05 (01-05, 05-09) = 09:00, with no H4 decision then.
+    assert all(r.decision_utc != at(28) for r in result.decisions)
+    assert trade.exit_reason == "SORTIE_TEMPORELLE" and trade.exit_utc == at(28) + STEP
+
+
+# ---------------------------------------------------------------- ATR: continuity of the expected H4
+
+
+def _h4_slots(first: datetime, count: int) -> list[datetime]:
+    slots: list[datetime] = []
+    moment = first
+    while len(slots) < count:
+        if candle_start(moment, Timeframe.H4) == moment and market_state(moment) is MarketState.OPEN:
+            slots.append(moment)
+        moment += timedelta(hours=1)
+    return slots
+
+
+def _constant_range_bars(starts: list[datetime]) -> list[dict[str, Any]]:
+    return [
+        {
+            "start_utc": s,
+            "end_utc": candle_end(s, Timeframe.H4),
+            "bid_high": d("1.1010"),
+            "bid_low": d("1.0990"),
+            "bid_close": d("1.1000"),
+        }
+        for s in starts
+    ]
+
+
+def test_s2_atr_restarts_after_an_absent_h4_but_not_after_the_weekly_closure() -> None:
+    period = 3
+    # Thursday to the next Tuesday: the weekly closure is inside, nothing is absent.
+    weekend = _constant_range_bars(_h4_slots(utc(2019, 3, 7, 21), 20))
+    s1_atr, s2_atr = WilderAtr(weekend, period), ContinuousWilderAtr(weekend, period)
+    assert [s2_atr.at(t, ok) for t in range(20)] == [s1_atr.at(t, ok) for t in range(20)]
+    assert s2_atr.at(19, ok) == d("0.0020")
+    # One expected H4 absent mid-week (index 6 removed).
+    slots = _h4_slots(START, 14)
+    holed = _constant_range_bars(slots[:6] + slots[7:])
+    s1_atr, s2_atr = WilderAtr(holed, period), ContinuousWilderAtr(holed, period)
+    assert s1_atr.at(7, ok) is not None  # S1's reading chains the true ranges across the hole
+    # Candle 6 now follows the hole: its close is the new reference, 3 valid true ranges are needed.
+    assert [s2_atr.at(t, ok) for t in (6, 7, 8)] == [None, None, None]
+    assert s2_atr.at(9, ok) == d("0.0020")
+
+
+def test_an_h4_hole_before_the_pullback_makes_the_atr_unavailable_at_i() -> None:
+    params = S2Params(pivot_d1=1, pivot_h4=1, pivot_h1=1, atr_period=3)
+    specs: list[Spec | None] = [
+        *block("1.1000", "1.1005", "1.0995", "1.1000") * 4,
+        *block("1.1000", "1.1040", "1.0998", "1.1030"),  # K
+        *block("1.1030", "1.1035", "1.1010", "1.1020"),
+        *flat("1.1020", 4),
+        *[None] * 4,  # an expected H4 without any quote, before E: outside the pullback
+        *flat("1.1020", 4),
+        *block("1.1020", "1.1250", "1.1015", "1.1240"),  # E
+        *block("1.1240", "1.1245", "1.1080", "1.1090"),  # confirms E: I
+        CONTACT,
+        RECOVERY,
+        CONFIRM,
+        BREAK,
+        *flat("1.1098", 2),
+    ]
+    identified = START + timedelta(hours=44)
+    result = run(specs, params)
+    assert result.setups == [] and decided(result) == []
+    line = next(r for r in result.decisions if r.decision_utc == identified)
+    assert line.entry_action is EntryAction.NOT_COMPUTABLE
+    assert line.reasons == ["configuration refusée, LONG : ATR H4 indisponible à I"]
+    # Without the continuity rule (S1's reading), the ATR would have been available at I.
+    h4 = candles(ticks_for(specs), Timeframe.H4)
+    i_bar = next(k for k, b in enumerate(h4) if b["end_utc"] == identified)
+    assert WilderAtr(h4, 3).at(i_bar, ok) is not None

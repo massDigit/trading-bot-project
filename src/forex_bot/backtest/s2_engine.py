@@ -32,11 +32,11 @@ from forex_bot.backtest.engine import (
     S1Backtest,
     StopType,
     Trade,
-    _PendingExit,
 )
 from forex_bot.backtest.feed import Silence, Tick, classify_silence
 from forex_bot.backtest.s1 import EntrySignal, S1Params
 from forex_bot.backtest.s2 import (
+    ContinuousWilderAtr,
     GapScenario,
     Pivot,
     PivotKind,
@@ -121,6 +121,9 @@ class S2Backtest(S1Backtest):
         atr_only = S1Params(atr_period=params.atr_period)
         super().__init__(h4, d1, ticks, gaps, atr_only, config, start_utc=start_utc, end_utc=end_utc)
         self.h1, self.s2, self.scenario = h1, params, scenario
+        # S2 reads the ATR with the continuity of the expected H4 (the S1 engine keeps its own, unchanged).
+        self.atr = ContinuousWilderAtr(h4, params.atr_period)
+        self._notes: list[tuple[str, bool]] = []  # (reason, missing data) raised during the current decision
         self.h1_available = [b["end_utc"] + config.latency for b in h1]
         if self.h1_available != sorted(self.h1_available):
             raise ValueError("bougies attendues dans l'ordre chronologique")
@@ -216,27 +219,28 @@ class S2Backtest(S1Backtest):
         new_pivots = {
             tf: self.pivots[tf].update(decision, states[tf]) for tf in (Timeframe.H1, Timeframe.H4, Timeframe.D1)
         }
+        self._notes = []
         trend, trend_issue = self._trend(decision, states[Timeframe.D1])
+        if trend_issue is not None:
+            self._notes.append((trend_issue, True))
         record = DecisionRecord(decision, self._known_s2(t, decision, states, trend), PositionAction.FLAT)
         self.decisions.append(record)
 
         if self.position is not None:
             record.position_action = PositionAction.HELD
-            if self.pending_exit is None and decision >= self._time_exit_due():
-                self.pending_exit = _PendingExit(decision, TIME_EXIT)
-                record.position_action = PositionAction.EXIT_DECIDED
-                record.reasons.append(f"sortie temporelle : {self.s2.max_hold_h4} H4 depuis l'exécution")
-                self._log(decision, "SORTIE_DÉCIDÉE", TIME_EXIT)
+            due = self._time_exit_due()
+            if decision >= due:  # the exit itself is driven by the ticks, not by this decision
+                record.reasons.append(f"échéance de sortie temporelle {due.isoformat()} atteinte")
 
         self._identify(new_pivots[Timeframe.H4], decision, states, trend)
         self._check_alive(decision, states)
         setup = self.setup
+        record.reasons.extend(reason for reason, _ in self._notes)
         if setup is None:
-            self._no_entry(
-                record,
-                EntryAction.NO_SIGNAL,
-                trend_issue or ("pas de tendance D1" if trend is None else "pas de configuration"),
-            )
+            missing_data = any(data for _, data in self._notes)
+            if not self._notes:
+                record.reasons.append("pas de tendance D1" if trend is None else "pas de configuration")
+            self._no_entry(record, EntryAction.NOT_COMPUTABLE if missing_data else EntryAction.NO_SIGNAL, None)
             return
         self._update_contact(setup, decision)
         trigger = self.s2.trigger
@@ -292,9 +296,10 @@ class S2Backtest(S1Backtest):
             setup.history.append(f"{decision.isoformat()} entrée décidée")
             self.setup = None
 
-    def _no_entry(self, record: DecisionRecord, action: EntryAction, reason: str) -> None:
+    def _no_entry(self, record: DecisionRecord, action: EntryAction, reason: str | None) -> None:
         record.entry_action = EntryAction.NOT_EVALUATED if self.position is not None else action
-        record.reasons.append(reason)
+        if reason is not None:
+            record.reasons.append(reason)
 
     def _refuse(self, record: DecisionRecord, decision: datetime, reason: str) -> None:
         self._log(decision, "ABSTENTION", reason)
@@ -350,12 +355,16 @@ class S2Backtest(S1Backtest):
             if p.index < extreme.index and (p.level < extreme.level if long else p.level > extreme.level)
         ]
         if not candidates:
-            self._log(decision, "CONFIGURATION_REFUSÉE", f"{side.value} : aucun niveau connu K pour E {extreme.level}")
+            reason = f"configuration refusée, {side.value} : aucun niveau connu K pour E {extreme.level}"
+            self._log(decision, "CONFIGURATION_REFUSÉE", reason)
+            self._notes.append((reason, False))
             return
         known = max(candidates, key=lambda p: p.index)
         atr = self.atr.at(self._last_available(Timeframe.H4, decision), states[Timeframe.H4])
         if atr is None:
-            self._log(decision, "CONFIGURATION_REFUSÉE", f"{side.value} : ATR H4 indisponible à I")
+            reason = f"configuration refusée, {side.value} : ATR H4 indisponible à I"
+            self._log(decision, "CONFIGURATION_REFUSÉE", reason)
+            self._notes.append((reason, True))
             return
         half = self.s2.zone_atr * atr
         setup = Setup(side, extreme, known, decision, atr, known.level - half, known.level + half)
@@ -368,10 +377,11 @@ class S2Backtest(S1Backtest):
         )
         self._check_alive(decision, states)
 
-    def _abandon(self, decision: datetime, reason: str) -> None:
+    def _abandon(self, decision: datetime, reason: str, *, missing_data: bool = False) -> None:
         if self.setup is not None:
             self.setup.history.append(f"{decision.isoformat()} abandonnée : {reason}")
             self._log(decision, "CONFIGURATION_ABANDONNÉE", reason)
+            self._notes.append((f"configuration abandonnée : {reason}", missing_data))
         self.setup = None
 
     def _pullback(self, tf: Timeframe, setup: Setup, decision: datetime) -> list[int]:
@@ -397,7 +407,7 @@ class S2Backtest(S1Backtest):
         ]
         if missing is not None or unusable:
             where = missing.isoformat() if missing is not None else "bougie inutilisable"
-            self._abandon(decision, f"DONNÉES_REPLI_INCOMPLÈTES ({where})")
+            self._abandon(decision, f"DONNÉES_REPLI_INCOMPLÈTES ({where})", missing_data=True)
             return
         for i in h4:
             close = self.h4[i]["bid_close"]
@@ -530,10 +540,9 @@ class S2Backtest(S1Backtest):
                 self._observed_stop(tick)
             if self.position is not None and self._target_reached(tick):
                 self._close(tick, self._exit_side(tick), "CIBLE", stop_triggered=False)
-            if self.pending_exit is not None and tick.ts_utc > self.pending_exit.decided_utc:
-                pending, self.pending_exit = self.pending_exit, None
-                if self.position is not None:
-                    self._close(tick, self._exit_side(tick), pending.reason, stop_triggered=False)
+            if self.position is not None and tick.ts_utc > self._time_exit_due():
+                # The deadline exists on its own: no decision candle needs to close at it.
+                self._close(tick, self._exit_side(tick), TIME_EXIT, stop_triggered=False)
             if self.pending_entry is not None and tick.ts_utc > self.pending_entry.decided_utc:
                 self._open(tick)
             self._last_tick = tick
@@ -595,6 +604,7 @@ class S2Backtest(S1Backtest):
         if position is None or pending is None or position.decided_utc != pending.decided_utc:
             return  # rejected, or filled then liquidated beyond the stop
         self.target = target
+        self._log(tick.ts_utc, "ÉCHÉANCE_TEMPORELLE", self._time_exit_due().isoformat())
         if self._target_reached(tick):
             self._close(
                 tick,
@@ -609,10 +619,5 @@ class S2Backtest(S1Backtest):
     def _close(
         self, tick: Tick, price: Decimal, reason: str, stop_triggered: bool, hypotheses: list[str] | None = None
     ) -> None:
-        if self.pending_exit is not None and reason != TIME_EXIT:
-            self.pending_exit = None
-            self._log(
-                tick.ts_utc, "SORTIE_TEMPORELLE_ABANDONNÉE", f"{reason} avant l'exécution de la sortie temporelle"
-            )
         super()._close(tick, price, reason, stop_triggered, hypotheses)
         self.target = None
