@@ -10,14 +10,15 @@
 Historique de recherche EUR/USD acquis (2015-2023, avec exceptions connues) ; règles de données
 de S1 validées comme référence expérimentale ; moteur de backtest S1 hors ligne **implémenté**,
 validé comme moteur de recherche hors ligne et fusionné (PR #4, `d52f24f`) ; référence S1 seule
-2015-2021 mesurée (ADR-010) et variante de granularité 0,01 contrat mesurée (ADR-011), sans
-valeur de validation de performance.
+2015-2021 mesurée (ADR-010), variantes de granularité 0,01 contrat (ADR-011) et de risque 1 %
+(ADR-013) mesurées, sans valeur de validation de performance.
 
 ## 🎯 Focus Courant
 Référence S1 seule sur la période de développement 2015-2021 (branche
 `feat/s1-reference-2015-2021`, PR #5 en brouillon, depuis `main` = `d52f24f`) : référence commitée
-(`7414378`) ; expérience de granularité 0,01 contrat (`docs/experiments/S1_GRANULARITY_001.md`)
-terminée, à présenter avant commit. Fusion de la PR #5 réservée à l'opérateur.
+(`7414378`) ; granularité 0,01 contrat commitée (`3477689`, `d316d31`), conclusion retenue par
+l'opérateur après revue d'Astra ; risque 1 % (`docs/experiments/S1_RISK_1PCT_001.md`) terminé, à
+présenter avant commit. Fusion de la PR #5 réservée à l'opérateur.
 
 ## 🧾 Synthèse vérifiée (2026-11-03)
 - PR #1 à #4 fusionnées dans `main` par commits de fusion, sur autorisation de l'opérateur
@@ -52,8 +53,17 @@ terminée, à présenter avant commit. Fusion de la PR #5 réservée à l'opéra
   1 dépassement du budget (0,008 €). Des 215 refus de taille : 84 exécutés (−147,09 € nets, déjà
   −117,61 € bruts), 131 non évalués (position ouverte par l'une de ces entrées), 0 toujours refusé.
   Écart −123,51 € = −147,09 (propres à la variante) + 24,69 (5 pertes de la référence évitées)
-  − 1,10 (48 communes, taille modifiée). Sur 2015-2021 et sous ces hypothèses, le minimum de
+  − 1,10 (48 communes : 40 de taille différente, 8 de taille identique). Sur 2015-2021 et sous ces hypothèses, le minimum de
   0,1 contrat a protégé le compte. 4 790 s / 321 Mio (H0), 4 859 s / 313 Mio (H1).
+- Risque 1 % (ADR-013), minimum et pas de 0,1 contrat, même trajectoire 2015-2021 : 1 franchissement
+  non observable, donc H0 et H1 (H1 : une seule transaction diffère, +0,30 €). Mêmes transactions
+  que la variante 0,01 contrat, à tailles plus élevées. H0 : 132 transactions, brut −160,99 €, coûts
+  197,73 €, net **−358,71 €** (H1 −358,42 €) ; drawdown au tick 448,02 € = 21,74 % du sommet (référence
+  46,34 € = 2,25 %) ; 1 dépassement du budget (0,02 €). Des 215 refus : 84 deviennent des entrées
+  (−495,03 €), 131 non évalués, 0 toujours refusé. Écart −376,35 € = +94,00 (48 communes, tailles
+  plus élevées) − 495,03 (84 ajoutées) + 24,69 (5 évitées). Plus gros gain : vente du 2018-04-20 ;
+  sans elle, la référence passe de +17,63 € à −12,98 €, la variante de −358,71 € à −450,54 €. Sur
+  2015-2021 et sous ces hypothèses, 1 % n'améliore pas S1. 4 849 s / 321 Mio (H0), 4 891 s / 311 Mio (H1).
 - Branches fusionnées `feat/ig-demo-diagnostic`, `feat/eurusd-mini-risk-guard`,
   `feat/eurusd-history-s1` supprimées (locales et GitHub) après vérification.
 
@@ -84,7 +94,7 @@ terminée, à présenter avant commit. Fusion de la PR #5 réservée à l'opéra
   Ces valeurs ne sont pas transposées au compte réel.
 
 ## 🔄 En Cours
-- [ ] Granularité 0,01 contrat (ADR-011) : H0 et H1 terminés, comparaison faite ; lot à présenter, non commité
+- [ ] Risque 1 % (ADR-013) : H0 et H1 terminés, comparaison faite ; lot à présenter, non commité
 - [ ] Recherche d'une source applicable pour les fermetures particulières (non bloquante)
 - [ ] Demande au support IG préparée, non envoyée (`docs/IG_SUPPORT_REQUEST.md`)
 
@@ -94,7 +104,7 @@ terminée, à présenter avant commit. Fusion de la PR #5 réservée à l'opéra
 - Déclenchement des stops et référence des distances minimales non confirmés : ASSUMP-008.
 - Compte réel cible à risque limité : stop garanti obligatoire, rapprochable mais jamais éloigné, prime au déclenchement (`docs/CONFIRMATIONS.md` §5, DÉCL) ; ses valeurs ne sont pas observées.
 - Pas encore de suivi des fonds propres du robot en fonctionnement (le moteur de recherche les valorise, ASSUMP-024) ; flux `PRICE` validé par sonde seulement.
-- Moteur S1 : la taille est fixée avant l'exécution simulée ; l'entrée exécutée peut dépasser le budget de risque, dépassement enregistré et jamais supprimé. Drawdown mesuré sur des échantillons (décisions H4 et sorties), pas tick par tick.
+- Moteur S1 : la taille est fixée avant l'exécution simulée ; l'entrée exécutée peut dépasser le budget de risque, dépassement enregistré et jamais supprimé. Drawdown mesuré au tick (depuis `4c6f01a`) et sur les échantillons (décisions H4 et sorties).
 - Mot de passe chiffré non géré si IG l'exige.
 - Dukascopy : ambiguïté de licence **non résolue** (ASSUMP-018) ; acquisition par décision de l'opérateur (ADR-004), arrêt et purge en cas d'avertissement ; convention temporelle non documentée, cohérente sur 2015-2023 (ASSUMP-019).
 - SDK JForex : une réponse HTTP 503 devient une heure vide mise en cache, sans erreur ; traitée comme acquisition incomplète (ASSUMP-022). Compte démo valable 14 jours.

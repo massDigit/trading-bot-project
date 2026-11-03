@@ -40,6 +40,19 @@ def _net(trade: dict[str, Any]) -> Decimal:
     return Decimal(trade["net_account"]) if trade["net_account"] is not None else Decimal(0)
 
 
+def _gross_and_costs(trades: list[dict[str, Any]]) -> dict[str, str]:
+    """EUR price result and EUR costs of closed trades, as in the run report (net = gross - costs)."""
+    gross = costs = Decimal(0)
+    for trade in trades:
+        if trade["net_account"] is None:
+            continue
+        rate = Decimal(trade["conversion_rate"])
+        gross += Decimal(trade["price_pnl_quote"]) * rate
+        costs += sum((Decimal(v) for v in trade["costs_quote"].values()), Decimal(0)) * rate
+        costs += Decimal(trade["conversion_fee"])
+    return {"gross_eur": str(gross), "costs_eur": str(costs)}
+
+
 def fate_of_size_refusals(
     reference: dict[str, dict[str, Any]], variant: dict[str, dict[str, Any]], variant_report: dict[str, Any]
 ) -> dict[str, Any]:
@@ -106,13 +119,19 @@ def match_trades(reference_report: dict[str, Any], variant_report: dict[str, Any
     only_ref = [ref[k] for k in sorted(ref.keys() - var.keys())]
     only_var = [var[k] for k in sorted(var.keys() - ref.keys())]
     common_delta = sum((Decimal(r["difference"]) for r in rows), Decimal(0))
+    larger = [r for r in rows if Decimal(r["size_variant"]) > Decimal(r["size_reference"])]
     only_ref_net = sum((_net(t) for t in only_ref), Decimal(0))
     only_var_net = sum((_net(t) for t in only_var), Decimal(0))
     return {
         "common": len(rows),
         "common_same_size": sum(1 for r in rows if Decimal(r["size_reference"]) == Decimal(r["size_variant"])),
         "common_same_exit": sum(1 for r in rows if r["same_exit"]),
+        "common_larger_in_variant": len(larger),
         "common_net_difference_eur": str(common_delta),
+        "common_reference_totals": _gross_and_costs([ref[k] for k in common]),
+        "common_variant_totals": _gross_and_costs([var[k] for k in common]),
+        "only_reference_totals": _gross_and_costs(only_ref),
+        "only_variant_totals": _gross_and_costs(only_var),
         "only_reference": len(only_ref),
         "only_reference_net_eur": str(only_ref_net),
         "only_variant": len(only_var),
@@ -133,6 +152,13 @@ def account_effect(reference_report: dict[str, Any], variant_report: dict[str, A
     def view(report: dict[str, Any]) -> dict[str, Any]:
         result = report["result"]
         totals = result["closed_trade_totals"]
+        drawdown = result["tick_drawdown"]
+        depth = Decimal(drawdown["max_drawdown_eur"])
+        # the peak preceding the deepest fall (in EUR), recovered from its trough
+        peak = Decimal(drawdown["trough_eur"]) + depth if drawdown["trough_eur"] is not None else None
+        closed = [t for t in result["trades"] if t["net_account"] is not None]
+        best = max(closed, key=_net, default=None)
+        net = Decimal(totals["net_eur"])
         return {
             "trades_closed": totals["closed"],
             "winners": totals["winners"],
@@ -148,7 +174,20 @@ def account_effect(reference_report: dict[str, Any], variant_report: dict[str, A
                 result["tick_drawdown"]["drawdown_peak_utc"],
                 result["tick_drawdown"]["trough_utc"],
             ],
+            "tick_drawdown_peak_eur": None if peak is None else str(peak),
+            "tick_drawdown_pct_of_peak": None if not peak else str(depth / peak * 100),
             "risk_overruns": len(result["risk_overruns"]),
+            "risk_overruns_eur": str(sum((Decimal(o["overrun_eur"]) for o in result["risk_overruns"]), Decimal(0))),
+            "largest_gain": None
+            if best is None
+            else {
+                "decided_utc": best["decided_utc"],
+                "side": best["side"],
+                "size": best["size"],
+                "net_eur": str(_net(best)),
+                "share_of_net_pct": None if not net else str(_net(best) / net * 100),
+                "net_without_it_eur": str(net - _net(best)),
+            },
             "unobservable_crossings_h0": result["unobservable_crossings_h0"],
             "stop_beyond_at_execution": result["stop_beyond_at_execution"],
             "net_by_year": {y: v["closed_trades"]["net_eur"] for y, v in report["by_year"].items()},

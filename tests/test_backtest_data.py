@@ -276,3 +276,23 @@ def test_common_trades_with_a_finer_size_are_matched_by_decision_and_side(tmp_pa
     assert D(long["size_variant"]) > D(long["size_reference"])  # finer increment: closer to the budget
     total = sum(D(r["difference"]) for r in matching["common_trades"])
     assert D(matching["net_difference_eur"]) == total == D(matching["common_net_difference_eur"])
+
+
+def test_comparison_reports_gross_costs_drawdown_share_and_largest_gain(tmp_path: Path) -> None:
+    after = (D("1.0990"), D("1.0988"), D("1.0985"), D("1.0988"))
+    ticks = ticks_for([FLAT] * 25 + [BREAKOUT] + [HOLD] * 10 + [REVERSE, after, after])
+    coarse = {"min_size": D("0.01"), "size_increment": D("0.01")}  # the wide stop fits both budgets
+    for name, config in (("ref", coarse), ("var", {**coarse, "risk_fraction": D("0.01")})):
+        _, engine = _both(ticks, WIDE, **config)
+        _write_run(tmp_path / name, engine.run(), engine.yearly_drawdown)
+    report = compare(tmp_path / "ref", tmp_path / "var")
+    matching = report["trade_matching"]
+    assert matching["common"] == 2 and matching["common_larger_in_variant"] == 2  # four times the budget
+    for side in ("reference", "variant"):
+        totals = matching[f"common_{side}_totals"]
+        view = report["account_effect"][side]
+        assert abs(D(totals["gross_eur"]) - D(totals["costs_eur"]) - D(view["net_eur"])) < D("1e-20")
+        best = view["largest_gain"]
+        assert D(best["net_without_it_eur"]) == D(view["net_eur"]) - D(best["net_eur"])
+        peak, depth = D(view["tick_drawdown_peak_eur"]), D(view["tick_drawdown_eur"])
+        assert depth > 0 and D(view["tick_drawdown_pct_of_peak"]) == depth / peak * 100

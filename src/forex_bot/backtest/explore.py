@@ -371,6 +371,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--size-increment", type=Decimal, default=ResearchConfig.size_increment, help="incrément de taille (scénario)"
     )
+    parser.add_argument(
+        "--risk-fraction",
+        type=Decimal,
+        default=ResearchConfig.risk_fraction,
+        help="fraction des fonds propres risquée par opération (scénario de recherche)",
+    )
     parser.add_argument("--compare", action="store_true", help="vérifier d'abord l'égalité mémoire / flux")
     parser.add_argument("--out", type=Path, help="fichier JSON du résultat (hors Git, sous data/)")
     parser.add_argument("--decisions-out", type=Path, help="journal JSONL des décisions H4 (hors Git, sous data/)")
@@ -392,6 +398,7 @@ def main(argv: list[str] | None = None) -> int:
         stop_at_execution=StopAtExecution[args.stop_at_execution],
         min_size=args.min_size,
         size_increment=args.size_increment,
+        risk_fraction=args.risk_fraction,
     )
     params = S1Params()  # fixed reference (ASSUMP-020): N 20, M 10, ATR 14, k 2, D1 filter 55 days
 

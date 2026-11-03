@@ -12,7 +12,8 @@
   - [x] premier passage exploratoire 2019-04-01 → 2019-07-01, dates fixées avant résultats, paramètres fixes, coûts de recherche explicites (ADR-009)
   - [x] revue du passage exploratoire et fusion de la PR #4 (2026-11-03)
 - [x] Référence S1 seule 2015-2021 (ADR-010, protocole `docs/experiments/S1_REFERENCE_2015_2021.md`) : H0 ; ni H1 ni rejet nécessaires ; retenue comme référence de développement (2026-11-03)
-- [ ] Granularité 0,01 contrat (ADR-011, protocole `docs/experiments/S1_GRANULARITY_001.md`) : H0 et H1 (1 franchissement non observable) ; minimum de 0,1 contrat protecteur sur 2015-2021 ; à présenter avant commit
+- [x] Granularité 0,01 contrat (ADR-011, protocole `docs/experiments/S1_GRANULARITY_001.md`) : H0 et H1 ; minimum de 0,1 contrat protecteur sur 2015-2021 ; conclusion retenue après revue d'Astra (2026-11-03)
+- [ ] Risque 1 % (ADR-013, protocole `docs/experiments/S1_RISK_1PCT_001.md`) : H0 et H1 ; 1 % n'améliore pas S1 sur 2015-2021 ; à présenter avant commit
 - [ ] Fermetures particulières (jours fériés, fermetures anticipées) : rechercher une source applicable, en parallèle ; sans preuve, le classement actuel est conservé (ASSUMP-016)
 
 ### 📋 A Faire
