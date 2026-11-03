@@ -9,20 +9,26 @@
 ## 🚀 Phase Actuelle
 Historique de recherche EUR/USD acquis (2015-2023, avec exceptions connues) ; règles de données
 de S1 validées comme référence expérimentale ; moteur de backtest S1 hors ligne **implémenté**,
-conventions validées (ADR-009), PR #4 en brouillon ; **un seul passage exploratoire** réalisé
-(2019-04-01 → 2019-07-01), sans valeur de validation de performance.
+validé comme moteur de recherche hors ligne et fusionné (PR #4, `d52f24f`) ; référence S1 seule
+2015-2021 mesurée (ADR-010), variantes de granularité 0,01 contrat (ADR-011) et de risque 1 %
+(ADR-013) mesurées, sans valeur de validation de performance.
 
 ## 🎯 Focus Courant
-Observation du passage exploratoire (branche `feat/s1-backtest-engine`, PR #4 en brouillon) :
-journal d'une ligne par décision H4 et drawdown observable au tick, à présenter avant commit.
+Référence S1 seule sur la période de développement 2015-2021 (branche
+`feat/s1-reference-2015-2021`, PR #5 en brouillon, depuis `main` = `d52f24f`) : référence commitée
+(`7414378`) ; granularité 0,01 contrat (`3477689`), conclusion retenue par l'opérateur après revue
+d'Astra ; risque 1 % (`docs/experiments/S1_RISK_1PCT_001.md`) terminé et clos (ADR-014) : S1 à
+0,25 % reste la référence de développement. Sorties de passage retirées de l'historique de la
+branche ; fusion de la PR #5 par l'agent autorisée par l'opérateur. Suite : protocole S2 (aucun
+backtest).
 
 ## 🧾 Synthèse vérifiée (2026-11-03)
-- PR #1, #2 et #3 fusionnées dans `main` par commits de fusion, sur autorisation de l'opérateur
-  (`main` = `aa69503`). Une branche depuis `main`, une PR vers `main`.
-- **PR #4 ouverte en brouillon** (`feat/s1-backtest-engine` → `main`) : moteur S1 (`9b38118`),
+- PR #1 à #4 fusionnées dans `main` par commits de fusion, sur autorisation de l'opérateur
+  (`main` = `d52f24f`). Une branche depuis `main`, une PR vers `main`.
+- **PR #4 fusionnée** (`d52f24f`, 2026-11-03) après revue d'Astra sur `4c6f01a` : moteur S1 (`9b38118`),
   revues d'Astra corrigées (`b8506b0`, `cf4d0b4`) ; ASSUMP-024 validée (ADR-009) ; lecteur en
   flux et passage exploratoire (`8681a6e`) vérifiés par Astra. Journal des décisions et drawdown
-  au tick dans l'arbre de travail, non commités. 211 tests réussis ; `ruff check`, `ruff format --check` et `uv run mypy src tests` sans erreur.
+  au tick (`4c6f01a`). Branche `feat/s1-reference-2015-2021` : bilan annuel (`7414378`), comparaison de passages, non commitée ; 216 tests réussis ; `ruff check`, `ruff format --check` et `uv run mypy src tests` sans erreur.
 - Comparaison sur l'échantillon réel 2019-04-01 → 2019-07-01 (7 707 234 ticks, 91 fichiers) :
   lecteurs en mémoire et en flux **identiques** (transactions, coûts, journal, fonds propres, fin).
   Passage en flux seul : 164 s, pic de mémoire 195 Mio (Mac M4) ; avec la référence en mémoire : 3,7 Gio.
@@ -30,6 +36,36 @@ journal d'une ligne par décision H4 et drawdown observable au tick, à présent
   H1 nécessaire pour cette fenêtre). Rejeu avec observation : 6 transactions identiques au JSON de
   référence ; 390 lignes de décision pour 390 décisions H4 ; drawdown au tick 13,77 € (échantillonné
   11,79 €) ; 190 s, pic 188 Mio.
+- Référence S1 seule 2015-2021, H0 (ADR-010) : 10 912 décisions H4, 53 transactions (19 achats,
+  34 ventes ; 18 gagnantes), brut +46,95 €, coûts 29,31 €, net +17,63 € ; fonds propres finaux
+  2 017,63 €, aucune position ouverte ; drawdown au tick 46,34 € (échantillonné 44,85 €) ; aucun
+  franchissement non observable, aucun stop dépassé à l'exécution, aucun dépassement du budget ;
+  refus de taille (minimum 0,1 contrat au-dessus du budget de 0,25 %) : 215 sur 1 024 cassures
+  détectées (21,0 %), ou 215 sur 268 signaux arrivés au dimensionnement (80,2 %) ; filtre D1 :
+  33 refus pour historique D1 initial insuffisant, distincts des 445 refus pour canal D1 inutilisable.
+  Indicateurs tous calculables à partir du 2015-03-19 21:00 UTC. 4 848 s, pic 307 Mio.
+  Journal : 10 912 lignes valides, distinctes, chronologiques. Empreinte de provenance du rapport
+  (`0231c857…`) différente du diff de lancement (`1515cac3…`) : calculée à l'écriture du rapport,
+  après des modifications de STATE, TASKS et CHANGELOG pendant le passage (arbre de fin reconstitué
+  = `0231c857…`) ; partie code (`src`, `tests`) identique au lancement et à la fin. Provenance
+  désormais relevée au lancement.
+- Granularité 0,01 contrat (ADR-011), même trajectoire 2015-2021 : 1 franchissement non observable,
+  donc H0 et H1 (H1 : une seule transaction diffère, +0,15 €). H0 : 132 transactions (39 gagnantes),
+  brut −45,62 €, coûts 60,26 €, net **−105,88 €** (H1 −105,73 €), drawdown au tick 136,64 €,
+  1 dépassement du budget (0,008 €). Des 215 refus de taille : 84 exécutés (−147,09 € nets, déjà
+  −117,61 € bruts), 131 non évalués (position ouverte par l'une de ces entrées), 0 toujours refusé.
+  Écart −123,51 € = −147,09 (propres à la variante) + 24,69 (5 pertes de la référence évitées)
+  − 1,10 (48 communes : 40 de taille différente, 8 de taille identique). Sur 2015-2021 et sous ces hypothèses, le minimum de
+  0,1 contrat a protégé le compte. 4 790 s / 321 Mio (H0), 4 859 s / 313 Mio (H1).
+- Risque 1 % (ADR-013), minimum et pas de 0,1 contrat, même trajectoire 2015-2021 : 1 franchissement
+  non observable, donc H0 et H1 (H1 : une seule transaction diffère, +0,30 €). Mêmes transactions
+  que la variante 0,01 contrat, à tailles plus élevées. H0 : 132 transactions, brut −160,99 €, coûts
+  197,73 €, net **−358,71 €** (H1 −358,42 €) ; drawdown au tick 448,02 € = 21,74 % du sommet (référence
+  46,34 € = 2,25 %) ; 1 dépassement du budget (0,02 €). Des 215 refus : 84 deviennent des entrées
+  (−495,03 €), 131 non évalués, 0 toujours refusé. Écart −376,35 € = +94,00 (48 communes, tailles
+  plus élevées) − 495,03 (84 ajoutées) + 24,69 (5 évitées). Plus gros gain : vente du 2018-04-20 ;
+  sans elle, la référence passe de +17,63 € à −12,98 €, la variante de −358,71 € à −450,54 €. Sur
+  2015-2021 et sous ces hypothèses, 1 % n'améliore pas S1. 4 849 s / 321 Mio (H0), 4 891 s / 311 Mio (H1). Expérience close (ADR-014).
 - Branches fusionnées `feat/ig-demo-diagnostic`, `feat/eurusd-mini-risk-guard`,
   `feat/eurusd-history-s1` supprimées (locales et GitHub) après vérification.
 
@@ -60,7 +96,7 @@ journal d'une ligne par décision H4 et drawdown observable au tick, à présent
   Ces valeurs ne sont pas transposées au compte réel.
 
 ## 🔄 En Cours
-- [ ] PR #4 en brouillon : journal des décisions H4 et drawdown au tick à présenter, non commités
+- [ ] Protocole S2 (reprise de tendance après repli) : à présenter, aucun backtest
 - [ ] Recherche d'une source applicable pour les fermetures particulières (non bloquante)
 - [ ] Demande au support IG préparée, non envoyée (`docs/IG_SUPPORT_REQUEST.md`)
 
@@ -70,7 +106,7 @@ journal d'une ligne par décision H4 et drawdown observable au tick, à présent
 - Déclenchement des stops et référence des distances minimales non confirmés : ASSUMP-008.
 - Compte réel cible à risque limité : stop garanti obligatoire, rapprochable mais jamais éloigné, prime au déclenchement (`docs/CONFIRMATIONS.md` §5, DÉCL) ; ses valeurs ne sont pas observées.
 - Pas encore de suivi des fonds propres du robot en fonctionnement (le moteur de recherche les valorise, ASSUMP-024) ; flux `PRICE` validé par sonde seulement.
-- Moteur S1 : la taille est fixée avant l'exécution simulée ; l'entrée exécutée peut dépasser le budget de risque, dépassement enregistré et jamais supprimé. Drawdown mesuré sur des échantillons (décisions H4 et sorties), pas tick par tick.
+- Moteur S1 : la taille est fixée avant l'exécution simulée ; l'entrée exécutée peut dépasser le budget de risque, dépassement enregistré et jamais supprimé. Drawdown mesuré au tick (depuis `4c6f01a`) et sur les échantillons (décisions H4 et sorties).
 - Mot de passe chiffré non géré si IG l'exige.
 - Dukascopy : ambiguïté de licence **non résolue** (ASSUMP-018) ; acquisition par décision de l'opérateur (ADR-004), arrêt et purge en cas d'avertissement ; convention temporelle non documentée, cohérente sur 2015-2023 (ASSUMP-019).
 - SDK JForex : une réponse HTTP 503 devient une heure vide mise en cache, sans erreur ; traitée comme acquisition incomplète (ASSUMP-022). Compte démo valable 14 jours.
@@ -82,6 +118,6 @@ journal d'une ligne par décision H4 et drawdown observable au tick, à présent
 - Authentification SSH vers GitHub intermittente le 2026-10-30 (clé enregistrée et chargée) ; une nouvelle tentative a suffi.
 
 ## 🏁 Prochaine Étape / Milestone
-1. Revue du passage exploratoire par l'opérateur et Astra ; suite (autres fenêtres 2015-2021, variantes) uniquement sur décision, coûts paramétrés (non confirmés chez IG), sans optimisation.
+1. Protocole S2, sans backtest ; ensuite seulement, sur décision, un modèle de sélection des signaux comparé à cette référence (aucun entraînement avant).
 2. En parallèle : fermetures particulières et confirmations IG.
 3. Garder 2022-2023 pour l'évaluation des variantes figées, puis 2024-2025 pour le test final (ADR-007).

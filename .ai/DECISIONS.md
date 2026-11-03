@@ -91,3 +91,41 @@
   3. Dates fixées **avant** de consulter les résultats : une courte fenêtre dans 2015-2021, précédée d'une période réservée à l'initialisation des indicateurs ; lectures bornées à ces dates ; données locales ; paramètres S1 fixes ; 2022-2025 jamais consultés. Un échantillon sans transaction reste un résultat : la fenêtre n'est pas changée pour en obtenir une.
 - **Fenêtre retenue par l'agent avant tout passage** (2026-11-03) : initialisation `[2019-01-01T00:00Z, 2019-04-01T00:00Z)` (bougies seulement, aucune décision) ; étude `[2019-04-01T00:00Z, 2019-07-01T00:00Z)` (décisions et ticks). Choix : environ 64 D1 avant l'étude (canal de 55 jours avec la D1 de contexte), trois mois au milieu de la partition de développement, sans regarder les prix.
 - **Portée** : recherche hors ligne. Ni validation de performance, ni autorisation de trading, ni passage d'ordre ; PR #4 en brouillon, sans fusion.
+
+### ADR-010 : Référence S1 seule sur la période de développement 2015-2021
+- **Date** : 2026-11-03
+- **Statut** : `ACCEPTED` (décision de l'opérateur)
+- **Source** : message de l'opérateur du 2026-11-03, après la revue de la PR #4 (commit `4c6f01a`) par Astra ; PR #4 fusionnée (`d52f24f`) sur son autorisation, le lot étant validé comme moteur de recherche hors ligne.
+- **Décision** : mesurer S1 Donchian seule sur une trajectoire continue du 2015-01-01 inclus au 2022-01-01 exclu, avec le moteur vérifié, les données locales et le lecteur en flux, la configuration du passage d'avril-juin 2019 (canaux 20/10, ATR 14, stop à 2 ATR, filtre D1 strict de 55 jours, stop garanti simulé, 2 000 EUR, 0,25 %, mêmes coûts). H0 d'abord ; H1 seulement si un franchissement non observable apparaît ; comparaison « exécutée puis liquidée » / « rejetée » seulement si un stop est déjà dépassé au premier tick d'entrée ; aucun scénario retenu pour sa rentabilité. Protocole figé avant lancement : `docs/experiments/S1_REFERENCE_2015_2021.md`.
+- **Portée** : référence pour comparer plus tard un modèle de sélection des signaux. Aucune optimisation, aucun entraînement, aucune donnée 2022-2025, aucun ordre ni téléchargement ; ni validation de performance ni autorisation de trading.
+
+### ADR-011 : Expérience de granularité de taille (0,01 contrat) sur 2015-2021
+- **Date** : 2026-11-03
+- **Statut** : `ACCEPTED` (décision de l'opérateur)
+- **Source** : message de l'opérateur du 2026-11-03, après la référence S1 seule (PR #5).
+- **Décision** : S1 Donchian, avec les paramètres et coûts du passage initial, est retenue comme référence de développement 2015-2021. Une variante unique rejoue toute la trajectoire avec une taille minimale et un incrément de 0,01 contrat au lieu de 0,1, tout le reste identique, dans des fichiers distincts ; protocole figé avant lancement : `docs/experiments/S1_GRANULARITY_001.md`. Aucune autre taille ni budget testé après les résultats.
+- **Portée** : hypothèse de recherche ; 0,01 contrat n'est pas confirmé chez IG. Aucune donnée 2022-2025, aucun ordre, aucun entraînement ; ni validation de performance ni autorisation de trading.
+
+### ADR-012 : Publication des résultats des passages 2015-2021 dans la PR #5
+- **Date** : 2026-11-03
+- **Statut** : `SUPERSEDED` par ADR-014 (fichiers retirés de la branche et de son historique avant fusion)
+- **Source** : message de l'opérateur du 2026-11-03, pour qu'Astra lise les résultats directement ; l'opérateur a été informé que le dépôt est **public** et que les journaux de décisions contiennent les bougies H4 et cotations EUR/USD 2015-2021 dérivées de Dukascopy (licence ambiguë, ASSUMP-018), et a choisi de tout publier, journaux compris.
+- **Décision** : versionner, par ajout explicite (`git add -f`), les sorties des passages de référence (`s1_ref_2015_2021_*`) et de granularité (`s1_gran001_*`) de `data/reports/backtests/` : rapports JSON, journaux de décisions, journaux d'exécution, diffs de lancement, protocoles et comparaisons. La règle `data/` de `.gitignore` reste inchangée : historique de marché, Parquet et autres sorties ne sont pas versionnés.
+- **Portée** : ces seuls fichiers. **Dérogation explicite** à ADR-004 (« données locales hors Git, jamais redistribuées ») pour ces données dérivées. Ne résout pas l'ambiguïté de licence (ASSUMP-018). En cas d'avertissement de Dukascopy, la purge devra aussi retirer ces fichiers du dépôt et de son historique ; `forex-history purge-dukascopy` ne le fait pas, et une publication sur un dépôt public peut avoir été copiée ou mise en cache entre-temps.
+
+### ADR-013 : Expérience de risque à 1 % par opération sur 2015-2021
+- **Date** : 2026-11-03
+- **Statut** : `ACCEPTED` (décision de l'opérateur)
+- **Source** : message de l'opérateur du 2026-11-03, après la revue par Astra du commit `d316d31`. La conclusion de l'expérience à 0,01 contrat (ADR-011) est retenue pour 2015-2021, sans nouveau passage.
+- **Décision** : une variante unique rejoue toute la trajectoire 2015-2021 avec un risque de 1 % des fonds propres par opération au lieu de 0,25 % (budget initial 20 € au lieu de 5 €, recalculé à chaque décision), minimum et pas de 0,1 contrat comme la référence, tout le reste identique ; H1 ou rejet à l'exécution seulement si les cas se présentent. Protocole figé avant lancement : `docs/experiments/S1_RISK_1PCT_001.md`. Journaux détaillés conservés localement ; bilan agrégé pour la revue.
+- **Portée** : backtest seulement. Pas de combinaison 1 % / 0,01 contrat, aucun ajustement après lecture des résultats, aucune donnée 2022-2025, aucun ordre ; ni validation de performance ni autorisation de trading.
+
+### ADR-014 : Clôture de l'expérience à 1 % et contenu de la PR #5 dans `main`
+- **Date** : 2026-11-03
+- **Statut** : `ACCEPTED` (décision de l'opérateur)
+- **Source** : messages de l'opérateur du 2026-11-03, après les résultats du test à 1 % (`docs/experiments/S1_RISK_1PCT_001.md`).
+- **Décision** :
+  1. L'expérience S1 à 1 % est close. S1 à 0,25 %, avec ses paramètres et coûts inchangés, reste la référence de développement. Aucune autre variante de risque n'est lancée.
+  2. Entrent dans `main` : le code, les tests, les protocoles et les résultats agrégés (`docs/experiments/`, `.ai/`). Restent hors de la fusion les sorties de passage de `data/reports/backtests/` : journaux de décisions (bougies H4 et cotations), rapports et comparaisons (prix d'entrée, de sortie et de stop), qui sont dérivés de Dukascopy, ainsi que les journaux d'exécution, diffs de lancement et copies de protocole, qui suivent la règle `data/` du `.gitignore`.
+  3. L'opérateur autorise la réécriture de l'historique public de la branche de la PR #5 et la fusion par l'agent. Le commit `d316d31`, seul à contenir ces fichiers, est retiré de la branche (rebase, poussée forcée) ; les fichiers restent sur le poste de l'opérateur, hors Git. ADR-012 est remplacée.
+- **Portée** : la réécriture retire ces fichiers de la branche et de `main` ; elle ne garantit pas leur disparition des copies, caches ou références déjà créés par GitHub ou par des tiers pendant leur publication (ASSUMP-018 inchangée). Ni validation de performance ni autorisation de trading.
