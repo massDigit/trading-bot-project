@@ -152,3 +152,15 @@
   1. L'étude est validée ; S2 reste inchangée et aucun autre calcul S2 n'est demandé. Conclusion retenue : « Sur les 66 cassures EUR/USD étudiées, la cible et le stop sont plus éloignés dans le groupe le plus volatil, mais le rapport cible/stop ne s'améliore pas de façon régulière. » Elle ne prouve ni que la volatilité est sans effet, ni qu'une autre paire serait préférable.
   2. Fiche S3 (PR #10), première référence : une seule règle de sortie de stratégie, la sortie suiveuse sur clôture H4 de l'autre côté de la moyenne de Bollinger, en plus du stop garanti de protection. La première réintégration de la boîte est journalisée sans déclencher de sortie ; une version sortant à la réintégration relèverait d'un protocole séparé, comme le test de sensibilité (ni grille ni optimisation). D1 → H4 reste la référence, H4 sans filtre D1 la comparaison, une seule tentative par boîte.
 - **Portée** : documentation seulement ; ASSUMP-026 reste `PROPOSED` jusqu'à revue du diff de la fiche. Aucune implémentation S3, aucun backtest, aucune donnée 2022-2025.
+
+### ADR-018 : Approbation de S3 (ASSUMP-026) pour la recherche hors ligne
+- **Date** : 2026-11-04
+- **Statut** : `ACCEPTED` (décision de l'opérateur)
+- **Source** : message de l'opérateur du 2026-11-04, après revue du diff de la fiche `docs/strategies/S3_SQUEEZE.md` (PR #10, `e826fd9`).
+- **Décision** : ASSUMP-026 est approuvée pour la recherche hors ligne.
+  1. *Paramètres* : valeurs du §10 conservées telles quelles, sans grille ni optimisation ; valeurs de référence de l'expérience, efficacité à mesurer.
+  2. *Sorties* : ni cible ni sortie temporelle ; la moyenne de 20 H4 est la seule règle de sortie de stratégie et ne garantit aucune durée maximale ; le stop garanti simulé reste en place jusqu'à la sortie effective ; une position ouverte en fin d'étude est valorisée séparément, sans clôture fictive.
+  3. *Annonces* : aucun filtre, faute de calendrier historique validé ; le stop garanti simulé ne mesure pas à lui seul les effets d'une annonce sur le spread ou le prix d'entrée.
+  4. *Journal* : la première clôture de retour est une réintégration si `BL ≤ clôture bid ≤ BH` (bornes incluses), une traversée si elle passe directement au-delà de la borne opposée, à l'achat et à la vente ; aucun de ces événements ne provoque à lui seul une sortie ; si la même clôture déclenche la sortie suiveuse, l'observation et la décision sont conservées.
+  Restent valables (ADR-017) : D1 → H4 en référence, H4 sans filtre D1 en comparaison, une seule tentative par boîte ; sortie sur réintégration et étude de sensibilité relèvent de protocoles séparés.
+- **Suite autorisée** : fusion de la PR #10, puis étape 1 de S3 depuis `main` sur une branche distincte (moteur hors ligne et tests synthétiques uniquement). Aucun backtest historique, aucune donnée 2022-2025, aucun entraînement, aucun ordre.

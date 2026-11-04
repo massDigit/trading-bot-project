@@ -96,7 +96,7 @@ décisions identique octet pour octet) ; 194 s, 175 Mio. Étape 3 rejouée aprè
   Ces valeurs ne sont pas transposées au compte réel.
 
 ## 🔄 En Cours
-- [ ] Fiche S3 (`docs/strategies/S3_SQUEEZE.md`, PR #10 brouillon) : sortie suiveuse unique et réintégration journalisée (ADR-017) ; ASSUMP-026 `PROPOSED` jusqu'à revue du diff ; aucune implémentation
+- [ ] S3 étape 1 : moteur hors ligne et tests synthétiques (fiche `docs/strategies/S3_SQUEEZE.md`, ASSUMP-026 approuvée, ADR-018)
 - [ ] Recherche d'une source applicable pour les fermetures particulières (non bloquante)
 - [ ] Demande au support IG préparée, non envoyée (`docs/IG_SUPPORT_REQUEST.md`)
 
