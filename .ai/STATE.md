@@ -97,6 +97,7 @@ décisions identique octet pour octet) ; 194 s, 175 Mio. Étape 3 rejouée aprè
 
 ## 🔄 En Cours
 - [x] S3 étape 1 : moteur hors ligne (`backtest/s3.py`, `s3_engine.py`, S1 et S2 inchangés) et 28 tests synthétiques, dont l'exemple du §7, ses deux suites et l'abandon de la sortie suiveuse quand le stop est atteint avant son exécution ; validée par l'opérateur (PR #13). Aucun passage historique
+- [x] S3 étape 2 (2026-11-04) : rejeu S1 H0 du 2019-04-01 au 2019-07-01 sur `main` = `51f1507` (après fusion du moteur S3), identique à la référence `s1_2019Q2_stream.json` : 6 transactions identiques champ par champ, solde 1 992,04 €, journal des 390 décisions identique octet pour octet ; 190 s, 187 Mio. Sorties hors Git. Étude de disponibilité et backtest de performance S3 non lancés
 - [ ] Recherche d'une source applicable pour les fermetures particulières (non bloquante)
 - [ ] Demande au support IG préparée, non envoyée (`docs/IG_SUPPORT_REQUEST.md`)
 

@@ -38,7 +38,9 @@
 - [ ] Mention « Powered by Dukascopy » si les données sont intégrées à une interface (licence, section 8)
 - [ ] Fiches S2 et D1 (première vague)
 - [x] Fiche S3 (`docs/strategies/S3_SQUEEZE.md`) : ASSUMP-026 approuvée pour la recherche hors ligne (ADR-018, 2026-11-04)
-- [ ] S3 étape 1 : moteur hors ligne et tests synthétiques
+- [x] S3 étape 1 : moteur hors ligne et 28 tests synthétiques (PR #13, `51f1507`, 2026-11-04)
+- [x] S3 étape 2 : rejeu de non-régression S1 sur avril-juin 2019 sur `51f1507` : 6 transactions, solde (1 992,04 €) et journal des 390 décisions identiques à la référence (2026-11-04)
+- [ ] S3 étape 3 : étude de disponibilité (non lancée, en attente de l'opérateur)
 - [ ] Apprentissage par l'expérience (cahier v1.2, ADR-019) : exigence future, **non implémentée** ; développement sur décision distincte, après fixation du budget d'expériences et des périodes autorisées
 
 ### ✅ Terminé
