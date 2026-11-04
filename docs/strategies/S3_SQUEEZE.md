@@ -27,6 +27,8 @@ comme les scénarios H0 et H1 des rapports S1.
 - **Appui** :
   - méthodes de cassure de volatilité de John Bollinger [R3] (largeur de bande faible par rapport
     à son propre historique, la « Squeeze », puis clôture hors des bandes) ;
+  - règles de Bollinger [R7] : un simple contact avec une bande ne constitue pas un signal ; d'où
+    la clôture hors de la consolidation **et** hors de la bande, avec une largeur en hausse (§4.3) ;
   - regroupement de la volatilité, propriété largement documentée des rendements de change.
   - Portée : ce sont des méthodes et des propriétés générales. Elles ne prouvent pas que **cette**
     variante H4 sur EUR/USD couvre ses coûts. L'adaptation au Forex est à tester (cahier §6.2).
@@ -218,8 +220,12 @@ d'une vente est placé au-dessus de l'extrême `ask_high` de la boîte (côté d
   - Quand l'expansion dure, `M` monte au-dessus de `BH` et devient la sortie active.
 - Les deux règles sont évaluées à chaque H4. Si les deux sont vraies, le motif journalisé est
   `RÉINTÉGRATION`. Le stop garanti reste en place jusqu'à l'exécution de la sortie.
-- **Pas de cible, pas de sortie temporelle** : la sortie suiveuse limite la durée. Une position
-  passe les nuits (swing) et paie le financement de recherche.
+- **Pas de cible, pas de sortie temporelle** : la sortie suiveuse limite la durée.
+- **Conservation nocturne et week-end** : une position passe les nuits (swing) et paie le
+  financement de recherche. Elle est aussi conservée pendant la fermeture hebdomadaire, comme dans
+  S1, avec son stop garanti : l'écart de réouverture est un risque assumé et mesuré (§6.3, §6.4).
+  La politique de conservation pendant les nuits et le week-end reste une décision ouverte du
+  cahier (§16.3) ; la fiche n'en préjuge pas pour l'exploitation.
 - **Sortie non calculable** :
   - H4 non utilisable : la position est maintenue avec son stop (S1 §10), et la sortie est
     évaluée à la H4 utilisable suivante ;
@@ -353,8 +359,11 @@ trajectoire continue, 2 000 €, 0,25 %, minimum et pas de 0,1, mêmes coûts.
   globalement et par année ;
 - **part des fausses cassures** (sorties sur réintégration) et leur perte moyenne en multiples du
   risque, comparée à celle des stops ;
-- drawdown au tick en euros, **véritable drawdown relatif maximal**, premier franchissement de 6 % ;
-- net sans la meilleure transaction ; transactions indéterminées ; dépassements du budget.
+- drawdown au tick en euros, **véritable drawdown relatif maximal**, premier franchissement de 6 %,
+  durée de récupération ;
+- net sans la meilleure transaction ; transactions indéterminées ; dépassements du budget ;
+- mesures du cahier (§9) : espérance nette en unités de risque, profit factor, gain et perte
+  moyens, durée d'exposition, mois sans opération et mois déficitaires conservés.
 
 **Comparaison à la référence S1**, ce qui mesure l'apport de S3 (§2) :
 - **coïncidence des entrées** : part des entrées S3 décidées sur la même H4 et dans le même sens
@@ -410,6 +419,10 @@ entraînement ; aucun ordre ; le sélecteur IA n'est pas concerné.
   - 0,25 × `A` est la marge de S2.
 - **Durée de vie** : 30 H4 font environ une semaine de cotation, comme le `T_max` de S2.
 
+**Domaine de recherche** (cahier §6.6) : **aucun** dans ce lot. Une seule valeur par paramètre,
+sans grille ni optimisation. Le test de sensibilité autour des valeurs choisies, prévu par le
+cahier (§9), n'est pas inclus ; il demanderait un protocole et une décision distincts (§11).
+
 ## 11. Points soumis à la décision de l'opérateur
 
 1. Valeurs du §10 (ASSUMP-026).
@@ -420,6 +433,13 @@ entraînement ; aucun ordre ; le sélecteur IA n'est pas concerné.
 5. **Aucun filtre d'annonces** tant qu'aucun calendrier n'est validé (§6.4).
 6. Réintégration jugée sur la **clôture** H4, pas sur un prix intra-bougie : la sortie attend la
    fin de la H4, et le stop reste la seule protection en cours de bougie.
+7. **Deux sorties dans une même version.** Le cahier (§6.2) prévoit une « sortie suiveuse ou
+   sortie sur réintégration selon la version testée », donc plutôt deux versions. Pour une seule
+   version de référence, la fiche les combine : la réintégration traite la fausse cassure, la
+   suiveuse la cassure qui tient. Leur apport respectif ne sera donc pas mesuré séparément. Les
+   séparer demanderait deux versions pré-enregistrées.
+8. **Sensibilité aux paramètres** (cahier §9) : non incluse dans la référence ; à décider plus
+   tard, avec son propre protocole, sans réglage d'après les résultats.
 
 Hors de cette version : sortie à objectif (projection de la hauteur), filtre de volume (pas de
 volume fiable sur le Forex de gré à gré), seconde entrée après une fausse cassure, déclenchement
