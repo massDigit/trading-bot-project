@@ -1,7 +1,8 @@
 # Fiche S3 — Cassure après compression de volatilité (swing)
 
-> Identifiant code : `SWING_03`. Statut : **spécifiée** (cahier des charges §6.2, §6.6) ; ni
-> implémentée, ni évaluée. Règles et valeurs numériques **approuvées pour la recherche hors ligne**
+> Identifiant code : `SWING_03`. Statut : **implémentée hors ligne** (`src/forex_bot/backtest/s3.py`,
+> `s3_engine.py`), **tests synthétiques uniquement** (`tests/test_s3.py`, étape 1) ; non évaluée
+> (cahier des charges §6.2, §6.6). Règles et valeurs numériques **approuvées pour la recherche hors ligne**
 > (ASSUMP-026, ADR-017, ADR-018, 2026-11-04) : ce sont les valeurs de référence de l'expérience,
 > choisies a priori, sans lecture de données ni optimisation ; leur efficacité reste à mesurer.
 > Aucune donnée 2022-2025. Ni validation de performance ni autorisation de trading.
