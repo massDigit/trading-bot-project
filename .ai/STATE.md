@@ -20,7 +20,7 @@ fusionnée, `46439fb`). Étape 1 (PR #7) : moteur S2 hors ligne
 Une cassure sur une bougie de déclenchement non `OK` est journalisée `ÉVALUATION_IMPOSSIBLE` (§8).
 Étape 2 faite (2026-11-03) : rejeu S1 H0 du 2019-04-01 au 2019-07-01 sur `7b9a1f1`, identique à la
 référence `s1_2019Q2_stream.json` (6 transactions une par une, solde 1 992,04 €, journal des 390
-décisions identique octet pour octet) ; 194 s, 175 Mio. Étape 3 rejouée après revue (2026-11-04, `5922ecc`, `docs/experiments/S2_AVAILABILITY_2015_2021.md`, non figé) : 43 584 créneaux H1 attendus, 3 absents, 460 non évaluables (420 par D1 de contexte non utilisable), 48 cassures détectées ; 556 configurations, 38 consommées par convention de l'étude, 2 abandonnées pour données du repli incomplètes. Étape 4 non lancée.
+décisions identique octet pour octet) ; 194 s, 175 Mio. Étape 3 rejouée après revue (2026-11-04, `5922ecc`, `docs/experiments/S2_AVAILABILITY_2015_2021.md`, non figé) : 43 584 créneaux H1 attendus, 3 absents, 460 non évaluables (420 par D1 de contexte non utilisable), 48 cassures détectées ; 556 configurations, 38 consommées par convention de l'étude, 2 abandonnées pour données du repli incomplètes ; validée (PR #8, `0343979`). Étape 4 (2026-11-04, protocole figé `c35d565`, bilan `docs/experiments/S2_REFERENCE_2015_2021_BILAN.md`, validé, ADR-016 : S2 étudiée, résultats insuffisants pour conclure) : H1-A 66 cassures → 13 refus tendance, 41 refus rapport, 5 refus taille → 7 positions ; net +8,90 € (brut 9,91, coûts 1,00), +0,13 € sans la meilleure ; drawdown relatif maximal au tick 0,506 %, aucun franchissement de 6 %, 0 cas indéterminé, 0 h de chevauchement avec S1 ; H4-A 3 cassures, 0 transaction. B, C et rejet non lancés (conditions du §4 non remplies).
 
 ## 🧾 Synthèse vérifiée (2026-11-03)
 - PR #1 à #4 fusionnées dans `main` par commits de fusion, sur autorisation de l'opérateur
@@ -96,7 +96,7 @@ décisions identique octet pour octet) ; 194 s, 175 Mio. Étape 3 rejouée aprè
   Ces valeurs ne sont pas transposées au compte réel.
 
 ## 🔄 En Cours
-- [ ] S2 étape 3 : bilan de disponibilité à valider par l'opérateur ; étape 4 sur décision
+- [ ] Fiche S3 (cassure après compression de volatilité) : rédaction, sans implémentation
 - [ ] Recherche d'une source applicable pour les fermetures particulières (non bloquante)
 - [ ] Demande au support IG préparée, non envoyée (`docs/IG_SUPPORT_REQUEST.md`)
 
