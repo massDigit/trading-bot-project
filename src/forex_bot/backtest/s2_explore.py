@@ -29,7 +29,15 @@ from pathlib import Path
 from typing import Any
 
 from forex_bot.backtest.data import load_bars, load_gaps, stream_ticks, tick_files
-from forex_bot.backtest.engine import EntryAction, ResearchConfig, StopAtExecution, StopType, TickDrawdown, Trade
+from forex_bot.backtest.engine import (
+    DecisionRecord,
+    EntryAction,
+    ResearchConfig,
+    StopAtExecution,
+    StopType,
+    TickDrawdown,
+    Trade,
+)
 from forex_bot.backtest.explore import (
     INSTRUMENT,
     RESEARCH_COSTS,
@@ -116,9 +124,26 @@ def _all_trades(result: S2Result) -> list[Trade]:
     return [*result.trades, *([result.open_trade] if result.open_trade else [])]
 
 
+def detected_breakouts(records: list[DecisionRecord]) -> list[DecisionRecord]:
+    """Every first close beyond a known threshold, whatever happens to the entry (one definition)."""
+    return [r for r in records if r.signal is not None]
+
+
+def s2_by_year(result: S2Result, yearly_drawdown: dict[int, TickDrawdown]) -> dict[int, dict[str, Any]]:
+    """The S1 yearly report, with the breakouts counted as in the funnel.
+
+    The S1 counter keeps only decided or refused entries; a breakout not computable or met during an
+    open position would be missing from it. The S1 report itself is unchanged.
+    """
+    report = by_year(result, yearly_drawdown)
+    for year, line in report.items():
+        line["breakouts"] = len(detected_breakouts([r for r in result.decisions if r.decision_utc.year == year]))
+    return report
+
+
 def breakout_funnel(result: S2Result) -> dict[str, Any]:
     """Detected breakouts -> decided entries -> positions actually opened (sheet §8 categories)."""
-    detected = [r for r in result.decisions if r.signal is not None]
+    detected = detected_breakouts(result.decisions)
     outcome: Counter[str] = Counter()
     other: Counter[str] = Counter()
     decided = []
@@ -397,7 +422,7 @@ def main(argv: list[str] | None = None) -> int:
         "inputs": {tf.value: len(b) for tf, b in bars.items()}
         | {"gaps": len(gaps), "tick_files": len(files), "ticks": counted},
         "result": report(result, engine.yearly_drawdown, engine.gap_events, s1),
-        "by_year": by_year(result, engine.yearly_drawdown),
+        "by_year": s2_by_year(result, engine.yearly_drawdown),
         "seconds": round(time.perf_counter() - began, 1),
         "peak_rss_mib": round(_peak_rss_mib(), 1),
     }

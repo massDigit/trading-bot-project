@@ -2,21 +2,22 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import timedelta
 from decimal import Decimal as D
 from typing import Any
 
 from test_backtest import COSTS, candles
-from test_s2 import BASE, FINE, START, P, at, d1_context, ticks_for
+from test_s2 import AFTER_GAP, BASE, FINE, START, P, Spec, at, d1_context, ticks_for
 
-from forex_bot.backtest.engine import ResearchConfig
+from forex_bot.backtest.engine import EntryAction, ResearchConfig
 from forex_bot.backtest.feed import TickFeed
-from forex_bot.backtest.s2_explore import S2Run, overlap_with_s1, report
+from forex_bot.backtest.s2_explore import S2Run, overlap_with_s1, report, s2_by_year
 from forex_bot.history.calendar import Timeframe
 
 
-def run_base() -> tuple[S2Run, Any]:
-    ticks = ticks_for(BASE)
+def run_base(specs: Sequence[Spec | None] = BASE) -> tuple[S2Run, Any]:
+    ticks = ticks_for(specs)
     feed = TickFeed(ticks)
     engine = S2Run(
         candles(ticks, Timeframe.H1),
@@ -68,3 +69,16 @@ def test_overlap_with_s1_counts_same_and_opposite_direction_hours() -> None:
     assert overlap["hours_same_direction"] == held and overlap["hours_opposite_direction"] == 0
     assert overlap["share_of_s2_time_overlapping_s1_pct"] == 100
     assert overlap["s2_trades_overlapping_an_s1_trade"] == 1 and overlap["s1_reference"]["trades"] == 2
+
+
+def test_a_breakout_during_an_open_position_is_detected_not_evaluated_and_counted_each_year() -> None:
+    # Scenario A: the first long is still open (indeterminate) when the second configuration breaks out.
+    engine, result = run_base(AFTER_GAP)
+    line = next(r for r in result.decisions if r.decision_utc == at(28))
+    assert line.signal is not None and line.entry_action is EntryAction.NOT_EVALUATED
+    assert line.reasons[-1] == "cassure pendant une position ouverte : seuil consommé"
+    funnel = report(result, engine.yearly_drawdown, engine.gap_events, None)["funnel"]
+    assert funnel["breakouts_detected"] == 2 and funnel["entries_decided"] == 1
+    assert funnel["not_entered"] == {"position déjà ouverte (seuil consommé)": 1}
+    yearly = s2_by_year(result, engine.yearly_drawdown)
+    assert sum(year["breakouts"] for year in yearly.values()) == funnel["breakouts_detected"] == 2
