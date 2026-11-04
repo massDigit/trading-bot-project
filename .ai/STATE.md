@@ -96,7 +96,7 @@ décisions identique octet pour octet) ; 194 s, 175 Mio. Étape 3 rejouée aprè
   Ces valeurs ne sont pas transposées au compte réel.
 
 ## 🔄 En Cours
-- [ ] S3 étape 1 : moteur hors ligne et tests synthétiques (fiche `docs/strategies/S3_SQUEEZE.md`, ASSUMP-026 approuvée, ADR-018)
+- [x] S3 étape 1 : moteur hors ligne (`backtest/s3.py`, `s3_engine.py`, S1 et S2 inchangés) et 28 tests synthétiques, dont l'exemple du §7, ses deux suites et l'abandon de la sortie suiveuse quand le stop est atteint avant son exécution ; validée par l'opérateur (PR #13). Aucun passage historique
 - [ ] Recherche d'une source applicable pour les fermetures particulières (non bloquante)
 - [ ] Demande au support IG préparée, non envoyée (`docs/IG_SUPPORT_REQUEST.md`)
 
