@@ -34,6 +34,7 @@ forex-backtest-compare = "forex_bot.backtest.compare:main"
 forex-s2-availability = "forex_bot.backtest.s2_availability:main"
 forex-s2-backtest = "forex_bot.backtest.s2_explore:main"
 forex-s2-volatility = "forex_bot.backtest.s2_volatility:main"
+forex-s3-availability = "forex_bot.backtest.s3_availability:main"
 
 [tool.ruff]
 line-length = 120
