@@ -289,22 +289,30 @@ class S2Backtest(S1Backtest):
             record.entry_action = EntryAction.NOT_COMPUTABLE
             record.reasons.append("cassure non évaluable : seuil consommé")
             return record
+        self._after_breakout(record, decision, setup, trend)
+        return record
+
+    def _after_breakout(self, record: DecisionRecord, decision: datetime, setup: Setup, trend: Side | None) -> None:
+        """Rules after a breakout detected on evaluable data: trend, stop, ratio, market, size."""
         if trend is not setup.side:
             self._refuse(record, decision, "tendance D1 perdue à la cassure")
-            return record
+            return
+        signal_line = record.signal
+        if signal_line is None:
+            raise ValueError("cassure sans ligne de signal")  # set when the breakout was detected
         stop = self._stop(setup, decision)
-        record.signal.update({"stop": stop, "target": setup.target})
+        signal_line.update({"stop": stop, "target": setup.target})
         ratio = self._reward_risk(setup.side, stop, setup.target)
         if isinstance(ratio, str):
             self._refuse(record, decision, ratio)
-            return record
-        record.signal["reward_risk"] = ratio
+            return
+        signal_line["reward_risk"] = ratio
         if ratio < self.s2.min_reward_risk:
             self._refuse(record, decision, f"cible trop proche : rapport {ratio:.2f} < {self.s2.min_reward_risk}")
-            return record
+            return
         if market_state(decision) is not MarketState.OPEN:
             self._refuse(record, decision, f"{setup.side.value} : marché fermé à l'instant de décision")
-            return record
+            return
         signal = EntrySignal(setup.side, stop, setup.atr, setup.extreme.level, setup.known_level.level)
         self._size(decision, signal, record)
         if record.entry_action is EntryAction.ENTRY_DECIDED:
@@ -312,7 +320,6 @@ class S2Backtest(S1Backtest):
             self._pending_target = setup.target
             setup.history.append(f"{decision.isoformat()} entrée décidée")
             self.setup = None
-        return record
 
     def _no_entry(self, record: DecisionRecord, action: EntryAction, reason: str | None) -> None:
         record.entry_action = EntryAction.NOT_EVALUATED if self.position is not None else action
