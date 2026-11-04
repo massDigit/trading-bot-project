@@ -12,9 +12,11 @@ scenario (A: an unobservable possible crossing is not triggered; B: it is) and o
 already beyond at the first execution tick. Parameters are the approved values (ASSUMP-026), costs
 and sizing those of the S1 reference. The engines are unchanged: this tool only observes.
 
-Before any result, the boxes of the run are reconciled with those of step 3 (formation instant,
-bounds, ATR, end). Any difference is an anomaly: the report then carries the differences only,
-no performance result, and the command exits with status 2 (protocol §5).
+Before any result, three controls must pass (protocol §5, §6): the boxes of the run against those
+of step 3 (distinct F, bounds, ATR, end; 160 on each side on the official window), each consumed box
+against its breakout decision (F, instant, side), and each decided entry against a trade or an
+engine event that explains why it was not executed. If one fails, the report carries the controls
+only, no performance result, and the command exits with status 2.
 """
 
 from __future__ import annotations
@@ -66,6 +68,9 @@ from forex_bot.risk import Side
 
 SCENARIOS = {"A": ScenarioPolicy.NONE_TRIGGERED, "B": ScenarioPolicy.ALL_TRIGGERED}
 BOX_FIELDS = ("BH", "BL", "AH", "A", "ended_utc", "end_reason")
+OFFICIAL_WINDOW = (datetime(2015, 1, 1, tzinfo=UTC), datetime(2022, 1, 1, tzinfo=UTC))
+OFFICIAL_BOXES = 160  # step 3 on the official window (docs/experiments/S3_AVAILABILITY_2015_2021.md)
+NO_TICK = "non exécutée : aucun tick avant la fin de la fenêtre"
 
 
 # ---------------------------------------------------------------------- observation
@@ -116,16 +121,61 @@ class Recovery:
         return {"longest_recovered": self.longest, "deepest": self.deepest}
 
 
+class YearlyDrawdowns:
+    """Tick drawdown per calendar year: the peak starts at the equity observed at the year's first tick.
+
+    A fall between the last tick of December and the first of January belongs to the continuous
+    global drawdown only, not to the new year.
+    """
+
+    def __init__(self) -> None:
+        self.years: dict[int, TickDrawdown] = {}
+
+    def observe(self, utc: datetime, equity: Decimal) -> None:
+        if utc.year not in self.years:
+            self.years[utc.year] = TickDrawdown(equity, utc)
+        self.years[utc.year].observe(utc, equity)
+
+
 class S3Run(S3Backtest):
-    """The S3 engine, plus observation only: drawdowns, recovery and the quotes around each gap."""
+    """The S3 engine, plus observation only: drawdowns, recovery, the quotes around each gap and the
+    engine event that settled each decided entry."""
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
-        self.yearly_drawdown: dict[int, TickDrawdown] = {}
+        self.yearly = YearlyDrawdowns()
         self.relative = RelativeDrawdown(self.config.initial_equity)
         self.recovery = Recovery(self.config.initial_equity)
-        self._equity_before = self.config.initial_equity
         self.gap_events: list[dict[str, Any]] = []
+        self.entry_events: dict[datetime, dict[str, Any]] = {}  # decision -> engine event at the first tick after D
+
+    @property
+    def yearly_drawdown(self) -> dict[int, TickDrawdown]:
+        return self.yearly.years
+
+    def run(self) -> S3Result:
+        result = super().run()
+        pending = self.pending_entry
+        if pending is not None:  # the replay reached the window end: no tick after D was read
+            self.entry_events[pending.decided_utc] = {"event": NO_TICK, "utc": None}
+        return result
+
+    def _open(self, tick: Tick) -> None:
+        pending = self.pending_entry
+        before = len(self.journal)
+        super()._open(tick)
+        if pending is None:
+            return
+        kinds = {e.kind for e in self.journal[before:]}
+        if "ENTRÉE_REJETÉE" in kinds:
+            event = "ENTRÉE_REJETÉE"
+        elif "ENTRÉE_ANNULÉE" in kinds:
+            event = "ENTRÉE_ANNULÉE"
+        elif "ENTRÉE" in kinds:
+            event = "ENTRÉE"
+        else:
+            event = "aucun événement"
+        self.entry_events[pending.decided_utc] = {"event": event, "utc": tick.ts_utc}
 
     def _observe(self, tick: Tick) -> None:
         equity = self.balance + self._unrealized(tick)  # once per tick for every measure
@@ -133,11 +183,7 @@ class S3Run(S3Backtest):
         position = self.position
         self.relative.observe(tick.ts_utc, equity, None if position is None else position.decided_utc.isoformat())
         self.recovery.observe(tick.ts_utc, equity)
-        year = tick.ts_utc.year
-        if year not in self.yearly_drawdown:  # each year starts from the equity at its first tick
-            self.yearly_drawdown[year] = TickDrawdown(self._equity_before, None)
-        self.yearly_drawdown[year].observe(tick.ts_utc, equity)
-        self._equity_before = equity
+        self.yearly.observe(tick.ts_utc, equity)
 
     def _after_silence(self, previous: Tick, tick: Tick) -> None:
         kind = classify_silence(
@@ -194,10 +240,15 @@ def _text(value: Any) -> Any:
     return value.isoformat() if isinstance(value, datetime) else None if value is None else str(value)
 
 
-def reconcile_boxes(step3: list[dict[str, Any]], boxes: list[Box]) -> dict[str, Any]:
-    """Boxes of the run against step 3, keyed by F: identical, missing on either side, or which field differs."""
+def reconcile_boxes(step3: list[dict[str, Any]], boxes: list[Box], expected_count: int | None = None) -> dict[str, Any]:
+    """Boxes of the run against step 3, keyed by F: identical, missing on either side, or which field differs.
+
+    Every F must be distinct on both sides; with `expected_count` (official window), both sides must
+    hold exactly that many boxes. Without it, small synthetic sets are accepted.
+    """
     expected = {str(r["F"]): r for r in step3}
     found = {_text(b.formed_utc): {k: _text(v) for k, v in b.describe().items()} for b in boxes}
+    counts_ok = expected_count is None or len(step3) == len(boxes) == expected_count
     different = []
     for key in sorted(expected.keys() & found.keys()):
         fields = {
@@ -210,13 +261,43 @@ def reconcile_boxes(step3: list[dict[str, Any]], boxes: list[Box]) -> dict[str, 
     only_run = sorted(found.keys() - expected.keys())
     only_step3 = sorted(expected.keys() - found.keys())
     return {
-        "step3_boxes": len(expected),
-        "run_boxes": len(found),
+        "step3_boxes": len(step3),
+        "run_boxes": len(boxes),
+        "expected_count": expected_count,
+        "distinct_step3": len(expected),
+        "distinct_run": len(found),
         "identical": len(expected.keys() & found.keys()) - len(different),
         "only_in_run": only_run,
         "only_in_step3": only_step3,
         "different": different,
-        "ok": not (different or only_run or only_step3) and len(boxes) == len(found) == len(step3),
+        "ok": not (different or only_run or only_step3)
+        and len(boxes) == len(found) == len(step3) == len(expected)
+        and counts_ok,
+    }
+
+
+def reconcile_breakouts(result: S3Result) -> dict[str, Any]:
+    """Each box consumed by a breakout against the decision that recorded it: same F, instant and side."""
+    signals = {
+        (r.decision_utc.isoformat(), _text(r.signal["box"]["F"]), str(r.signal["side"])): r
+        for r in result.decisions
+        if r.signal is not None
+    }
+    consumed = {}
+    for box in result.boxes:
+        reason = box.end_reason or ""
+        if reason.startswith("consommée par la cassure "):
+            side = reason.rsplit(" ", 1)[1]
+            consumed[(_text(box.ended_utc), _text(box.formed_utc), side)] = box
+    unmatched_boxes = sorted(str(k) for k in consumed.keys() - signals.keys())
+    unmatched_breakouts = sorted(str(k) for k in signals.keys() - consumed.keys())
+    return {
+        "boxes_consumed": len(consumed),
+        "breakout_decisions": len(signals),
+        "matched": len(consumed.keys() & signals.keys()),
+        "boxes_without_breakout_decision": unmatched_boxes,
+        "breakout_decisions_without_box": unmatched_breakouts,
+        "ok": not unmatched_boxes and not unmatched_breakouts,
     }
 
 
@@ -262,32 +343,38 @@ def _all_trades(result: S3Result) -> list[Trade]:
     return [*result.trades, *([result.open_trade] if result.open_trade else [])]
 
 
-def execution_of(record: DecisionRecord, result: S3Result, trades: dict[datetime, Trade]) -> str:
-    """What became of a decided entry: executed (possibly liquidated at once) or not, with the reason."""
+def execution_of(record: DecisionRecord, trades: dict[datetime, Trade], events: dict[datetime, dict[str, Any]]) -> str:
+    """What became of a decided entry, attested by the engine event at the first tick after D.
+
+    An entry executed then liquidated at once (stop already beyond) is an executed entry. Without an
+    attesting event the entry is an anomaly; "no tick before the end" only when the replay verified it.
+    """
     trade = trades.get(record.decision_utc)
-    if trade is not None:
+    event = events.get(record.decision_utc, {}).get("event")
+    if trade is not None and event == "ENTRÉE":
         if trade.exit_reason == "STOP_FRANCHI_À_L'EXÉCUTION":
             return "exécutée puis liquidée au premier tick (stop déjà dépassé)"
         return "exécutée : position ouverte"
-    later = [r.decision_utc for r in result.decisions if r.decision_utc > record.decision_utc]
-    until = later[0] if later else None
-    for entry in result.journal:
-        if entry.utc > record.decision_utc and (until is None or entry.utc <= until):
-            if entry.kind == "ENTRÉE_REJETÉE":
-                return "non exécutée : rejet à l'exécution (stop invalide)"
-            if entry.kind == "ENTRÉE_ANNULÉE":
-                return "non exécutée : position déjà ouverte"
-    return "non exécutée : aucun tick avant la fin de la fenêtre"
+    if trade is None and event == "ENTRÉE_REJETÉE":
+        return "non exécutée : rejet à l'exécution (stop invalide)"
+    if trade is None and event == "ENTRÉE_ANNULÉE":
+        return "non exécutée : position déjà ouverte"
+    if trade is None and event == NO_TICK:
+        return NO_TICK
+    return f"anomalie : aucun événement n'explique l'entrée (transaction {trade is not None}, événement {event})"
 
 
-def funnel(result: S3Result, records: list[DecisionRecord] | None = None) -> dict[str, Any]:
+def funnel(
+    result: S3Result, events: dict[datetime, dict[str, Any]], records: list[DecisionRecord] | None = None
+) -> dict[str, Any]:
     """Boxes -> breakouts -> one category each -> decided entries -> executed or not (protocol §6)."""
     records = result.decisions if records is None else records
     breakouts = [r for r in records if r.signal is not None]
     categories = Counter(breakout_category(r) for r in breakouts)
     trades = {t.decided_utc: t for t in _all_trades(result)}
     decided = [r for r in breakouts if r.entry_action is EntryAction.ENTRY_DECIDED]
-    executions = Counter(execution_of(r, result, trades) for r in decided)
+    executions = Counter(execution_of(r, trades, events) for r in decided)
+    decided_instants = {r.decision_utc for r in decided}
     return {
         "breakouts": len(breakouts),
         "by_side": dict(Counter(str(r.signal["side"]) for r in breakouts if r.signal).most_common()),
@@ -299,6 +386,9 @@ def funnel(result: S3Result, records: list[DecisionRecord] | None = None) -> dic
             "no_unclassified_reason": not any("autre (" in k for k in categories),
             "decided_equals_executed_plus_not": sum(executions.values()) == len(decided)
             and categories.get("entrée décidée", 0) == len(decided),
+            "every_entry_attested": not any(k.startswith("anomalie") for k in executions),
+            "every_trade_from_a_decided_entry": records is not result.decisions
+            or all(t.decided_utc in decided_instants for t in trades.values()),
         },
     }
 
@@ -426,8 +516,14 @@ def s1_signals(lines: Iterable[dict[str, Any]]) -> set[tuple[str, str]]:
     }
 
 
+def years(start: datetime, end: datetime) -> list[int]:
+    """Calendar years of [start, end): 2015-2021 for the official window."""
+    last = end.year if (end.month, end.day, end.hour, end.minute) == (1, 1, 0, 0) else end.year + 1
+    return list(range(start.year, last))
+
+
 def compare_with_s1(
-    result: S3Result, s1_report: dict[str, Any], signals: set[tuple[str, str]], end: datetime
+    result: S3Result, s1_report: dict[str, Any], signals: set[tuple[str, str]], end: datetime, window_years: list[int]
 ) -> dict[str, Any]:
     """Coincidence of entries, time overlap, simultaneous losses and annual nets side by side (protocol §8)."""
     entries = [
@@ -481,9 +577,12 @@ def compare_with_s1(
         "s3_trades_overlapping_an_s1_trade": overlapping,
         "s3_losing_trades": losers,
         "s3_losses_overlapping_an_s1_loss": simultaneous_losses,
-        "net_by_year": {
-            year: {"s1": s1_report["by_year"].get(str(year), {}).get("closed_trades", {}).get("net_eur"), "s3": net}
-            for year, net in sorted(s3_by_year.items())
+        "net_by_year": {  # realized nets by exit year; 0 when no trade was closed that year
+            year: {
+                "s1": s1_report["by_year"].get(str(year), {}).get("closed_trades", {}).get("net_eur"),
+                "s3": s3_by_year.get(year, Decimal(0)),
+            }
+            for year in window_years
         },
     }
 
@@ -499,11 +598,13 @@ def performance(
     end = result.end_utc or datetime.now(UTC)
     report = by_year(result, engine.yearly_drawdown)
     for year, line in report.items():
-        line["funnel"] = funnel(result, [r for r in result.decisions if r.decision_utc.year == year])
+        line["funnel"] = funnel(
+            result, engine.entry_events, [r for r in result.decisions if r.decision_utc.year == year]
+        )
         line["breakouts"] = line["funnel"]["breakouts"]  # the S1 counter misses breakouts not evaluated
     return _json(
         {
-            "funnel": funnel(result),
+            "funnel": funnel(result, engine.entry_events),
             "trades": [_trade(t) for t in result.trades],
             "open_trade_at_end": _trade(result.open_trade) if result.open_trade else None,
             "balance_eur": result.balance,
@@ -530,22 +631,46 @@ def performance(
             "journal_counts": dict(sorted(Counter(e.kind for e in result.journal).items())),
             "decisions": len(result.decisions),
             "end_utc": result.end_utc,
-            "s1_comparison": None if s1 is None else compare_with_s1(result, s1, signals, end),
+            "s1_comparison": None if s1 is None else compare_with_s1(result, s1, signals, end, years(start, end)),
             "by_year": report,
         }
     )
 
 
-def gated_report(
-    check: dict[str, Any], triggers: dict[str, Any], results: Callable[[], dict[str, Any]]
+def controls(
+    result: S3Result,
+    events: dict[datetime, dict[str, Any]],
+    step3: list[dict[str, Any]],
+    expected_count: int | None,
 ) -> dict[str, Any]:
-    """Protocol §5: the performance results exist in the report only if the boxes match step 3."""
-    if not check["ok"]:
+    """Every control that must pass before any result is presented (protocol §5, §6)."""
+    checks = funnel(result, events)["checks"]
+    entries = {"ok": all(checks.values()), "checks": checks}
+    if not entries["ok"]:  # name the entries no event explains, without any result
+        trades = {t.decided_utc: t for t in _all_trades(result)}
+        entries["unexplained"] = [
+            {"decision_utc": r.decision_utc, "execution": execution_of(r, trades, events)}
+            for r in result.decisions
+            if r.entry_action is EntryAction.ENTRY_DECIDED and execution_of(r, trades, events).startswith("anomalie")
+        ]
+    return {
+        "boxes": reconcile_boxes(step3, result.boxes, expected_count),
+        "breakouts": reconcile_breakouts(result),
+        "funnel": entries,
+    }
+
+
+def gated_report(
+    checks: dict[str, Any], triggers: dict[str, Any], results: Callable[[], dict[str, Any]]
+) -> dict[str, Any]:
+    """Protocol §5, §6: the performance results exist in the report only if every control passes."""
+    failed = sorted(name for name, check in checks.items() if not check["ok"])
+    if failed:
         return {
-            "anomaly": "boîtes différentes de l'étape 3 : résultats de performance non présentés",
-            "boxes_check": check,
+            "anomaly": f"contrôles en échec ({', '.join(failed)}) : résultats de performance non présentés",
+            "controls": checks,
         }
-    return {"boxes_check": check, "scenario_triggers": triggers, "result": results()}
+    return {"controls": checks, "scenario_triggers": triggers, "result": results()}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -605,14 +730,17 @@ def main(argv: list[str] | None = None) -> int:
     )
     result = engine.run()
     with args.step3.open() as rows:
-        check = reconcile_boxes(step3_boxes(json.loads(line) for line in rows), result.boxes)
+        step3 = step3_boxes(json.loads(line) for line in rows)
+    official = (args.start, args.end) == OFFICIAL_WINDOW
+    checks = controls(result, engine.entry_events, step3, OFFICIAL_BOXES if official else None)
+    passed = all(check["ok"] for check in checks.values())
     s1 = json.loads(args.s1_reference.read_text()) if args.s1_reference else None
     signals: set[tuple[str, str]] = set()
     if args.s1_decisions:
         with args.s1_decisions.open() as lines:
             signals = s1_signals(json.loads(line) for line in lines)
-    body = gated_report(check, scenario_triggers(result), lambda: performance(result, engine, args.start, s1, signals))
-    if check["ok"] and args.decisions_out:
+    body = gated_report(checks, scenario_triggers(result), lambda: performance(result, engine, args.start, s1, signals))
+    if passed and args.decisions_out:
         args.decisions_out.parent.mkdir(parents=True, exist_ok=True)
         with args.decisions_out.open("w") as out:
             for record in result.decisions:
@@ -643,9 +771,9 @@ def main(argv: list[str] | None = None) -> int:
     }
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(_str(full), ensure_ascii=False, indent=2, default=str))
-    if not check["ok"]:
-        print(f"ANOMALIE : boîtes différentes de l'étape 3, résultats non présentés ({args.out})")
-        print(json.dumps(_str(check), ensure_ascii=False, indent=2))
+    if not passed:
+        print(f"ANOMALIE : {body['anomaly']} ({args.out})")
+        print(json.dumps(_str(checks), ensure_ascii=False, indent=2))
         return 2
     print(f"rapport écrit : {args.out} ({full['seconds']} s, {full['peak_rss_mib']} Mio)")
     return 0

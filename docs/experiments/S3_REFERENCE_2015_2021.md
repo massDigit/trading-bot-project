@@ -3,7 +3,8 @@
 **Statut** : figé le 2026-11-04 avec l'outil de passage, **avant tout lancement** sur cette
 période ; aucun passage lancé. Étape 4 de la fiche `docs/strategies/S3_SQUEEZE.md` (§9), après
 validation de l'étape 3 (PR #15) ; protocole validé par l'opérateur (PR #16), précisé sur le
-déclenchement de B (§4) et le décompte des cassures (§6). Ni validation
+déclenchement de B (§4) et le décompte des cassures (§6), puis corrigé après revue (contrôles des
+boîtes, des cassures et des entrées ; comparatif annuel ; drawdown annuel). Ni validation
 de performance, ni autorisation de trading. Aucun paramètre ne sera modifié après lecture des
 résultats ; un résultat défavorable est rapporté tel quel.
 
@@ -87,10 +88,20 @@ passage**, référence et comparaison. **Tout écart est une anomalie** : le pas
 ses résultats ne sont pas présentés, et l'écart est soumis à l'opérateur avant toute correction
 ou nouveau lancement.
 
-Mise en œuvre : le rapport contient `boxes_check` (identiques, seulement dans le passage,
-seulement à l'étape 3, et pour chaque boîte différente son `F` et chaque champ avec ses deux
-valeurs). En cas d'écart, il ne contient **aucun résultat de performance** (ni transactions, ni
-parcours, ni journal des décisions écrit), et la commande s'arrête avec le code 2.
+Mise en œuvre (`controls.boxes`) : sur la fenêtre officielle 2015-2021, chaque côté doit contenir
+**exactement 160 boîtes, toutes de `F` distincts** (deux listes identiques de 159 boîtes, ou 160
+lignes dont deux partagent un `F`, échouent) ; puis égalité de `BH`, `BL`, `AH`, `A`, de
+l'instant de fin et du devenir. Le rapport donne les boîtes identiques, celles d'un seul côté, et
+pour chaque boîte différente son `F` et chaque champ avec ses deux valeurs. Le comparateur
+générique, sans nombre attendu, accepte de petits jeux synthétiques.
+
+**Cassure de chaque boîte** (`controls.breakouts`) : chaque boîte consommée est rapprochée de la
+décision qui a enregistré sa cassure, par `F`, instant et sens ; une boîte sans décision, ou une
+décision de cassure sans boîte, est une anomalie.
+
+Si un contrôle échoue (boîtes, cassures, ou entrées du §6), le rapport ne contient **aucun
+résultat de performance** (ni transactions, ni parcours, ni journal des décisions écrit), seulement
+les contrôles, et la commande s'arrête avec le code 2.
 
 ## 6. Parcours : cassures, refus, entrées
 
@@ -108,13 +119,19 @@ aucune règle n'est réévaluée. Chaque cassure est dans **une seule** catégor
 
 Un motif non prévu est rangé à part (« autre », avec le motif) et fait échouer le contrôle.
 
-Chaque **entrée décidée** est ensuite comptée une seule fois comme **exécutée** (position
-ouverte, ou exécutée puis liquidée au premier tick si le stop est déjà dépassé) ou **non
-exécutée** (rejet à l'exécution, position déjà ouverte, aucun tick avant la fin de la fenêtre).
+Chaque **entrée décidée** est ensuite comptée une seule fois, d'après l'**événement du moteur au
+premier tick après `D`**, observé par l'outil :
+- **exécutée** : événement `ENTRÉE` et transaction de cette décision. Une entrée **exécutée puis
+  liquidée** au premier tick (stop déjà dépassé) est une entrée exécutée ;
+- **non exécutée** : `ENTRÉE_REJETÉE` (rejet à l'exécution) ou `ENTRÉE_ANNULÉE` (position déjà
+  ouverte), sans transaction ; ou **aucun tick avant la fin de la fenêtre**, seulement quand le
+  rejeu a atteint la fin de la fenêtre avec cette entrée toujours en attente (cas vérifié) ;
+- sinon : **anomalie** (« aucun événement n'explique l'entrée »), jamais une non-exécution
+  supposée.
 
-Contrôles écrits dans le rapport (`funnel.checks`) : une catégorie par cassure ; aucun motif non
-classé ; entrées décidées = exécutées + non exécutées. Un contrôle en échec est rapporté avant
-toute lecture des résultats.
+Contrôles (`controls.funnel`) : une catégorie par cassure ; aucun motif non classé ; entrées
+décidées = exécutées + non exécutées ; chaque entrée attestée par un événement ; chaque
+transaction issue d'une entrée décidée. Un échec bloque la présentation du bilan (§5).
 
 ## 7. Rapporté pour chaque passage
 
@@ -125,9 +142,11 @@ toute lecture des résultats.
   traversée, sans retour ; délai en H4 depuis l'exécution ; sortie qui a suivi (suiveuse ou
   stop) et résultat en multiples du risque, à côté des positions sans réintégration. Aucune
   sortie à la réintégration n'est simulée.
-- Drawdown au tick en euros (global et par année) ; **véritable drawdown relatif maximal au
-  tick** ; premier franchissement éventuel de 6 % (seuil de revue, la trajectoire continue) ;
-  durée de récupération.
+- Drawdown au tick en euros : **global, continu** depuis 2 000 € ; **par année**, avec un sommet
+  initialisé aux fonds propres observés au **premier tick de l'année** (une baisse entre le
+  dernier tick de décembre et le premier de janvier reste dans le drawdown global seulement) ;
+  **véritable drawdown relatif maximal au tick** ; premier franchissement éventuel de 6 % (seuil
+  de revue, la trajectoire continue) ; durée de récupération.
 - Net sans la meilleure transaction ; transactions indéterminées (trou, cotations qui l'encadrent,
   distance au stop) ; dépassements du budget.
 - Mesures du cahier (§9) : espérance nette en multiples du risque, profit factor, gain et perte
@@ -141,7 +160,8 @@ Lue dans les sorties de la référence S1, pour chaque passage S3 :
 - chevauchement des positions dans le temps (même sens, sens opposé) ;
 - **pertes simultanées** : transactions S3 perdantes qui chevauchent une transaction S1
   perdante ;
-- nets annuels S1 et S3 côte à côte.
+- nets annuels réalisés S1 et S3 côte à côte, pour **les sept années 2015 à 2021** (par année de
+  clôture ; net S3 de 0 € une année sans clôture).
 
 La référence D1 → H4 et la comparaison H4 seule sont aussi présentées côte à côte (parcours,
 transactions, net, drawdown), sans que la comparaison remplace la référence.
@@ -181,8 +201,8 @@ Ordre prévu :
    `*_b*`) si `scenario_b_required`, puis `--stop-at-execution REJECT` (sorties `*_a_reject*`)
    si `reject_required`.
 
-Chaque commande part d'un arbre propre au commit qui fige ce protocole ; un passage dont le
-contrôle des boîtes échoue (code 2) arrête la suite.
+Chaque commande part d'un arbre propre au commit qui fige ce protocole ; un passage dont un
+contrôle échoue (code 2) arrête la suite.
 
 Bilan agrégé dans ce dossier après les passages ; journaux et rapports détaillés hors Git.
 

@@ -2,32 +2,58 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable, Sequence
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal as D
 from typing import Any
 
 import pytest
+import test_s3
 from test_backtest import utc
-from test_s3 import SUITE_1, SUITE_2, InjectedBox, X, at, d1_context, engine, scenario, spec, ticks_for
+from test_s3 import SUITE_1, SUITE_2, InjectedBox, Spec, X, at, d1_context, engine, scenario, spec, ticks_for
 
-from forex_bot.backtest.engine import DecisionRecord, EntryAction, PositionAction, StopAtExecution
+from forex_bot.backtest.engine import DecisionRecord, EntryAction, PositionAction, StopAtExecution, TickDrawdown
 from forex_bot.backtest.explore import _str
 from forex_bot.backtest.feed import TickFeed
 from forex_bot.backtest.s3 import Box, S3Params
-from forex_bot.backtest.s3_engine import S3Backtest
+from forex_bot.backtest.s3_engine import S3Backtest, S3Result
 from forex_bot.backtest.s3_explore import (
+    NO_TICK,
     Recovery,
     S3Run,
+    YearlyDrawdowns,
     breakout_category,
     compare_with_s1,
+    controls,
     funnel,
     gated_report,
     reconcile_boxes,
+    reconcile_breakouts,
     returns_to_box,
     s1_signals,
     scenario_triggers,
 )
 from forex_bot.risk import CostModel
+
+Tool = Callable[..., tuple[S3Result, S3Run]]
+
+
+@pytest.fixture
+def tool(monkeypatch: pytest.MonkeyPatch) -> Tool:
+    """The synthetic engine of test_s3, built as the run tool's S3Run (observation only)."""
+    monkeypatch.setattr(test_s3, "S3Backtest", S3Run)
+
+    def run(after: Sequence[Spec | None], **kwargs: Any) -> tuple[S3Result, S3Run]:
+        built = engine(after, **kwargs)
+        assert isinstance(built, S3Run)
+        return built.run(), built
+
+    return run
+
+
+def never() -> dict[str, Any]:
+    raise AssertionError("performance results must not be computed")
+
 
 # ---------------------------------------------------------------- scenario B trigger (protocol §4)
 
@@ -96,20 +122,21 @@ def _unusable_context() -> list[dict[str, Any]]:
         ({"risk_fraction": D("0.0001")}, "refus taille : taille minimale"),
     ],
 )
-def test_each_breakout_is_in_one_category_recorded_by_the_engine(kwargs: dict[str, Any], category: str) -> None:
+def test_each_breakout_is_in_one_category_recorded_by_the_engine(
+    tool: Tool, kwargs: dict[str, Any], category: str
+) -> None:
     if kwargs.get("d1") == "unusable":
         kwargs = {**kwargs, "d1": _unusable_context()}
-    result = engine(SUITE_1, **kwargs).run()
-    out = funnel(result)
+    result, run = tool(SUITE_1, **kwargs)
+    out = funnel(result, run.entry_events)
     assert out["breakouts"] == 1 and out["categories"] == {category: 1}
     assert all(out["checks"].values())
 
 
-def test_neutral_or_contrary_d1_is_not_a_data_reason_without_the_filter() -> None:
-    result = engine(SUITE_1, d1=d1_context(mirror=True), params=S3Params(use_d1_filter=False)).run()
-    assert funnel(result)["categories"] == {"entrée décidée": 1}
-    result = engine(SUITE_1, d1=[], params=S3Params(use_d1_filter=False)).run()
-    assert funnel(result)["categories"] == {"entrée décidée": 1}
+def test_neutral_or_contrary_d1_is_not_a_data_reason_without_the_filter(tool: Tool) -> None:
+    for d1 in (d1_context(mirror=True), []):
+        result, run = tool(SUITE_1, d1=d1, params=S3Params(use_d1_filter=False))
+        assert funnel(result, run.entry_events)["categories"] == {"entrée décidée": 1}
 
 
 @pytest.mark.parametrize(
@@ -143,26 +170,46 @@ def test_data_reasons_at_the_breakout_keep_their_own_category(reason: str, categ
     assert breakout_category(record) == category
 
 
+class InjectedRun(InjectedBox, S3Run):
+    """InjectedBox of test_s3, observed by the run tool."""
+
+
 def test_a_breakout_during_a_position_is_not_evaluated_and_counted_once() -> None:
     base = engine(SUITE_2)
-    injected = InjectedBox(
+    injected = InjectedRun(
         base.h4, base.d1, ticks_for(*scenario(SUITE_2)), [], S3Params(), base.config, start_utc=base.start_utc
     )
-    out = funnel(injected.run())
+    out = funnel(injected.run(), injected.entry_events)
     assert out["breakouts"] == 2 and all(out["checks"].values())
     assert out["categories"] == {"entrée décidée": 1, "non évaluée : position S3 déjà ouverte": 1}
 
 
-def test_each_decided_entry_is_executed_or_not() -> None:
+def test_each_decided_entry_is_executed_or_not(tool: Tool) -> None:
     gap_down = [spec("1.1318", "1.1317", "1.1316", "1.1317"), *SUITE_1[1:]]
-    filled = funnel(engine(gap_down).run())
+    result, run = tool(gap_down)
+    filled = funnel(result, run.entry_events)  # executed then liquidated at once: an executed entry
     assert filled["executions"] == {"exécutée puis liquidée au premier tick (stop déjà dépassé)": 1}
-    rejected = funnel(engine(gap_down, stop_at_execution=StopAtExecution.REJECT).run())
+    result, run = tool(gap_down, stop_at_execution=StopAtExecution.REJECT)
+    rejected = funnel(result, run.entry_events)
     assert rejected["executions"] == {"non exécutée : rejet à l'exécution (stop invalide)": 1}
-    pending = funnel(engine(SUITE_1, end=at(8) + timedelta(minutes=1)).run())  # no tick after D in the window
-    assert pending["executions"] == {"non exécutée : aucun tick avant la fin de la fenêtre": 1}
+    result, run = tool(SUITE_1, end=at(8) + timedelta(minutes=1))  # the replay reaches the end, no tick after D
+    pending = funnel(result, run.entry_events)
+    assert pending["executions"] == {NO_TICK: 1}
     for out in (filled, rejected, pending):
         assert out["entries_decided"] == 1 and all(out["checks"].values())
+
+
+def test_a_decided_entry_without_an_attesting_event_is_an_anomaly_that_hides_the_results(tool: Tool) -> None:
+    result, _ = tool(SUITE_1, end=at(8) + timedelta(minutes=1))
+    out = funnel(result, {})  # no event: "no tick before the end" is not assumed
+    (execution,) = out["executions"]
+    assert execution.startswith("anomalie") and not out["checks"]["every_entry_attested"]
+    executed, _ = tool(SUITE_1)
+    assert not funnel(executed, {})["checks"]["every_entry_attested"]  # a trade alone is not enough either
+    checks = controls(result, {}, [], None)
+    assert not checks["funnel"]["ok"] and checks["funnel"]["unexplained"][0]["decision_utc"] == at(8)
+    report = gated_report(checks, {}, never)
+    assert set(report) == {"anomaly", "controls"} and "funnel" in report["anomaly"]
 
 
 # ---------------------------------------------------------------- boxes against step 3 (protocol §5)
@@ -199,11 +246,26 @@ def test_one_differing_box_among_160_is_named_with_its_field_and_hides_the_resul
     assert diff["F"] == boxes[41].formed_utc.isoformat()
     assert diff["fields"] == {"BL": {"step3": "1.1019", "run": "1.1020"}}
 
-    def never() -> dict[str, Any]:
-        raise AssertionError("performance results must not be computed")
+    report = gated_report({"boxes": check}, {"scenario_b_required": False}, never)
+    assert set(report) == {"anomaly", "controls"} and "result" not in report
 
-    report = gated_report(check, {"scenario_b_required": False}, never)
-    assert set(report) == {"anomaly", "boxes_check"} and "result" not in report
+
+def test_two_identical_lists_of_159_boxes_fail_the_official_check() -> None:
+    boxes = _boxes(159)
+    assert reconcile_boxes(_rows(boxes), boxes)["ok"]  # the generic comparator accepts small sets
+    check = reconcile_boxes(_rows(boxes), boxes, expected_count=160)
+    assert not check["ok"] and check["identical"] == 159 and check["different"] == []
+    report = gated_report({"boxes": check}, {}, never)
+    assert set(report) == {"anomaly", "controls"}
+
+
+def test_160_rows_with_a_repeated_f_are_not_160_distinct_boxes() -> None:
+    boxes = _boxes(160)
+    rows = _rows(boxes)
+    rows[10] = rows[9]
+    check = reconcile_boxes(rows, boxes, expected_count=160)
+    assert check["step3_boxes"] == 160 and check["distinct_step3"] == 159 and not check["ok"]
+    assert check["only_in_run"] == [boxes[10].formed_utc.isoformat()]
 
 
 def test_a_missing_box_and_a_different_end_are_reported() -> None:
@@ -213,6 +275,18 @@ def test_a_missing_box_and_a_different_end_are_reported() -> None:
     check = reconcile_boxes(rows[1:], boxes)
     assert not check["ok"] and check["only_in_run"] == [boxes[0].formed_utc.isoformat()]
     assert [d["fields"].keys() for d in check["different"]] == [{"end_reason": None}.keys()]
+
+
+def test_each_consumed_box_matches_its_breakout_decision(tool: Tool) -> None:
+    result, run = tool(SUITE_1)
+    check = reconcile_breakouts(result)
+    assert check["ok"] and check["boxes_consumed"] == check["breakout_decisions"] == check["matched"] == 1
+    result.boxes[0].end_reason = "consommée par la cassure SHORT"  # the side no longer matches the decision
+    check = reconcile_breakouts(result)
+    assert not check["ok"] and check["boxes_without_breakout_decision"] and check["breakout_decisions_without_box"]
+    checks = controls(result, run.entry_events, _rows(result.boxes), None)
+    assert checks["boxes"]["ok"] and not checks["breakouts"]["ok"]
+    assert set(gated_report(checks, {}, never)) == {"anomaly", "controls"}
 
 
 def test_the_engine_boxes_reconcile_with_themselves_through_the_step3_format() -> None:
@@ -265,10 +339,14 @@ def test_coincidence_with_an_s1_signal_and_simultaneous_losses() -> None:
         {"decision_utc": "2019-02-13T10:00:00+00:00", "signal": {"side": "LONG"}},
         {"signal": None},
     ]
-    out = compare_with_s1(result, s1_report, s1_signals(lines), utc(2019, 3, 1))
+    window = list(range(2015, 2022))
+    out = compare_with_s1(result, s1_report, s1_signals(lines), utc(2019, 3, 1), window)
     assert out["entries_coinciding_with_an_s1_signal"] == 1 and out["coincidence_pct"] == 100
     assert out["s3_losses_overlapping_an_s1_loss"] == 1 and out["hours_same_direction"] == 2
-    other_side = compare_with_s1(result, s1_report, {("2019-02-13T10:00:00+00:00", "SHORT")}, utc(2019, 3, 1))
+    assert list(out["net_by_year"]) == window  # the seven years, S3 at 0 EUR without a closed trade
+    assert all(out["net_by_year"][y]["s3"] == 0 for y in window if y != 2019)
+    assert trade.net_account is not None and out["net_by_year"][2019]["s3"] == trade.net_account < 0
+    other_side = compare_with_s1(result, s1_report, {("2019-02-13T10:00:00+00:00", "SHORT")}, utc(2019, 3, 1), window)
     assert other_side["entries_coinciding_with_an_s1_signal"] == 0
 
 
@@ -280,3 +358,21 @@ def test_recovery_reports_the_longest_recovered_and_the_deepest_episode() -> Non
     out = recovery.close()
     assert out["longest_recovered"]["days"] == 2 and out["longest_recovered"]["fall_eur"] == 10
     assert out["deepest"]["fall_eur"] == 51 and out["deepest"]["recovered_utc"] is None
+
+
+def test_the_yearly_drawdown_starts_at_the_equity_of_the_first_tick_of_the_year() -> None:
+    yearly, overall = YearlyDrawdowns(), TickDrawdown(D(2000), None)
+    path = [
+        (datetime(2015, 12, 31, 21, 59, tzinfo=UTC), "2000"),
+        (datetime(2016, 1, 3, 22, 0, tzinfo=UTC), "1990"),  # lower at the first tick of January
+        (datetime(2016, 1, 4, 9, 0, tzinfo=UTC), "1995"),
+        (datetime(2016, 1, 5, 9, 0, tzinfo=UTC), "1985"),
+    ]
+    for moment, equity in path:
+        yearly.observe(moment, D(equity))
+        overall.observe(moment, D(equity))
+    year = yearly.years[2016]
+    assert year.observed_ticks == 3 and year.drawdown_peak_utc == path[2][0]
+    assert year.max_drawdown_eur == 10  # 1995 -> 1985; from December's 2000 it would be 15
+    assert overall.max_drawdown_eur == 15  # the global drawdown stays continuous
+    assert yearly.years[2015].max_drawdown_eur == 0
