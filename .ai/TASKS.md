@@ -36,6 +36,7 @@
 - [ ] Calibrage Dukascopy / IG sur une période commune : prix et bougies, signaux, coûts et conditions d'exécution, séparément (ouverture de 2026 dans l'adaptateur : décision de l'opérateur)
 - [ ] Mention « Powered by Dukascopy » si les données sont intégrées à une interface (licence, section 8)
 - [ ] Fiches S2 et D1 (première vague)
+- [ ] Fiche S3 : rédigée (`docs/strategies/S3_SQUEEZE.md`, ASSUMP-026 proposée), à valider par l'opérateur
 
 ### ✅ Terminé
 - [x] Revue externe du rapport historique et revue du code : classement des interruptions, purge limitée, vérifications ciblées, état connaissable à la clôture séparé de l'audit, ticks invalides, tests anti-fuite sur de vraies clôtures H1/H4/D1 (2026-10-30, PR #3)
