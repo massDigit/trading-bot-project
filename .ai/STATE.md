@@ -123,5 +123,6 @@ décisions identique octet pour octet) ; 194 s, 175 Mio. Étape 3 rejouée aprè
 
 ## 🏁 Prochaine Étape / Milestone
 1. S1, S2 et S3 étudiées sur 2015-2021 (ADR-016, ADR-020), sans conclusion de rentabilité. Suite (stratégie, paramètres, capital ou risque, modèle de sélection) sur décision de l'opérateur seulement ; aucune expérience en cours.
+   Première vague (cahier v1.2 §6.6, §15 lot 3A) : fiche DAY_01 en cours (ASSUMP-027 proposée, documentation seulement) ; ensuite, sur décision, lot de données M15/M5 audité, puis moteur DAY_01.
 2. En parallèle : fermetures particulières et confirmations IG.
 3. Garder 2022-2023 pour l'évaluation des variantes figées, puis 2024-2025 pour le test final (ADR-007).
