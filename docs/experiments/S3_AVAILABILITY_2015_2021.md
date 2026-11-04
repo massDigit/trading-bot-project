@@ -89,15 +89,23 @@ pourcentage des **10 896 créneaux attendus**.
 - **Initialisation** : 259 H4 (2,377 % des attendus), toutes en 2015. La compression est
   calculable à partir de la H4 qui commence le 2015-03-04 à 02:00 UTC, conformément à
   l'amorçage prévu par la fiche (§3).
-- **Interruptions** : 316 H4 (2,900 % des attendus). Elles viennent de **16 H4 inutilisables**,
-  toutes `INTERRUPTION_INEXPLIQUÉE` : chacune rend la compression non calculable pour elle-même
-  et pour les 19 H4 suivantes (304 = 16 × 19).
-  - 11 sont sur un créneau attendu : 2015-05-06 (13:00 ; la H4 de 09:00, également
-    inutilisable, est dans la même fenêtre), 2016-09-02, 2016-12-26, 2017-12-25 22:00, 2019-05-26,
-    2020-02-11, 2020-09-09, 2021-02-08, 2021-04-20, 2021-04-26 et 2021-05-03.
-  - 5 sont des H4 hors calendrier des journées de la convention (25 décembre 2015, 2018, 2019
-    et 2020 ; 31 décembre 2018). Présentes mais inutilisables, elles rompent la continuité. Les
-    12 H4 non calculables « par elles-mêmes » sont les 12 H4 inutilisables sur un créneau attendu.
+- **Interruptions** : 316 décisions distinctes bloquées (2,900 % des attendus) : 12 dont la
+  H4 elle-même est inutilisable, et 304 dont la fenêtre de 20 H4 des bandes contient une H4
+  inutilisable. Ces totaux sont lus dans les sorties (une ligne par créneau, première cause).
+- **Bougies inutilisables** (recomptage de l'état des H4 locales à leur disponibilité, même
+  commit) : **28 H4**, toutes `INTERRUPTION_INEXPLIQUÉE`.
+  - **12 sur un créneau attendu** : ce sont exactement les 12 H4 non calculables « par
+    elles-mêmes ». Les H4 de 09:00 et de 13:00 UTC du 2015-05-06 sont toutes deux inutilisables
+    et comptées dans ces 12.
+  - **16 hors calendrier** : ce sont les 16 H4 présentes hors calendrier prévu, toutes
+    inutilisables (H4 partielles des journées de la convention).
+  - **16 épisodes** de H4 inutilisables consécutives : 2015-05-06 (2 H4 sur calendrier) ;
+    Noël 2015, 2018, 2019 et 2020 (3 H4 hors calendrier chacun) ; Noël 2017 (3 H4 hors
+    calendrier suivies de la H4 sur calendrier du 2017-12-25 à 22:00) ; 2018-12-31 (1 H4 hors
+    calendrier) ; et 9 H4 isolées sur calendrier (2016-09-02, 2016-12-26, 2019-05-26,
+    2020-02-11, 2020-09-09, 2021-02-08, 2021-04-20, 2021-04-26, 2021-05-03).
+  - Les sorties ne gardent pas la bougie qui bloque chaque décision : les 304 décisions ne sont
+    donc pas attribuées ici à une bougie ou à un épisode.
 - La référence de 360 H4 n'est jamais descendue sous 240 largeurs après l'initialisation : une
   interruption isolée retire au plus 20 largeurs.
 
@@ -128,12 +136,13 @@ des bougies.
 - **Consolidations trop larges** : 41 refus (décisions), répartis sur **23 séquences**. 8 de
   ces séquences n'ont donné aucune boîte (toutes leurs fenêtres trop larges) ; dans les 15
   autres, une fenêtre ultérieure de la même séquence a été reconnue (26 refus).
-- **Autre motif** : 5 séquences d'au moins 6 H4 sans boîte ni refus, parce que leurs bougies
-  commençaient avant la fin de la boîte précédente (§4.1, condition 3). Aucun refus pour ATR
+- **Autre motif** : 5 séquences d'au moins 6 H4 sans boîte ni refus. Chacune commence pendant
+  la vie d'une boîte active ; après la cassure de cette boîte, aucune fenêtre de 6 H4 de la
+  séquence ne commençait après sa fin (§4.1, conditions 1 et 3). Aucun refus pour ATR
   indisponible.
 - **Boîtes expirées : 0. Boîtes abandonnées pour données manquantes : 0.** Les 160 boîtes ont
   toutes été consommées par une cassure, 24 H4 au plus après `F` : 1 H4 pour 38 boîtes,
-  médiane 3, troisième quartile 6, maximum 24. Aucune des 16 H4 inutilisables n'est tombée
+  médiane 3, troisième quartile 6, maximum 24. Aucune des 28 H4 inutilisables n'est tombée
   pendant la vie d'une boîte. Aucune boîte n'était active à la fin de l'étude.
 - Les cassures (160) ne sont **pas évaluées** à cette étape : leur nombre n'est ni un nombre
   d'entrées, ni un résultat.
@@ -141,8 +150,9 @@ des bougies.
 ## 5. Lecture
 
 - **Données** : la compression est calculable sur 94,7 % des créneaux attendus. Hors amorçage
-  de 2015, la perte vient seulement des 16 H4 `INTERRUPTION_INEXPLIQUÉE` (2,9 % des créneaux),
-  dont 5 sont des H4 partielles des journées fériées de la convention.
+  de 2015, la perte vient seulement de H4 `INTERRUPTION_INEXPLIQUÉE` : 316 décisions bloquées
+  (2,9 % des créneaux), autour de 28 H4 inutilisables en 16 épisodes, dont 16 H4 partielles hors
+  calendrier des journées fériées de la convention.
 - **Effectif** : 160 boîtes sur sept ans, entre 18 et 27 par an. Ce sera le maximum des
   cassures évaluées à l'étape 4, avant les refus (expansion, contexte D1, marché, taille,
   position ouverte).
