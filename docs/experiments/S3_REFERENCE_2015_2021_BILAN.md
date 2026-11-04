@@ -3,7 +3,7 @@
 **Statut** : passages du 2026-11-04, autorisés par l'opérateur (fiche S3 §9, étape 4), selon le
 protocole `docs/experiments/S3_REFERENCE_2015_2021.md`, figé et poussé avant tout lancement
 (commit `15d2c83`). Aucun paramètre modifié après lecture des résultats. Ni validation de
-performance, ni autorisation de trading. **Bilan en attente de revue par l'opérateur.**
+performance, ni autorisation de trading. **Bilan validé par l'opérateur le 2026-11-04 (ADR-020).**
 
 ## 1. Provenance et passages lancés
 
@@ -62,17 +62,20 @@ existe donc pour chaque réglage.
 
 ## 3. Des cassures aux positions (D1 → H4, référence)
 
-Le moteur évalue le contexte D1 avant l'expansion et la taille : la catégorie d'une cassure est
-son premier motif bloquant.
+Le moteur contrôle chaque cassure dans cet ordre : disponibilité des données D1, puis expansion,
+puis compatibilité de la direction D1, puis marché ouvert, puis taille
+(`backtest/s3_engine.py`). **Chaque cassure est comptée à son premier blocage seulement.** Une
+cassure bloquée à une étape n'est pas évaluée aux suivantes : elle aurait pu échouer aussi
+plus loin.
 
 | Étape | 2015 | 2016 | 2017 | 2018 | 2019 | 2020 | 2021 | Total |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
 | **Cassures (boîtes consommées)** | 18 | 23 | 27 | 24 | 26 | 24 | 18 | **160** |
-| Données D1 inutilisables (règle stricte, canal de 55 D1) | 5 | 12 | 6 | 3 | 12 | 12 | 10 | **60** |
-| Refus : contexte D1 calculable, neutre ou contraire | 6 | 2 | 2 | 5 | 5 | 3 | 3 | **26** |
-| Refus : pas d'expansion | 5 | 6 | 8 | 11 | 4 | 6 | 2 | **42** |
-| Refus : taille minimale | 2 | 2 | 11 | 5 | 3 | 3 | 1 | **27** |
-| Refus : marché fermé | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| 1. Données D1 inutilisables (règle stricte, canal de 55 D1) | 5 | 12 | 6 | 3 | 12 | 12 | 10 | **60** |
+| 2. Refus : pas d'expansion | 5 | 6 | 8 | 11 | 4 | 6 | 2 | **42** |
+| 3. Refus : contexte D1 calculable, neutre ou contraire | 6 | 2 | 2 | 5 | 5 | 3 | 3 | **26** |
+| 5. Refus : taille minimale | 2 | 2 | 11 | 5 | 3 | 3 | 1 | **27** |
+| 4. Refus : marché fermé | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
 | **Entrées décidées** | 0 | 1 | 0 | 0 | 2 | 0 | 2 | **5** |
 | **Positions effectivement ouvertes** | 0 | 1 | 0 | 0 | 2 | 0 | 2 | **5** |
 
@@ -81,7 +84,11 @@ son premier motif bloquant.
   été exécutée puis liquidée, rejetée, annulée ou laissée sans tick.
 - **Données D1** : 60 cassures sur 160 (37,5 %) tombent quand le canal de 55 D1 contient une D1
   inutilisable. Le moteur S1 applique alors sa règle stricte : évaluation impossible, pas un
-  refus.
+  refus. Ces cassures ne sont évaluées ni sur l'expansion, ni sur la direction, ni sur la taille.
+- **Blocages liés à D1** : 86 au total (60 données + 26 direction). Ils ne représentent pas
+  86 entrées supplémentaires possibles sans D1. La comparaison H4 seule (§5) montre que la plupart
+  de ces cassures échouent ensuite sur l'expansion ou la taille : sans D1, on passe de 5 à
+  7 entrées.
 - **Taille minimale** : budget de 0,25 % de 2 000 €, environ 5 €. Pour 0,1 contrat, cela
   correspond à un stop d'environ 53 pips au plus, coûts compris. Mesuré sur les 160 cassures
   du passage H4 seule :
@@ -120,13 +127,9 @@ Trajectoire continue, 2 000 € au départ, sans remise à zéro.
   stop atteint. Les pertes restent entre −0,31 et −0,78 fois le risque estimé. Durées de 8 h à
   184 h, 248 h en position sur sept ans.
 
-| Décision (UTC) | Sens | Taille | Durée | Net (€) | Multiple du risque estimé |
-|---|---|---:|---:|---:|---:|
-| 2016-03-28 17:00 | achat | 0,1 | 184 h | +14,44 | +3,28 |
-| 2019-05-23 09:00 | vente | 0,1 | 8 h | −3,89 | −0,78 |
-| 2019-11-13 18:00 | vente | 0,1 | 24 h | −1,87 | −0,67 |
-| 2021-10-12 13:00 | vente | 0,1 | 20 h | −1,40 | −0,31 |
-| 2021-12-29 02:00 | vente | 0,1 | 12 h | −1,66 | −0,47 |
+Meilleure transaction : +14,44 € (achat de mars 2016, +3,28 fois le risque estimé). Les
+quatre autres sont perdantes. Le détail transaction par transaction reste dans les rapports
+locaux.
 
 **Retours vers la boîte** (description seulement, aucune sortie simulée) : les 5 positions ont
 eu une réintégration, après 1 à 4 H4 (médiane 2). Aucune traversée ni position sans retour.
@@ -161,9 +164,8 @@ taille.
 | **Entrées décidées = positions ouvertes** | 0 | 1 | 0 | 0 | 2 | 0 | 4 | **7** |
 
 - Les 7 transactions comprennent les 5 de la référence, identiques, et 2 transactions de plus
-  en 2021 :
-  - 2021-06-29 09:00, vente : +2,05 €, +0,46 fois le risque estimé, sans retour vers la boîte ;
-  - 2021-08-13 13:00, achat : −2,29 €, −0,55 fois le risque estimé.
+  en 2021 : une gagnante, une perdante, nettes ensemble de −0,25 €. Leur détail reste dans les
+  rapports locaux.
 - **Résultat** : brut +7,54 €, coûts 2,17 €, net **+5,37 €** (2 gagnantes, 5 perdantes ; toutes
   par la sortie suiveuse ; aucun stop).
 - **Drawdown** : relatif maximal au tick de **0,786 %** (15,89 €), même sommet que la référence,
@@ -198,11 +200,14 @@ Les quatre pertes de la référence S3 chevauchent toutes une transaction perdan
 ## 7. Lecture (règles du §9 du protocole)
 
 - **Fréquence** : le moteur de référence ouvre 5 positions en sept ans sur 160 cassures. Les
-  refus se répartissent ainsi :
+  blocages, comptés au premier motif dans l'ordre du moteur, se répartissent ainsi :
   - 60 cassures sont bloquées par les données D1 (règle stricte de S1) ;
-  - 26 par un contexte D1 neutre ou contraire ;
   - 42 faute d'expansion ;
+  - 26 par un contexte D1 neutre ou contraire ;
   - 27 par la taille minimale.
+
+  Les 86 blocages liés à D1 ne sont pas 86 entrées perdues : sans D1, on obtient 7 entrées au
+  lieu de 5.
 
   Sans D1, la taille minimale devient le premier obstacle : 79 cassures sur 160. Au capital de
   2 000 € et au risque de 0,25 %, le stop structurel de S3 dépasse souvent le budget pour
