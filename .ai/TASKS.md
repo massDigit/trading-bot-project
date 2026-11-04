@@ -17,7 +17,8 @@
 - [x] Protocole S2 (reprise de tendance après repli) : fiche `docs/strategies/S2_PULLBACK.md`, ASSUMP-025 approuvée pour la recherche hors ligne (ADR-015, 2026-11-03)
 - [x] S2 étape 1 : implémentation hors ligne et 27 tests synthétiques (PR #7)
 - [x] S2 étape 2 : rejeu de non-régression S1 sur avril-juin 2019 sur `7b9a1f1` : transactions, solde (1 992,04 €) et journal identiques à la référence (2026-11-03)
-- [ ] S2 étape 3 : disponibilité des données 2015-2021 (autorisée 2026-11-04)
+- [x] S2 étape 3 : disponibilité des données 2015-2021 (`docs/experiments/S2_AVAILABILITY_2015_2021.md`, 2026-11-04)
+- [ ] S2 étape 4 : passages pré-enregistrés (sur décision)
 - [ ] Fermetures particulières (jours fériés, fermetures anticipées) : rechercher une source applicable, en parallèle ; sans preuve, le classement actuel est conservé (ASSUMP-016)
 
 ### 📋 A Faire
