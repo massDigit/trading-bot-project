@@ -1,0 +1,282 @@
+"""Synthetic tests of the S3 performance run tool (step 4). No real data."""
+
+from __future__ import annotations
+
+from datetime import UTC, datetime, timedelta
+from decimal import Decimal as D
+from typing import Any
+
+import pytest
+from test_backtest import utc
+from test_s3 import SUITE_1, SUITE_2, InjectedBox, X, at, d1_context, engine, scenario, spec, ticks_for
+
+from forex_bot.backtest.engine import DecisionRecord, EntryAction, PositionAction, StopAtExecution
+from forex_bot.backtest.explore import _str
+from forex_bot.backtest.feed import TickFeed
+from forex_bot.backtest.s3 import Box, S3Params
+from forex_bot.backtest.s3_engine import S3Backtest
+from forex_bot.backtest.s3_explore import (
+    Recovery,
+    S3Run,
+    breakout_category,
+    compare_with_s1,
+    funnel,
+    gated_report,
+    reconcile_boxes,
+    returns_to_box,
+    s1_signals,
+    scenario_triggers,
+)
+from forex_bot.risk import CostModel
+
+# ---------------------------------------------------------------- scenario B trigger (protocol §4)
+
+
+def test_an_unobservable_possible_crossing_under_a_requires_b() -> None:
+    after = [
+        SUITE_1[0],
+        spec("1.1349", "1.1350", "1.1340", "1.1345"),  # 30 minutes without quotes, the bid stays above the stop
+        spec("1.1345", "1.1346", "1.1310", "1.1312"),  # later, the stop 1.1319 is observed
+    ]
+    result = engine(after, drop=(10, 6, 12)).run()
+    (trade,) = result.trades
+    assert trade.exit_reason == "STOP_OBSERVÉ" and trade.indeterminate
+    triggers = scenario_triggers(result)
+    assert triggers["scenario_b_required"] and len(triggers["unobservable_crossings"]) == 1
+    assert not triggers["unobservable_crossings"][0]["open_at_end"]
+
+
+def test_a_crossing_on_a_position_still_open_at_the_end_requires_b() -> None:
+    result = engine(SUITE_2, drop=(10, 6, 12), end=at(13)).run()
+    assert result.open_trade is not None and result.open_trade.indeterminate
+    (crossing,) = scenario_triggers(result)["unobservable_crossings"]
+    assert crossing["open_at_end"] and scenario_triggers(result)["scenario_b_required"]
+
+
+def test_a_gap_followed_by_a_price_already_beyond_the_stop_does_not_require_b_by_itself() -> None:
+    gap_then_beyond = [SUITE_1[0], spec("1.1349", "1.1350", "1.1340", "1.1310"), *SUITE_1[2:]]
+    result = engine(gap_then_beyond, drop=(10, 1, 12)).run()  # 14:00, then nothing until 15:05 under the stop
+    (trade,) = result.trades
+    assert trade.exit_reason == "STOP_APRÈS_INTERRUPTION" and not trade.indeterminate
+    triggers = scenario_triggers(result)
+    assert not triggers["scenario_b_required"] and triggers["unobservable_crossings"] == []
+    assert not triggers["reject_required"]
+
+
+def test_a_stop_beyond_at_execution_requires_the_reject_run() -> None:
+    gap_down = [spec("1.1318", "1.1317", "1.1316", "1.1317"), *SUITE_1[1:]]
+    triggers = scenario_triggers(engine(gap_down).run())
+    assert triggers["reject_required"] and triggers["stop_beyond_at_execution"] == 1
+    assert not triggers["scenario_b_required"]
+
+
+# ---------------------------------------------------------------- breakout funnel (protocol §6)
+
+
+def _context_index(d1: list[dict[str, Any]], decision: datetime) -> int:
+    return max(i for i, b in enumerate(d1) if b["end_utc"] <= decision)
+
+
+def _unusable_context() -> list[dict[str, Any]]:
+    d1 = d1_context()
+    i = _context_index(d1, at(8))
+    d1[i] = {**d1[i], "complete_at_close": False, "flags_at_close": ["trou de cotation"]}
+    return d1
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "category"),
+    [
+        ({}, "entrée décidée"),
+        ({"d1": []}, "données D1 : insuffisantes"),
+        ({"d1": "unusable"}, "données D1 : inutilisables"),
+        ({"d1": d1_context(mirror=True)}, "refus : contexte D1 calculable, neutre ou contraire"),
+        ({"params": S3Params(bb_width=D(6))}, "refus : pas d'expansion"),
+        ({"costs": CostModel()}, "refus taille : coût inconnu"),
+        ({"risk_fraction": D("0.0001")}, "refus taille : taille minimale"),
+    ],
+)
+def test_each_breakout_is_in_one_category_recorded_by_the_engine(kwargs: dict[str, Any], category: str) -> None:
+    if kwargs.get("d1") == "unusable":
+        kwargs = {**kwargs, "d1": _unusable_context()}
+    result = engine(SUITE_1, **kwargs).run()
+    out = funnel(result)
+    assert out["breakouts"] == 1 and out["categories"] == {category: 1}
+    assert all(out["checks"].values())
+
+
+def test_neutral_or_contrary_d1_is_not_a_data_reason_without_the_filter() -> None:
+    result = engine(SUITE_1, d1=d1_context(mirror=True), params=S3Params(use_d1_filter=False)).run()
+    assert funnel(result)["categories"] == {"entrée décidée": 1}
+    result = engine(SUITE_1, d1=[], params=S3Params(use_d1_filter=False)).run()
+    assert funnel(result)["categories"] == {"entrée décidée": 1}
+
+
+@pytest.mark.parametrize(
+    ("reason", "category"),
+    [
+        ("aucune cotation connue à l'instant de décision", "refus taille : aucune cotation connue"),
+        ("estimation impossible : distance nulle", "refus taille : estimation impossible"),
+        ("coût inconnu, jamais compté zéro : financement", "refus taille : coût inconnu"),
+        ("taille minimale 0.1 > taille permise 0.0", "refus taille : taille minimale"),
+        ("LONG : marché fermé à l'instant de décision", "refus : marché fermé à D"),
+        ("cassure baissière contre le contexte D1", "refus : contexte D1 calculable, neutre ou contraire"),
+    ],
+)
+def test_sizing_and_market_reasons_keep_their_own_category(reason: str, category: str) -> None:
+    record = DecisionRecord(X, {}, PositionAction.FLAT, EntryAction.SIGNAL_REFUSED, [reason], {"side": "LONG"})
+    assert breakout_category(record) == category
+
+
+@pytest.mark.parametrize(
+    ("reason", "category"),
+    [
+        ("bougie de cassure FERMETURE_DOCUMENTÉE", "données : bougie de cassure non OK"),
+        ("bandes non calculables à la cassure", "données : bandes non calculables"),
+        ("historique D1 insuffisant", "données D1 : insuffisantes"),
+        ("D1 de contexte non utilisable", "données D1 : inutilisables"),
+        ("D1 non utilisable dans le canal de 55 jours (règle stricte)", "données D1 : inutilisables"),
+    ],
+)
+def test_data_reasons_at_the_breakout_keep_their_own_category(reason: str, category: str) -> None:
+    record = DecisionRecord(X, {}, PositionAction.FLAT, EntryAction.NOT_COMPUTABLE, [reason], {"side": "LONG"})
+    assert breakout_category(record) == category
+
+
+def test_a_breakout_during_a_position_is_not_evaluated_and_counted_once() -> None:
+    base = engine(SUITE_2)
+    injected = InjectedBox(
+        base.h4, base.d1, ticks_for(*scenario(SUITE_2)), [], S3Params(), base.config, start_utc=base.start_utc
+    )
+    out = funnel(injected.run())
+    assert out["breakouts"] == 2 and all(out["checks"].values())
+    assert out["categories"] == {"entrée décidée": 1, "non évaluée : position S3 déjà ouverte": 1}
+
+
+def test_each_decided_entry_is_executed_or_not() -> None:
+    gap_down = [spec("1.1318", "1.1317", "1.1316", "1.1317"), *SUITE_1[1:]]
+    filled = funnel(engine(gap_down).run())
+    assert filled["executions"] == {"exécutée puis liquidée au premier tick (stop déjà dépassé)": 1}
+    rejected = funnel(engine(gap_down, stop_at_execution=StopAtExecution.REJECT).run())
+    assert rejected["executions"] == {"non exécutée : rejet à l'exécution (stop invalide)": 1}
+    pending = funnel(engine(SUITE_1, end=at(8) + timedelta(minutes=1)).run())  # no tick after D in the window
+    assert pending["executions"] == {"non exécutée : aucun tick avant la fin de la fenêtre": 1}
+    for out in (filled, rejected, pending):
+        assert out["entries_decided"] == 1 and all(out["checks"].values())
+
+
+# ---------------------------------------------------------------- boxes against step 3 (protocol §5)
+
+
+def _boxes(n: int) -> list[Box]:
+    first = datetime(2016, 1, 4, 2, tzinfo=UTC)
+    out = []
+    for k in range(n):
+        box = Box(k, first + timedelta(hours=4 * k), D("1.1050"), D("1.1020"), D("1.1051"), D("0.0012"))
+        box.end(box.formed_utc + timedelta(hours=8), "consommée par la cassure LONG")
+        out.append(box)
+    return out
+
+
+def _rows(boxes: list[Box]) -> list[dict[str, Any]]:
+    return [{"kind": "boîte", **_str(b.describe())} for b in boxes]
+
+
+def test_identical_boxes_pass_the_check() -> None:
+    boxes = _boxes(160)
+    check = reconcile_boxes(_rows(boxes), boxes)
+    assert check["ok"] and check["identical"] == 160 and check["different"] == []
+
+
+def test_one_differing_box_among_160_is_named_with_its_field_and_hides_the_results() -> None:
+    boxes = _boxes(160)
+    rows = _rows(boxes)
+    rows[41] = {**rows[41], "BL": "1.1019"}
+    check = reconcile_boxes(rows, boxes)
+    assert check["step3_boxes"] == check["run_boxes"] == 160 and not check["ok"]
+    assert check["identical"] == 159 and check["only_in_run"] == check["only_in_step3"] == []
+    (diff,) = check["different"]
+    assert diff["F"] == boxes[41].formed_utc.isoformat()
+    assert diff["fields"] == {"BL": {"step3": "1.1019", "run": "1.1020"}}
+
+    def never() -> dict[str, Any]:
+        raise AssertionError("performance results must not be computed")
+
+    report = gated_report(check, {"scenario_b_required": False}, never)
+    assert set(report) == {"anomaly", "boxes_check"} and "result" not in report
+
+
+def test_a_missing_box_and_a_different_end_are_reported() -> None:
+    boxes = _boxes(3)
+    rows = _rows(boxes)
+    rows[2] = {**rows[2], "end_reason": "expirée après 30 H4"}
+    check = reconcile_boxes(rows[1:], boxes)
+    assert not check["ok"] and check["only_in_run"] == [boxes[0].formed_utc.isoformat()]
+    assert [d["fields"].keys() for d in check["different"]] == [{"end_reason": None}.keys()]
+
+
+def test_the_engine_boxes_reconcile_with_themselves_through_the_step3_format() -> None:
+    result = engine(SUITE_1).run()
+    check = reconcile_boxes(_rows(result.boxes), result.boxes)
+    assert check["ok"] and check["identical"] == len(result.boxes) == 1
+
+
+# ---------------------------------------------------------------- observation and comparison
+
+
+def test_the_run_tool_only_observes() -> None:
+    specs, starts = scenario(SUITE_2)
+    base = engine(SUITE_2)
+    args = (base.h4, base.d1)
+    plain = S3Backtest(*args, TickFeed(ticks_for(specs, starts)), [], S3Params(), base.config, start_utc=base.start_utc)
+    run = S3Run(*args, TickFeed(ticks_for(specs, starts)), [], S3Params(), base.config, start_utc=base.start_utc)
+    plain_result, observed = plain.run(), run.run()
+    assert [(t.entry_utc, t.exit_utc, t.net_account) for t in plain_result.trades] == [
+        (t.entry_utc, t.exit_utc, t.net_account) for t in observed.trades
+    ]
+    assert observed.balance == plain_result.balance and run.relative.peak_eur >= base.config.initial_equity
+
+
+def test_returns_to_box_group_positions_by_their_first_close_back() -> None:
+    out = returns_to_box(engine(SUITE_1).run())
+    assert out["RÉINTÉGRATION"]["positions"] == 1 and out["RÉINTÉGRATION"]["exits"] == {"SORTIE_SUIVEUSE": 1}
+    assert out["RÉINTÉGRATION"]["h4_since_entry"]["median"] == 1
+    assert returns_to_box(engine(SUITE_2).run())["sans retour"]["positions"] == 1
+
+
+def test_coincidence_with_an_s1_signal_and_simultaneous_losses() -> None:
+    result = engine(SUITE_1).run()  # one long entry decided at 2019-02-13 10:00, a loss
+    trade = result.trades[0]
+    s1_report = {
+        "result": {
+            "trades": [
+                {
+                    "entry_utc": (trade.entry_utc - timedelta(hours=1)).isoformat(),
+                    "exit_utc": (trade.entry_utc + timedelta(hours=2)).isoformat(),
+                    "side": "LONG",
+                    "net_account": "-3.5",
+                }
+            ],
+            "open_trade_at_end": None,
+        },
+        "by_year": {"2019": {"closed_trades": {"net_eur": "-3.5"}}},
+    }
+    lines: list[dict[str, Any]] = [
+        {"decision_utc": "2019-02-13T10:00:00+00:00", "signal": {"side": "LONG"}},
+        {"signal": None},
+    ]
+    out = compare_with_s1(result, s1_report, s1_signals(lines), utc(2019, 3, 1))
+    assert out["entries_coinciding_with_an_s1_signal"] == 1 and out["coincidence_pct"] == 100
+    assert out["s3_losses_overlapping_an_s1_loss"] == 1 and out["hours_same_direction"] == 2
+    other_side = compare_with_s1(result, s1_report, {("2019-02-13T10:00:00+00:00", "SHORT")}, utc(2019, 3, 1))
+    assert other_side["entries_coinciding_with_an_s1_signal"] == 0
+
+
+def test_recovery_reports_the_longest_recovered_and_the_deepest_episode() -> None:
+    recovery = Recovery(D(2000))
+    t0 = datetime(2016, 1, 4, tzinfo=UTC)
+    for day, equity in enumerate(["2000", "1990", "2001", "1950", "1980"]):
+        recovery.observe(t0 + timedelta(days=day), D(equity))
+    out = recovery.close()
+    assert out["longest_recovered"]["days"] == 2 and out["longest_recovered"]["fall_eur"] == 10
+    assert out["deepest"]["fall_eur"] == 51 and out["deepest"]["recovered_utc"] is None

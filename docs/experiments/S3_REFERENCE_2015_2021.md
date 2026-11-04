@@ -1,8 +1,9 @@
 # Protocole — S3 cassure après compression, premier passage de performance 2015-2021
 
-**Statut** : projet soumis à l'opérateur le 2026-11-04, **non figé, aucun passage lancé**. Étape 4
-de la fiche `docs/strategies/S3_SQUEEZE.md` (§9), après validation de l'étape 3 (PR #15). Le
-protocole sera figé par le commit de l'outil de passage (§1), avant tout lancement. Ni validation
+**Statut** : figé le 2026-11-04 avec l'outil de passage, **avant tout lancement** sur cette
+période ; aucun passage lancé. Étape 4 de la fiche `docs/strategies/S3_SQUEEZE.md` (§9), après
+validation de l'étape 3 (PR #15) ; protocole validé par l'opérateur (PR #16), précisé sur le
+déclenchement de B (§4) et le décompte des cassures (§6). Ni validation
 de performance, ni autorisation de trading. Aucun paramètre ne sera modifié après lecture des
 résultats ; un résultat défavorable est rapporté tel quel.
 
@@ -11,9 +12,11 @@ résultats ; un résultat défavorable est rapporté tel quel.
 - Moteur : `S3Backtest` (`backtest/s3_engine.py`), fusionné dans `main` (PR #13), **inchangé**.
   Le rejeu de non-régression S1 (étape 2) est clos ; il ne sera refait que si un moteur partagé
   est modifié.
-- Outil de passage à écrire : `forex-s3-backtest` (`backtest/s3_explore.py`), sur le modèle de
+- Outil de passage : `forex-s3-backtest` (`backtest/s3_explore.py`), sur le modèle de
   `forex-s2-backtest`. Il n'ajoute que de l'observation (parcours, rapprochement des boîtes,
-  retours vers la boîte, drawdown, comparaison à S1) et sera couvert par des tests synthétiques.
+  retours vers la boîte, drawdown, récupération, cotations autour des trous, comparaison à S1),
+  couverte par des tests synthétiques (`tests/test_s3_explore.py`) ; un test vérifie que les
+  transactions et le solde sont ceux du moteur seul.
   Chaque rapport enregistre le commit, l'empreinte du diff non commité et la ligne de commande ;
   les passages partent d'un arbre propre au commit qui fige ce protocole.
 - Données : historique Dukascopy EUR/USD local, lecteur en flux, fenêtre bornée ; aucun
@@ -55,10 +58,14 @@ Deux réglages, enregistrés à l'avance :
 Pour chaque réglage, dans cet ordre :
 1. **A — observé seulement** (`NONE_TRIGGERED`), toujours lancé.
 2. **B — stop d'abord** (`ALL_TRIGGERED`) : lancé seulement si le passage A du même réglage
-   contient **au moins une transaction indéterminée** (trou de cotation inexpliqué pendant une
-   position).
+   contient **au moins un franchissement possible mais non observable** enregistré par le moteur
+   (`unobservable_crossings` d'une transaction, **y compris une position encore ouverte à la
+   fin** ; rapport : `scenario_triggers.scenario_b_required`). Un trou de cotation suivi d'un prix
+   **déjà au-delà du stop** n'en est pas un : le moteur clôture alors la position au stop
+   (`STOP_APRÈS_INTERRUPTION`, franchissement observé), ce qui ne déclenche pas B à lui seul.
 3. **Rejet à l'exécution** (`REJECT`, scénario A) : lancé seulement si le passage A du même
-   réglage contient **au moins une exécution dont le stop est déjà dépassé au premier tick**.
+   réglage contient **au moins une exécution dont le stop est déjà dépassé au premier tick**
+   (`STOP_DÉPASSÉ_À_L'EXÉCUTION` ; rapport : `scenario_triggers.reject_required`).
 
 S3 n'ayant pas de cible, il n'y a pas de scénario C. Chaque passage est une trajectoire rejouée en
 entier. Aucune autre variante n'est lancée (ni sortie à la réintégration, ni sensibilité : fiche
@@ -80,24 +87,34 @@ passage**, référence et comparaison. **Tout écart est une anomalie** : le pas
 ses résultats ne sont pas présentés, et l'écart est soumis à l'opérateur avant toute correction
 ou nouveau lancement.
 
+Mise en œuvre : le rapport contient `boxes_check` (identiques, seulement dans le passage,
+seulement à l'étape 3, et pour chaque boîte différente son `F` et chaque champ avec ses deux
+valeurs). En cas d'écart, il ne contient **aucun résultat de performance** (ni transactions, ni
+parcours, ni journal des décisions écrit), et la commande s'arrête avec le code 2.
+
 ## 6. Parcours : cassures, refus, entrées
 
-Pour chaque passage, avec les nombres et la première cause (fiche §8), globalement et par année :
-1. boîtes reconnues (160 attendues) → **cassures détectées** (boîtes consommées par une
-   cassure ; 160 attendues), par sens ;
-2. cassures **non évaluables** pour données : bougie de cassure non `OK`, bandes non calculables
-   à la cassure ou à la H4 précédente, contexte D1 non utilisable ou insuffisant (référence
-   seulement) ;
-3. cassures **non évaluées** : position S3 déjà ouverte (boîte consommée) ;
-4. **refus** : pas d'expansion (clôture dans la bande ou largeur qui ne s'élargit pas) ; contexte
-   D1 contraire ou absent (référence seulement) ; marché fermé à `D` ; taille (0,1 contrat
-   au-dessus du budget, ou distance du stop sous le minimum du courtier) ;
-5. **entrées décidées** ;
-6. **entrées exécutées** (positions effectivement ouvertes), dont exécutées puis liquidées
-   (stop dépassé au premier tick) ; entrées décidées non exécutées, avec leur motif.
+Pour chaque passage, globalement et par année. Une **cassure détectée** est une décision où le
+moteur a enregistré un signal (première clôture hors d'une boîte active ; 160 attendues). Sa
+catégorie reprend **l'action et le dernier motif enregistrés par le moteur** à cette décision ;
+aucune règle n'est réévaluée. Chaque cassure est dans **une seule** catégorie :
 
-La somme des branches est contrôlée : cassures = non évaluables + non évaluées + refus + entrées
-décidées ; entrées décidées = exécutées + non exécutées.
+| Action du moteur | Catégorie |
+|---|---|
+| `ÉVALUATION_IMPOSSIBLE` | données : bougie de cassure non `OK` ; données : bandes non calculables (à la cassure ou à la H4 précédente) ; **données D1 : insuffisantes** (moins de 55 D1 disponibles) ; **données D1 : inutilisables** (D1 de contexte, ou une D1 du canal, non utilisable). Référence seulement : sans filtre D1, l'état du D1 n'est pas lu |
+| `NON_ÉVALUÉE` | non évaluée : position S3 déjà ouverte (boîte consommée) |
+| `SIGNAL_REFUSÉ` | refus : pas d'expansion ; **refus : contexte D1 calculable, neutre ou contraire** (référence seulement) ; refus : marché fermé à `D` ; refus taille : **aucune cotation connue** ; refus taille : **estimation impossible** ; refus taille : **coût inconnu** ; refus taille : **taille minimale** |
+| `ENTRÉE_DÉCIDÉE` | entrée décidée |
+
+Un motif non prévu est rangé à part (« autre », avec le motif) et fait échouer le contrôle.
+
+Chaque **entrée décidée** est ensuite comptée une seule fois comme **exécutée** (position
+ouverte, ou exécutée puis liquidée au premier tick si le stop est déjà dépassé) ou **non
+exécutée** (rejet à l'exécution, position déjà ouverte, aucun tick avant la fin de la fenêtre).
+
+Contrôles écrits dans le rapport (`funnel.checks`) : une catégorie par cassure ; aucun motif non
+classé ; entrées décidées = exécutées + non exécutées. Un contrôle en échec est rapporté avant
+toute lecture des résultats.
 
 ## 7. Rapporté pour chaque passage
 
@@ -141,7 +158,7 @@ transactions, net, drawdown), sans que la comparaison remplace la référence.
    soit son net. Aucun seuil automatique n'est fixé.
 4. Avec peu de transactions, aucune conclusion statistique.
 
-## 10. Commandes (après validation et gel)
+## 10. Commandes (aucune lancée à ce jour)
 
 Préfixe des sorties : `data/reports/backtests/s3_ref_2015_2021_<réglage>_<passage>` (hors Git),
 avec `<réglage>` = `d1h4` (référence) ou `h4` (comparaison) et `<passage>` = `a`, `b` ou
@@ -157,8 +174,15 @@ uv run forex-s3-backtest --init-start 2015-01-01 --start 2015-01-01 --end 2022-0
   --decisions-out data/reports/backtests/s3_ref_2015_2021_d1h4_a_decisions.jsonl
 ```
 
-Les autres passages changent seulement `--d1-filter` (`off`), `--scenario` (`B`) et, pour le
-rejet, ajoutent `--stop-at-execution REJECT` ; les noms de sortie suivent le préfixe ci-dessus.
+Ordre prévu :
+1. `d1h4_a` (ci-dessus) ;
+2. `h4_a` : même commande avec `--d1-filter off`, sorties `s3_ref_2015_2021_h4_a*` ;
+3. pour chaque réglage, selon `scenario_triggers` de son passage A : `--scenario B` (sorties
+   `*_b*`) si `scenario_b_required`, puis `--stop-at-execution REJECT` (sorties `*_a_reject*`)
+   si `reject_required`.
+
+Chaque commande part d'un arbre propre au commit qui fige ce protocole ; un passage dont le
+contrôle des boîtes échoue (code 2) arrête la suite.
 
 Bilan agrégé dans ce dossier après les passages ; journaux et rapports détaillés hors Git.
 
