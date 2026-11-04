@@ -352,6 +352,15 @@ class S3Backtest(S1Backtest):
         record.position_action = PositionAction.EXIT_DECIDED
         record.reasons.append(reason)
 
+    def _close(
+        self, tick: Tick, price: Decimal, reason: str, stop_triggered: bool, hypotheses: list[str] | None = None
+    ) -> None:
+        # S3's pending exit is the trailing one: its abandonment is journaled here, not as S1's channel exit.
+        pending, self.pending_exit = self.pending_exit, None
+        super()._close(tick, price, reason, stop_triggered, hypotheses)
+        if pending is not None:
+            self._log(tick.ts_utc, "SORTIE_SUIVEUSE_ABANDONNÉE", f"{reason} avant l'exécution de la sortie suiveuse")
+
     def _held_not_computable(self, record: DecisionRecord, decision: datetime, reason: str) -> None:
         self._log(decision, "SORTIE_NON_CALCULABLE", reason)
         record.position_action = PositionAction.HELD_EXIT_NOT_COMPUTABLE

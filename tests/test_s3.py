@@ -487,6 +487,20 @@ def test_unexplained_interruption_in_position_scenarios_a_and_b() -> None:
     assert line(a, 10).known["h4"]["state"] == BarState.UNEXPLAINED_INTERRUPTION.value
 
 
+def test_a_stop_reached_before_a_pending_trailing_exit_closes_once_and_abandons_the_trailing_exit() -> None:
+    stop_first = [*SUITE_1[:2], spec("1.1332", "1.1318", "1.1316", "1.1317")]  # 18:05 bid under the stop 1.1319
+    result = engine(stop_first).run()
+    assert line(result, 10).position_action is PositionAction.EXIT_DECIDED  # trailing exit pending from 18:00
+    (trade,) = result.trades
+    assert trade.exit_reason == "STOP_OBSERVÉ" and trade.exit_price == d("1.1319")
+    assert trade.exit_utc == utc(2019, 2, 13, 18, 5)
+    assert result.open_trade is None and len(kinds(result, "SORTIE")) == 1
+    (abandoned,) = kinds(result, "SORTIE_SUIVEUSE_ABANDONNÉE")
+    assert abandoned.startswith("STOP_OBSERVÉ") and "sortie suiveuse" in abandoned
+    assert not kinds(result, "SORTIE_CANAL_ABANDONNÉE")
+    assert not any("canal" in e.detail or "CANAL" in e.kind for e in result.journal)
+
+
 def test_first_price_beyond_the_stop_is_filled_then_liquidated() -> None:
     gap_down = [spec("1.1318", "1.1317", "1.1316", "1.1317"), *SUITE_1[1:]]  # opens under the stop 1.1319
     result = engine(gap_down).run()
