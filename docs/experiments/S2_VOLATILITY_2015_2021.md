@@ -101,3 +101,64 @@ signification n'est présenté comme une preuve.
 - Détail par cassure dans `data/reports/backtests/s2_volatility_2015_2021_details.jsonl`, hors
   Git.
 - Tableau agrégé dans ce document après le calcul.
+
+## 8. Résultats (calculés après le gel de la méthode)
+
+**Provenance** :
+- méthode figée au commit `5e803de`, avant tout calcul ;
+- outil au commit `42f0f6e`, arbre propre ;
+- commande :
+  `uv run forex-s2-volatility --journal data/reports/backtests/s2_ref_2015_2021_h1_a_decisions.jsonl --out data/reports/backtests/s2_volatility_2015_2021.json --details-out data/reports/backtests/s2_volatility_2015_2021_details.jsonl` ;
+- durée 8 s ; détails hors Git.
+
+**Contrôle de la reconstruction** : sur les 53 cassures évaluées, la reconstruction retrouve
+**exactement** chaque stop et chaque rapport du journal (0 écart). Les 13 refus de tendance ont des
+valeurs reconstruites, signalées ci-dessous. La volatilité à la décision est calculable pour les
+66 cassures.
+
+Volatilité et ATR en % du prix ; distances et spread en pips ; médianes, avec l'intervalle
+interquartile entre crochets ; `n` = nombre de valeurs.
+
+| | Faible | Moyenne | Élevée | Toutes |
+|---|---|---|---|---|
+| Cassures | 22 | 22 | 22 | 66 |
+| ATR H4 à la décision (bornes du groupe) | 0,146 – 0,221 | 0,222 – 0,316 | 0,345 – 0,729 | 0,146 – 0,729 |
+| ATR figé `A` (médiane, n = 22 / 22 / 22 / 66) | 0,186 | 0,272 | 0,461 | 0,272 |
+| Années des décisions | 2016 : 1 ; 2017 : 3 ; 2019 : 3 ; 2020 : 7 ; 2021 : 8 | 2015 : 1 ; 2016 : 1 ; 2017 : 9 ; 2018 : 6 ; 2020 : 2 ; 2021 : 3 | **2015 : 19** ; 2016 : 1 ; 2017 : 2 | |
+| Issue : entrées / refus tendance / refus rapport / refus taille | 1 / 6 / 15 / 0 | 4 / 2 / 16 / 0 | 2 / 5 / 10 / 5 | 7 / 13 / 41 / 5 |
+| Spread (n = 22 / 22 / 22 / 66) | 0,3 [0,2 – 0,3] | 0,3 [0,2 – 0,4] | 0,3 [0,2 – 0,4] | 0,3 [0,2 – 0,4] |
+| Distance à la cible (n = 22 / 22 / 22 / 66) | 25,1 [19,1 – 51,6] | 29,8 [18,8 – 44,0] | 80,8 [40,2 – 162,2] | 40,9 [20,5 – 69,2] |
+| Distance au stop (n = 22 / 22 / 22 / 66) | 38,6 [35,4 – 50,8] | 57,8 [41,7 – 70,0] | 99,7 [78,4 – 130,0] | 58,5 [39,0 – 89,0] |
+| **Rapport des distances** (n = 22 / 22 / 22 / 66) | **0,90** [0,53 – 1,08] | **0,50** [0,27 – 1,02] | **0,89** [0,51 – 1,63] | 0,72 [0,33 – 1,14] |
+| Rapport gain/risque **évalué** | 0,60 [0,37 – 0,87], n = 16 | 0,45 [0,23 – 0,93], n = 20 | 0,95 [0,45 – 1,48], n = 17 | 0,58 [0,31 – 0,99], n = 53 |
+| Rapport gain/risque **reconstruit** (refus de tendance, hypothétique) | 1,33 [1,00 – 1,64], n = 6 | 0,27 [0,26 – 0,28], n = 2 | 0,73 [0,69 – 1,57], n = 5 | 0,97 [0,30 – 1,59], n = 13 |
+| Rapport gain/risque, tous (dont reconstruits) | 0,78, n = 22 (6) | 0,43, n = 22 (2) | 0,84, n = 22 (5) | 0,67, n = 66 (13) |
+
+Les distances au stop des 13 refus de tendance sont aussi reconstruites (6, 2 et 5 par groupe) ;
+celles des 53 autres cassures sont évaluées.
+
+## 9. Réponse
+
+**Les observations ne permettent pas de trancher** (règle du §6). La médiane du rapport des
+distances n'est pas monotone : 0,90, puis 0,50, puis 0,89. Celle du groupe élevé reste dans
+l'intervalle interquartile du groupe faible.
+
+Ce que montrent les chiffres, sans plus :
+- **Les deux distances grandissent avec la volatilité** : de 25 à 81 pips jusqu'à la cible, de 39 à
+  100 pips jusqu'au stop, entre les groupes faible et élevé. La cible n'est pas relativement plus
+  éloignée, et le stop n'est pas relativement plus large : leur rapport médian est presque le même
+  (0,90 et 0,89).
+- **Le groupe moyen** a un stop plus large sans cible plus éloignée (rapport 0,50). Avec 22
+  observations et des intervalles qui se recouvrent largement, ce creux n'est pas interprétable.
+- Les rapports gain/risque **évalués** vont dans le même sens que le rapport des distances
+  (0,60, 0,45, 0,95), avec les mêmes recouvrements. Ils ne permettent pas non plus de trancher.
+- Le spread médian est le même dans les trois groupes (0,3 pip). Rapporté à des distances de 25 à
+  100 pips, il ne départage pas les groupes.
+- **Confusion avec l'année** : 19 des 22 cassures du groupe élevé datent de 2015. Le groupe faible
+  vient surtout de 2020-2021. La volatilité ne peut pas être séparée ici de la période : ce qui
+  distingue les groupes peut tenir à 2015 autant qu'à la volatilité.
+- Les 5 refus pour taille minimale sont tous dans le groupe élevé (2015) : stop large, budget de
+  0,25 %.
+
+Cette étude porte sur EUR/USD seul, 66 cassures, et décrit l'échantillon. Elle ne désigne aucune
+meilleure paire, n'établit aucune rentabilité et ne justifie aucun changement de paramètre de S2.
