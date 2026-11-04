@@ -39,6 +39,7 @@
 - [ ] Fiches S2 et D1 (première vague)
 - [x] Fiche S3 (`docs/strategies/S3_SQUEEZE.md`) : ASSUMP-026 approuvée pour la recherche hors ligne (ADR-018, 2026-11-04)
 - [ ] S3 étape 1 : moteur hors ligne et tests synthétiques
+- [ ] Apprentissage par l'expérience (cahier v1.2, ADR-019) : exigence future, **non implémentée** ; développement sur décision distincte, après fixation du budget d'expériences et des périodes autorisées
 
 ### ✅ Terminé
 - [x] Revue externe du rapport historique et revue du code : classement des interruptions, purge limitée, vérifications ciblées, état connaissable à la clôture séparé de l'audit, ticks invalides, tests anti-fuite sur de vraies clôtures H1/H4/D1 (2026-10-30, PR #3)
