@@ -11,9 +11,12 @@ present with a decision line that is not computable (data, sheet §8), evaluable
 or evaluable with a breakout (not detailed at this step). Configurations abandoned for incomplete
 pullback data are counted apart, against the configurations identified, never added to the slots.
 
-Trajectory: without ticks there is never an open position, and a breakout the rules accept
-consumes its configuration as an entry decision would (no sizing). The configuration counts are
-those of this position-free trajectory; step 4 may differ where a position was open.
+Convention of this study only (the S2 performance engine is unchanged): a structural breakout
+is counted as soon as it is detected on evaluable data, and its threshold is consumed. If the
+required D1 trend still holds and the market is open at the decision, the configuration is
+consumed too; otherwise it is kept and the reason is logged. No reward/risk ratio, no size, no
+order and no quote: no tick is read, so there is never an open position. The effect of open
+positions on the counts of step 4 is unknown.
 """
 
 from __future__ import annotations
@@ -30,24 +33,43 @@ from typing import Any
 from forex_bot.backtest.data import load_bars, load_gaps
 from forex_bot.backtest.engine import DecisionRecord, EntryAction, ResearchConfig
 from forex_bot.backtest.explore import INSTRUMENT, RESEARCH_COSTS, SOURCE, _date, _peak_rss_mib, _provenance, _str
-from forex_bot.backtest.s1 import EntrySignal
-from forex_bot.backtest.s2 import S2Params
+from forex_bot.backtest.s2 import S2Params, Setup
 from forex_bot.backtest.s2_engine import S2Backtest
-from forex_bot.history.calendar import Timeframe, expected_open_hours
+from forex_bot.history.calendar import MarketState, Timeframe, expected_open_hours, market_state
+from forex_bot.risk import Side
 
 INCOMPLETE = "DONNÉES_REPLI_INCOMPLÈTES"
 ONE_HOUR = timedelta(hours=1)
 
 
+CONSUMED = "configuration consommée par convention de l'étude (ni rapport gain/risque, ni taille, ni ordre)"
+
+
 class AvailabilityBacktest(S2Backtest):
-    """S2 decisions without ticks: an accepted breakout consumes its configuration, nothing is sized."""
+    """S2 decisions without ticks; after a detected breakout, only the trend and the market are read."""
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self.abandons: list[tuple[datetime, datetime, str, bool]] = []  # (I, decision, reason, missing data)
+        self.consumed: list[tuple[datetime, datetime]] = []  # (I, decision)
+        self.kept: list[tuple[datetime, datetime, str]] = []  # (I, decision, reason): only the threshold consumed
 
-    def _size(self, decision: datetime, signal: EntrySignal, record: DecisionRecord) -> None:
-        record.entry_action = EntryAction.ENTRY_DECIDED  # consumes the configuration; no order exists
+    def _after_breakout(self, record: DecisionRecord, decision: datetime, setup: Setup, trend: Side | None) -> None:
+        if trend is not setup.side:
+            reason = "tendance D1 perdue à la cassure"
+        elif market_state(decision) is not MarketState.OPEN:
+            reason = f"{setup.side.value} : marché fermé à l'instant de décision"
+        else:
+            setup.used = True
+            setup.history.append(f"{decision.isoformat()} {CONSUMED}")
+            self._log(decision, "CONFIGURATION_CONSOMMÉE", CONSUMED)
+            record.entry_action = EntryAction.NOT_EVALUATED  # no entry is evaluated at this step
+            record.reasons.append(CONSUMED)
+            self.consumed.append((setup.identified_utc, decision))
+            self.setup = None
+            return
+        self.kept.append((setup.identified_utc, decision, reason))
+        self._refuse(record, decision, reason)  # the configuration stays, its threshold is consumed
 
     def _abandon(self, decision: datetime, reason: str, *, missing_data: bool = False) -> None:
         if self.setup is not None:
@@ -74,7 +96,7 @@ def slot_class(record: DecisionRecord) -> str:
         return "present_not_evaluable"
     if record.entry_action is EntryAction.NO_SIGNAL:
         return "evaluable_no_signal"
-    return "evaluable_breakout"  # a close beyond the threshold, whatever followed (not detailed here)
+    return "evaluable_breakout"  # a structural breakout detected on evaluable data
 
 
 def _ratio(part: int, whole: int) -> str | None:
@@ -98,8 +120,8 @@ def availability(
     by_start = {r.known["trigger_candle"]["start_utc"]: r for r in engine.decisions}
     latency = config.latency
 
-    years: dict[int, dict[str, Any]] = defaultdict(
-        lambda: {
+    def empty() -> dict[str, Any]:
+        return {
             "expected_slots": 0,
             "absent": 0,
             "present_not_evaluable": 0,
@@ -108,10 +130,13 @@ def availability(
             "not_evaluable_causes": Counter(),
             "present_outside_calendar": Counter(),
             "configurations_identified": 0,
+            "configurations_consumed": 0,
+            "configurations_kept_after_breakout": Counter(),
             "configurations_abandoned_incomplete_data": Counter(),
             "configurations_refused_atr": 0,
         }
-    )
+
+    years: dict[int, dict[str, Any]] = defaultdict(empty)
     details: list[dict[str, Any]] = []
     expected = [
         s for s in expected_open_hours(start - ONE_HOUR - latency, end) if start <= s + ONE_HOUR + latency < end
@@ -140,6 +165,10 @@ def availability(
 
     for setup in engine.setups:
         years[setup.identified_utc.year]["configurations_identified"] += 1
+    for identified, _ in engine.consumed:
+        years[identified.year]["configurations_consumed"] += 1
+    for identified, _, reason in engine.kept:
+        years[identified.year]["configurations_kept_after_breakout"][reason.split(" : ")[-1]] += 1
     for identified, decision, reason, data in engine.abandons:
         if not data:
             continue
@@ -178,6 +207,8 @@ def availability(
             },
             "configurations": {
                 "identified": identified,
+                "consumed_by_convention": counts["configurations_consumed"],
+                "kept_after_structural_refusal": dict(counts["configurations_kept_after_breakout"]),
                 "abandoned_incomplete_data": abandoned,
                 "pct_of_identified": _ratio(abandoned, identified),
                 "abandoned_incomplete_data_by_cause": dict(counts["configurations_abandoned_incomplete_data"]),
@@ -185,18 +216,7 @@ def availability(
             },
         }
 
-    total: dict[str, Any] = {
-        "expected_slots": 0,
-        "absent": 0,
-        "present_not_evaluable": 0,
-        "evaluable_no_signal": 0,
-        "evaluable_breakout": 0,
-        "not_evaluable_causes": Counter(),
-        "present_outside_calendar": Counter(),
-        "configurations_identified": 0,
-        "configurations_abandoned_incomplete_data": Counter(),
-        "configurations_refused_atr": 0,
-    }
+    total = empty()
     for counts in years.values():
         for key, value in counts.items():
             total[key] += value
