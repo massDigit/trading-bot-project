@@ -2,7 +2,8 @@
 
 > Identifiant code : `SWING_03`. Statut : **spécifiée, proposée** (cahier des charges §6.2, §6.6) ;
 > ni implémentée, ni évaluée. Règles et valeurs numériques **proposées** (ASSUMP-026), en attente
-> de la décision de l'opérateur. Valeurs choisies a priori, sans lecture de données ni
+> de la décision de l'opérateur ; sortie unique et réintégration journalisée décidées par
+> l'opérateur (ADR-017). Valeurs choisies a priori, sans lecture de données ni
 > optimisation ; aucune donnée 2022-2025. Ni validation de performance ni autorisation de trading.
 
 **Libellés.** Comme dans la fiche S2, **H4 et D1 désignent toujours des unités de temps**. Les
@@ -13,7 +14,7 @@ comme les scénarios H0 et H1 des rapports S1.
 - reconnaissance de la compression avant la cassure : §3 et §4.1 ;
 - bornes de consolidation et moment où elles sont figées : §4.1 et §4.2 ;
 - confirmation de la direction : §4.3 ;
-- sortie d'une fausse cassure : §5 ;
+- sortie d'une fausse cassure : §5 (sortie suiveuse ou stop ; réintégration journalisée) ;
 - apport par rapport à S1 : §2 et §9.
 
 ## 1. Hypothèse de marché et références
@@ -43,7 +44,7 @@ comme les scénarios H0 et H1 des rapports S1.
 
 S1 et S3 entrent toutes deux sur la clôture d'une H4 au-delà d'un extrême récent, dans le sens du
 contexte D1. Le cahier note qu'elles **peuvent partager des risques** (§6.6). S3 n'apporte quelque
-chose que si ses trois différences changent les transactions prises ou leur issue :
+chose que si ses différences changent les transactions prises ou leur issue :
 
 | | S1 — cassure Donchian | S3 — cassure après compression |
 |---|---|---|
@@ -52,13 +53,14 @@ chose que si ses trois différences changent les transactions prises ou leur iss
 | Confirmation | clôture au-delà du canal | clôture hors de la consolidation **et** hors de la bande de Bollinger, **avec** une largeur de bande en hausse (§4.3) |
 | Nombre de tentatives | tant que les clôtures franchissent le canal | **une seule cassure par consolidation** (la première clôture hors de la boîte la consomme) |
 | Stop | 2 × ATR H4 depuis la clôture du signal | **structurel** : au-delà de la borne opposée de la consolidation, plus 0,25 × `A` |
-| Sortie d'une fausse cassure | aucune règle propre : stop ou canal opposé de 10 H4 | **réintégration** : première clôture H4 revenue dans la consolidation (§5) |
-| Sortie d'une cassure qui tient | canal opposé de 10 H4 | **suiveuse** : clôture H4 de l'autre côté de la moyenne de Bollinger (20 H4) |
-| Profil attendu (non mesuré) | beaucoup de faux départs en marché latéral, gains longs | moins d'entrées ; faux départs coupés plus tôt ; gains longs si l'expansion dure |
+| Sortie de stratégie | canal opposé de 10 H4 | **une seule règle, suiveuse** : clôture H4 de l'autre côté de la moyenne de Bollinger (20 H4), qu'il s'agisse d'une fausse cassure ou d'une cassure qui se prolonge (§5) |
+| Réintégration de la consolidation | sans objet | **journalisée** (première clôture H4 revenue dans la boîte), **sans sortie** (§5) |
+| Profil attendu (non mesuré) | beaucoup de faux départs en marché latéral, gains longs | moins d'entrées ; une fausse cassure se termine à la moyenne ou au stop ; gains longs si l'expansion dure |
 
 **Ce que S3 doit démontrer**, mesuré à l'étape 4 (§9) :
 1. que ses entrées ne sont pas pour l'essentiel les mêmes que celles de S1 (même H4, même sens) ;
-2. que la sortie sur réintégration coupe les fausses cassures pour une perte inférieure au stop ;
+2. comment se terminent ses fausses cassures : à quel moment la boîte est réintégrée, puis par
+   quelle sortie (suiveuse ou stop) et pour quelle perte, en multiples du risque ;
 3. que les deux stratégies ne perdent pas en même temps.
 
 Si les entrées coïncident largement et que les pertes sont simultanées, S3 est **redondante**
@@ -193,8 +195,8 @@ rôle du contrôle de risque.
 | Expansion | `bid_close[h] > U(h)` et `W(h) > W(h − 1)` | `bid_close[h] < B(h)` et `W(h) > W(h − 1)` |
 | Contexte D1 | haussier | baissier |
 | Stop | `BL − 0,25 × A` (niveau bid) | `AH + 0,25 × A` (niveau ask) |
-| Réintégration | clôture H4 `bid_close ≤ BH` | clôture H4 `bid_close ≥ BL` |
-| Sortie suiveuse | clôture H4 `bid_close < M(t)` | clôture H4 `bid_close > M(t)` |
+| Sortie suiveuse (seule sortie de stratégie) | clôture H4 `bid_close < M(t)` | clôture H4 `bid_close > M(t)` |
+| Réintégration (journalisée, sans sortie) | première clôture H4 `bid_close ≤ BH` | première clôture H4 `bid_close ≥ BL` |
 | Exécution d'entrée | ask du premier tick après `D` | bid du premier tick après `D` |
 
 Asymétrie assumée, comme dans S2 (ADR-015) : la structure est mesurée sur la série bid ; le stop
@@ -206,20 +208,25 @@ d'une vente est placé au-dessus de l'extrême `ask_high` de la boîte (côté d
   - achat : `BL − b × A` ; vente : `AH + b × A` ; `b = 0,25` ;
   - stop garanti simulé, prime à son déclenchement (S1 §6, §10.5) ;
   - jamais élargi ni déplacé.
-- **Sortie sur réintégration** (fausse cassure) : à la disponibilité de toute H4 postérieure à
-  l'exécution dont `bid_close ≤ BH` (achat), la position est clôturée au marché au premier tick
-  strictement postérieur. Revenir dans la boîte, ou sur sa borne, invalide la cassure.
-  - La perte est alors en général inférieure à celle du stop : on sort près de `BH`, alors que le
-    stop est sous `BL`.
-  - Ce n'est pas garanti : une seule H4 peut traverser toute la boîte.
-- **Sortie suiveuse** (cassure qui tient) : à la disponibilité de toute H4 postérieure à
-  l'exécution dont `bid_close < M(t)` (achat), sortie au marché au premier tick strictement
-  postérieur.
-  - Juste après la cassure, `M` est en général à l'intérieur de la boîte, et la réintégration
-    joue avant.
-  - Quand l'expansion dure, `M` monte au-dessus de `BH` et devient la sortie active.
-- Les deux règles sont évaluées à chaque H4. Si les deux sont vraies, le motif journalisé est
-  `RÉINTÉGRATION`. Le stop garanti reste en place jusqu'à l'exécution de la sortie.
+- **Sortie suiveuse, seule règle de sortie de stratégie** (ADR-017) : à la disponibilité de toute
+  H4 postérieure à l'exécution dont `bid_close < M(t)` (achat), la position est clôturée au marché
+  au premier tick strictement postérieur (motif `SUIVEUSE`). La même règle s'applique quand la
+  cassure échoue et quand elle se prolonge :
+  - **cassure qui échoue** : juste après la cassure, `M` est en général près de la boîte ou à
+    l'intérieur (ce n'est pas garanti). Un retour du prix sous `M` clôt la position. Sinon, le
+    stop garanti la clôt ;
+  - **cassure qui se prolonge** : `M` monte avec les clôtures, dépasse `BH`, et suit le mouvement.
+  - La clôture de cassure est au-dessus de `U`, donc de `M` : la sortie suiveuse ne peut pas
+    être déclenchée par la bougie de cassure elle-même.
+- **Réintégration de la boîte : journalisée, sans sortie.** La première H4 postérieure à
+  l'exécution dont `bid_close ≤ BH` (achat), ou `bid_close ≥ BL` (vente), est enregistrée
+  **une seule fois par position** (`RÉINTÉGRATION`) :
+  - l'instant ;
+  - le nombre de H4 depuis l'exécution ;
+  - la clôture, `M` et le résultat latent à cet instant.
+  - La position n'est **pas** clôturée pour autant. Une version qui sortirait dès la
+    réintégration relève d'un protocole séparé (§11) ; elle n'est ni simulée ni rapportée ici.
+- Le stop garanti reste en place jusqu'à l'exécution de la sortie.
 - **Pas de cible, pas de sortie temporelle** : la sortie suiveuse limite la durée.
 - **Conservation nocturne et week-end** : une position passe les nuits (swing) et paie le
   financement de recherche. Elle est aussi conservée pendant la fermeture hebdomadaire, comme dans
@@ -229,8 +236,9 @@ d'une vente est placé au-dessus de l'extrême `ask_high` de la boîte (côté d
 - **Sortie non calculable** :
   - H4 non utilisable : la position est maintenue avec son stop (S1 §10), et la sortie est
     évaluée à la H4 utilisable suivante ;
-  - H4 utilisable mais `M(t)` non calculable (continuité rompue) : la réintégration est évaluée,
-    la sortie suiveuse non, et la ligne le journalise.
+  - H4 utilisable mais `M(t)` non calculable (continuité rompue) : la position est maintenue
+    avec son stop et la ligne le journalise. La sortie est évaluée à la première H4 dont `M` est
+    de nouveau calculable. La réintégration, qui ne dépend pas de `M`, reste journalisée.
 
 ## 6. Exécution et risque
 
@@ -258,8 +266,7 @@ n'est fait que si de tels cas existent.
 
 ### 6.4 Trous de cotation
 
-S3 n'a qu'une borne de prix, le stop : les sorties de réintégration et suiveuse se décident sur
-des clôtures. Pendant une interruption inexpliquée (S1 §10.5), seul un franchissement du stop
+S3 n'a qu'une borne de prix, le stop : la sortie suiveuse se décide sur des clôtures. Pendant une interruption inexpliquée (S1 §10.5), seul un franchissement du stop
 peut être non observable.
 - **Scénario A** (observé seulement) : la position continue, sauf si la première cotation après le
   trou est au-delà du stop.
@@ -286,8 +293,9 @@ mesuré par les dépassements au premier tick ; il n'est pas modélisé autremen
 | mer. 13 févr. 10:00 | H4 06-10 clôture à 1,1366 > `BH` : **cassure**, la boîte est consommée. `U` = 1,1358 et `W` passe de 0,0016 à 0,0021 : **expansion**. D1 du 12 févr. clôture à 1,1340, au-dessus du milieu de son canal de 55 D1 (1,1290) : contexte haussier. **Décision `D` = 10:00** | §4.3 |
 | mer. 13 févr. 10:00 | Dernier tick avant `D` : bid 1,1366, ask 1,1367. Stop = 1,1322 − 0,25 × 0,0012 = **1,1319**. Perte estimée = (1,1367 − 1,1319 + 0,00005) × 10 000 + 1,2 + 1,0 = 50,70 USD par contrat, soit 50,70 / 1,1366 × 1,005 = 44,83 €. Budget 5,00 € → **0,1 contrat** (4,48 €) | §6.2 |
 | mer. 13 févr. 10:00:00,2 | Premier tick après `D` : **achat à l'ask 1,1368** | §6.1 |
-| *Suite 1, fausse cassure* : mer. 13 févr. 14:00 | H4 10-14 clôture à 1,1349 ≤ `BH` : **réintégration**. Sortie au premier tick après 14:00, bid 1,1348. Environ −20 pips de prix, contre −49 pips au stop | §5 |
-| *Suite 2, cassure qui tient* | Les clôtures restent au-dessus de `BH` et de `M` ; `M` dépasse `BH` le 15 févr. La première H4 qui clôture sous `M` déclenche la **sortie suiveuse** | §5 |
+| *Suite 1, fausse cassure* : mer. 13 févr. 14:00 | H4 10-14 clôture à 1,1349 ≤ `BH` : **première réintégration journalisée** (1 H4 après l'exécution). `M` = 1,1338 : la clôture reste au-dessus, **pas de sortie** | §5 |
+| *Suite 1* : mer. 13 févr. 18:00 | H4 14-18 clôture à 1,1333 < `M` = 1,1339 : **sortie suiveuse**. Sortie au premier tick après 18:00, bid 1,1332. Environ −36 pips de prix, contre −49 pips au stop | §5 |
+| *Suite 2, cassure qui se prolonge* | Les clôtures restent au-dessus de `M` ; aucune ne revient dans la boîte, donc aucune réintégration n'est journalisée. `M` dépasse `BH` le 15 févr. et suit le mouvement. La première H4 qui clôture sous `M` déclenche la **sortie suiveuse** | §5 |
 
 ## 8. Abstentions (première cause journalisée)
 
@@ -313,6 +321,7 @@ Le journal garde une ligne par décision H4, avec seulement ce qui était connu 
 - H4 comprimées consécutives ;
 - boîte (`F`, `BH`, `BL`, `AH`, `A`, H4 restantes) ;
 - bandes, contexte D1, cotation, compte, position ;
+- pour une position ouverte : réintégration déjà survenue ou non, et son instant ;
 - l'action décidée, sans résultat ultérieur (comme S1 et S2).
 
 ## 9. Protocole de test et lecture des résultats
@@ -328,9 +337,11 @@ Le journal garde une ligne par décision H4, avec seulement ce qui était connu 
 - abandon pour H4 manquante ; expiration à la 30e H4 ;
 - une cassure par boîte ; refus sans expansion ; refus sur contexte D1 contraire ;
 - cassure pendant une position ;
-- stop structurel ; sorties sur réintégration et suiveuse, avec priorité du motif ;
-- sortie non calculable ; vente symétrique ;
-- exemple du §7 reproduit ;
+- stop structurel ; sortie suiveuse, seule règle de sortie, impossible sur la bougie de cassure ;
+- première réintégration journalisée une seule fois par position, **sans sortie** ; aucune
+  réintégration journalisée quand les clôtures restent hors de la boîte ;
+- sortie non calculable (H4 non utilisable, `M` non calculable) ; vente symétrique ;
+- exemple du §7 reproduit, ses deux suites ;
 - premier prix au-delà du stop ; scénarios A et B.
 
 **Étape 2 — non-régression de S1** : si le moteur S1 est partagé ou modifié, rejeu de la référence
@@ -355,10 +366,14 @@ trajectoire continue, 2 000 €, 0,25 %, minimum et pas de 0,1, mêmes coûts.
 - **parcours** : H4 comprimées → boîtes reconnues (refusées trop larges, abandonnées pour données,
   expirées sans cassure) → cassures → refus (position ouverte, expansion, contexte D1, marché,
   taille) → entrées décidées → positions effectivement ouvertes ;
-- transactions ; brut, coûts, net ; sorties par motif (stop, réintégration, suiveuse) ;
-  globalement et par année ;
-- **part des fausses cassures** (sorties sur réintégration) et leur perte moyenne en multiples du
-  risque, comparée à celle des stops ;
+- transactions ; brut, coûts, net ; sorties par motif (stop, suiveuse) ; globalement et par
+  année ;
+- **réintégrations** (description seulement) :
+  - nombre de positions dont la boîte a été réintégrée ;
+  - délai en H4 depuis l'exécution ;
+  - sortie qui a suivi (suiveuse ou stop) et résultat en multiples du risque, à comparer aux
+    positions sans réintégration.
+  - Aucune sortie à la réintégration n'est simulée ; ce serait une autre version (§11) ;
 - drawdown au tick en euros, **véritable drawdown relatif maximal**, premier franchissement de 6 %,
   durée de récupération ;
 - net sans la meilleure transaction ; transactions indéterminées ; dépassements du budget ;
@@ -404,7 +419,8 @@ entraînement ; aucun ordre ; le sélecteur IA n'est pas concerné.
 | Expansion | clôture hors bande et `W(h) > W(h − 1)` | confirmation de la cassure |
 | Contexte D1 | milieu du canal de 55 D1 (S1) | sens admis |
 | `b` | 0,25 × `A` | marge du stop au-delà de la borne opposée |
-| Sorties | réintégration (`bid_close ≤ BH`), suiveuse (`bid_close < M`) | fausse cassure, cassure qui tient |
+| Sortie de stratégie | suiveuse : clôture H4 sous `M` (achat), au-dessus de `M` (vente) | seule règle, fausse cassure comme cassure qui se prolonge ; stop garanti en protection |
+| Réintégration | première clôture H4 revenue dans la boîte | journalisée, sans sortie |
 
 **Raisons des valeurs** (a priori, aucune mesurée) :
 - **Bandes** : 20 périodes et 2 écarts types sont les réglages usuels de Bollinger.
@@ -421,26 +437,27 @@ entraînement ; aucun ordre ; le sélecteur IA n'est pas concerné.
 
 **Domaine de recherche** (cahier §6.6) : **aucun** dans ce lot. Une seule valeur par paramètre,
 sans grille ni optimisation. Le test de sensibilité autour des valeurs choisies, prévu par le
-cahier (§9), n'est pas inclus ; il demanderait un protocole et une décision distincts (§11).
+cahier (§9), n'est pas inclus : il relève d'un protocole distinct (ADR-017, §11).
 
-## 11. Points soumis à la décision de l'opérateur
+## 11. Décisions de l'opérateur et points ouverts
 
-1. Valeurs du §10 (ASSUMP-026).
-2. **Contexte D1 dans la référence** et H4 seule en comparaison secondaire. L'ordre inverse est
-   possible, mais la référence suivrait alors l'unité unique, alors que le cahier prévoit D1 → H4.
-3. **Une seule cassure par boîte**, sans seconde entrée de l'autre côté après une fausse cassure.
-4. **Ni cible, ni sortie temporelle** : la sortie suiveuse limite la durée.
-5. **Aucun filtre d'annonces** tant qu'aucun calendrier n'est validé (§6.4).
-6. Réintégration jugée sur la **clôture** H4, pas sur un prix intra-bougie : la sortie attend la
-   fin de la H4, et le stop reste la seule protection en cours de bougie.
-7. **Deux sorties dans une même version.** Le cahier (§6.2) prévoit une « sortie suiveuse ou
-   sortie sur réintégration selon la version testée », donc plutôt deux versions. Pour une seule
-   version de référence, la fiche les combine : la réintégration traite la fausse cassure, la
-   suiveuse la cassure qui tient. Leur apport respectif ne sera donc pas mesuré séparément. Les
-   séparer demanderait deux versions pré-enregistrées.
-8. **Sensibilité aux paramètres** (cahier §9) : non incluse dans la référence ; à décider plus
-   tard, avec son propre protocole, sans réglage d'après les résultats.
+**Décidé le 2026-11-04 (ADR-017)** :
+1. **Sortie unique** : la première référence n'a qu'une règle de sortie de stratégie, la sortie
+   suiveuse sur `M`, plus le stop garanti de protection. Cela résout l'écart avec le cahier
+   (§6.2 : « sortie suiveuse ou sortie sur réintégration selon la version testée ») : cette
+   référence est la version « sortie suiveuse ».
+2. **Réintégration journalisée** sans sortie. Une version qui sortirait dès la réintégration
+   pourra faire l'objet d'un **protocole séparé**.
+3. **Sensibilité aux paramètres** (cahier §9) : protocole distinct ; ni grille ni optimisation.
+4. **D1 → H4** reste la référence, **H4 sans filtre D1** la comparaison secondaire.
+5. **Une seule tentative par boîte**, sans seconde entrée après une fausse cassure.
 
-Hors de cette version : sortie à objectif (projection de la hauteur), filtre de volume (pas de
+**Encore soumis à décision avant de figer ASSUMP-026** :
+1. Valeurs du §10.
+2. **Ni cible, ni sortie temporelle** : la sortie suiveuse limite la durée.
+3. **Aucun filtre d'annonces** tant qu'aucun calendrier n'est validé (§6.4).
+
+Hors de cette version : sortie à la réintégration (protocole séparé), sortie à objectif
+(projection de la hauteur), filtre de volume (pas de
 volume fiable sur le Forex de gré à gré), seconde entrée après une fausse cassure, déclenchement
 sur une unité plus fine.
