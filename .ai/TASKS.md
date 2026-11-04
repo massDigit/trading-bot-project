@@ -19,7 +19,7 @@
 - [x] S2 étape 2 : rejeu de non-régression S1 sur avril-juin 2019 sur `7b9a1f1` : transactions, solde (1 992,04 €) et journal identiques à la référence (2026-11-03)
 - [x] S2 étape 3 : disponibilité des données 2015-2021 (`docs/experiments/S2_AVAILABILITY_2015_2021.md`, 2026-11-04)
 - [x] S2 étape 4 : passages pré-enregistrés 2015-2021, H1-A et H4-A ; bilan `docs/experiments/S2_REFERENCE_2015_2021_BILAN.md` validé (ADR-016) : étudiée, résultats insuffisants pour conclure
-- [x] Étude descriptive de volatilité S2 sur les 66 cassures H1 (`docs/experiments/S2_VOLATILITY_2015_2021.md`, méthode figée avant calcul) : les observations ne permettent pas de trancher
+- [x] Étude descriptive de volatilité S2 sur les 66 cassures H1 (`docs/experiments/S2_VOLATILITY_2015_2021.md`, méthode figée avant calcul) : validée (ADR-017), rapport cible/stop sans amélioration régulière avec la volatilité
 - [ ] Fermetures particulières (jours fériés, fermetures anticipées) : rechercher une source applicable, en parallèle ; sans preuve, le classement actuel est conservé (ASSUMP-016)
 
 ### 📋 A Faire

@@ -1,6 +1,7 @@
 # S2 — Étude descriptive : volatilité à la décision et distances cible / stop (EUR/USD 2015-2021)
 
-**Statut** : méthode figée le 2026-11-04, **avant tout calcul**, à la demande de l'opérateur.
+**Statut** : méthode figée le 2026-11-04, **avant tout calcul**, à la demande de l'opérateur ;
+résultats **validés par l'opérateur** le 2026-11-04 (ADR-017, conclusion retenue au §10).
 Étude descriptive sur des sorties existantes ; ni backtest de performance, ni modification de
 S2, ni entraînement, ni optimisation, ni lecture de 2022-2025. Elle porte sur EUR/USD seul : elle
 ne peut ni désigner une meilleure paire, ni établir une rentabilité.
@@ -162,3 +163,11 @@ Ce que montrent les chiffres, sans plus :
 
 Cette étude porte sur EUR/USD seul, 66 cassures, et décrit l'échantillon. Elle ne désigne aucune
 meilleure paire, n'établit aucune rentabilité et ne justifie aucun changement de paramètre de S2.
+
+## 10. Conclusion retenue par l'opérateur (ADR-017)
+
+« Sur les 66 cassures EUR/USD étudiées, la cible et le stop sont plus éloignés dans le groupe le
+plus volatil, mais le rapport cible/stop ne s'améliore pas de façon régulière. »
+
+Cela ne prouve ni que la volatilité est sans effet, ni qu'une autre paire serait préférable. S2
+reste inchangée ; aucun autre calcul S2 n'est demandé.

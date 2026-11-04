@@ -97,7 +97,6 @@ décisions identique octet pour octet) ; 194 s, 175 Mio. Étape 3 rejouée aprè
 
 ## 🔄 En Cours
 - [ ] Fiche S3 (cassure après compression de volatilité) : rédaction, sans implémentation
-- [ ] Étude descriptive de volatilité S2 (`docs/experiments/S2_VOLATILITY_2015_2021.md`) : à valider par l'opérateur ; « les observations ne permettent pas de trancher », groupe le plus volatil confondu avec 2015
 - [ ] Recherche d'une source applicable pour les fermetures particulières (non bloquante)
 - [ ] Demande au support IG préparée, non envoyée (`docs/IG_SUPPORT_REQUEST.md`)
 
