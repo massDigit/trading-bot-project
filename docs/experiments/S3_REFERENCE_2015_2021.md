@@ -99,6 +99,12 @@ générique, sans nombre attendu, accepte de petits jeux synthétiques.
 décision qui a enregistré sa cassure, par `F`, instant et sens ; une boîte sans décision, ou une
 décision de cassure sans boîte, est une anomalie.
 
+**Unicité** (vérifiée avant tout rapprochement) : une seule décision de cassure par boîte
+consommée (`controls.breakouts.duplicates`) ; une seule entrée décidée par instant de décision et
+au plus une transaction par entrée décidée, position ouverte à la fin comprise
+(`controls.entries.duplicates`) ; toute transaction vient d'une entrée décidée. Un doublon est
+rapporté avec son identifiant et son nombre d'occurrences, et bloque comme une boîte manquante.
+
 Si un contrôle échoue (boîtes, cassures, ou entrées du §6), le rapport ne contient **aucun
 résultat de performance** (ni transactions, ni parcours, ni journal des décisions écrit), seulement
 les contrôles, et la commande s'arrête avec le code 2.

@@ -276,28 +276,54 @@ def reconcile_boxes(step3: list[dict[str, Any]], boxes: list[Box], expected_coun
     }
 
 
+def duplicates(keys: Iterable[Any]) -> list[dict[str, Any]]:
+    """Identifiers seen more than once, with their number of occurrences (checked before any dict is built)."""
+    return [{"id": str(key), "occurrences": n} for key, n in sorted(Counter(keys).items(), key=str) if n > 1]
+
+
 def reconcile_breakouts(result: S3Result) -> dict[str, Any]:
-    """Each box consumed by a breakout against the decision that recorded it: same F, instant and side."""
-    signals = {
-        (r.decision_utc.isoformat(), _text(r.signal["box"]["F"]), str(r.signal["side"])): r
+    """Each box consumed by a breakout against the single decision that recorded it: same F, instant and side."""
+    signal_keys = [
+        (r.decision_utc.isoformat(), _text(r.signal["box"]["F"]), str(r.signal["side"]))
         for r in result.decisions
         if r.signal is not None
-    }
-    consumed = {}
+    ]
+    consumed_keys = []
     for box in result.boxes:
         reason = box.end_reason or ""
         if reason.startswith("consommée par la cassure "):
-            side = reason.rsplit(" ", 1)[1]
-            consumed[(_text(box.ended_utc), _text(box.formed_utc), side)] = box
-    unmatched_boxes = sorted(str(k) for k in consumed.keys() - signals.keys())
-    unmatched_breakouts = sorted(str(k) for k in signals.keys() - consumed.keys())
+            consumed_keys.append((_text(box.ended_utc), _text(box.formed_utc), reason.rsplit(" ", 1)[1]))
+    repeated = {
+        "breakout_decisions_per_box": duplicates(f for _, f, _ in signal_keys),  # one breakout per box
+        "breakout_decisions": duplicates(signal_keys),
+        "consumed_boxes": duplicates(f for _, f, _ in consumed_keys),
+    }
+    signals, consumed = set(signal_keys), set(consumed_keys)
+    unmatched_boxes = sorted(str(k) for k in consumed - signals)
+    unmatched_breakouts = sorted(str(k) for k in signals - consumed)
     return {
-        "boxes_consumed": len(consumed),
-        "breakout_decisions": len(signals),
-        "matched": len(consumed.keys() & signals.keys()),
+        "boxes_consumed": len(consumed_keys),
+        "breakout_decisions": len(signal_keys),
+        "matched": len(consumed & signals),
         "boxes_without_breakout_decision": unmatched_boxes,
         "breakout_decisions_without_box": unmatched_breakouts,
-        "ok": not unmatched_boxes and not unmatched_breakouts,
+        "duplicates": repeated,
+        "ok": not unmatched_boxes and not unmatched_breakouts and not any(repeated.values()),
+    }
+
+
+def reconcile_entries(result: S3Result) -> dict[str, Any]:
+    """One decided entry per decision instant and at most one trade per decided entry, open trade included."""
+    decided = [r.decision_utc for r in result.decisions if r.entry_action is EntryAction.ENTRY_DECIDED]
+    trades = [t.decided_utc for t in _all_trades(result)]
+    repeated = {"decided_entries": duplicates(decided), "trades_per_entry": duplicates(trades)}
+    orphans = sorted(str(t) for t in set(trades) - set(decided))
+    return {
+        "entries_decided": len(decided),
+        "trades": len(trades),
+        "duplicates": repeated,
+        "trades_without_decided_entry": orphans,
+        "ok": not any(repeated.values()) and not orphans,
     }
 
 
@@ -656,6 +682,7 @@ def controls(
     return {
         "boxes": reconcile_boxes(step3, result.boxes, expected_count),
         "breakouts": reconcile_breakouts(result),
+        "entries": reconcile_entries(result),
         "funnel": entries,
     }
 

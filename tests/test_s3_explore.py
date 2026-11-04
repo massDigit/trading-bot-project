@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal as D
 from typing import Any
@@ -29,6 +30,7 @@ from forex_bot.backtest.s3_explore import (
     gated_report,
     reconcile_boxes,
     reconcile_breakouts,
+    reconcile_entries,
     returns_to_box,
     s1_signals,
     scenario_triggers,
@@ -376,3 +378,43 @@ def test_the_yearly_drawdown_starts_at_the_equity_of_the_first_tick_of_the_year(
     assert year.max_drawdown_eur == 10  # 1995 -> 1985; from December's 2000 it would be 15
     assert overall.max_drawdown_eur == 15  # the global drawdown stays continuous
     assert yearly.years[2015].max_drawdown_eur == 0
+
+
+# ---------------------------------------------------------------- duplicates hidden by dictionaries
+
+
+def test_the_intact_single_entry_scenario_passes_every_control(tool: Tool) -> None:
+    result, run = tool(SUITE_1)
+    checks = controls(result, run.entry_events, _rows(result.boxes), None)
+    assert all(check["ok"] for check in checks.values())
+    assert checks["entries"]["entries_decided"] == checks["entries"]["trades"] == 1
+    assert set(gated_report(checks, {}, lambda: {"ok": True})) == {"controls", "scenario_triggers", "result"}
+
+
+def test_a_duplicated_breakout_decision_is_reported_and_blocks(tool: Tool) -> None:
+    result, run = tool(SUITE_1)
+    breakout = next(r for r in result.decisions if r.signal is not None)
+    result.decisions.append(replace(breakout))  # two decided entries for one trade
+    checks = controls(result, run.entry_events, _rows(result.boxes), None)
+    (box,) = checks["breakouts"]["duplicates"]["breakout_decisions_per_box"]
+    assert box == {"id": at(5).isoformat(), "occurrences": 2} and not checks["breakouts"]["ok"]
+    (entry,) = checks["entries"]["duplicates"]["decided_entries"]
+    assert entry == {"id": str(at(8)), "occurrences": 2} and not checks["entries"]["ok"]
+    assert set(gated_report(checks, {}, never)) == {"anomaly", "controls"}
+
+
+def test_a_duplicated_trade_is_reported_and_blocks(tool: Tool) -> None:
+    result, run = tool(SUITE_1)
+    result.trades.append(result.trades[0])  # two trades for one decided entry
+    checks = controls(result, run.entry_events, _rows(result.boxes), None)
+    assert checks["breakouts"]["ok"]
+    (trade,) = checks["entries"]["duplicates"]["trades_per_entry"]
+    assert trade == {"id": str(at(8)), "occurrences": 2} and not checks["entries"]["ok"]
+    assert set(gated_report(checks, {}, never)) == {"anomaly", "controls"}
+
+
+def test_a_closed_trade_and_the_open_trade_of_the_same_entry_are_a_duplicate(tool: Tool) -> None:
+    result, _ = tool(SUITE_1)
+    result.open_trade = replace(result.trades[0], exit_utc=None)
+    check = reconcile_entries(result)
+    assert check["duplicates"]["trades_per_entry"] == [{"id": str(at(8)), "occurrences": 2}] and not check["ok"]
