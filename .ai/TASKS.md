@@ -40,7 +40,8 @@
 - [x] Fiche S3 (`docs/strategies/S3_SQUEEZE.md`) : ASSUMP-026 approuvée pour la recherche hors ligne (ADR-018, 2026-11-04)
 - [x] S3 étape 1 : moteur hors ligne et 28 tests synthétiques (PR #13, `51f1507`, 2026-11-04)
 - [x] S3 étape 2 : rejeu de non-régression S1 sur avril-juin 2019 sur `51f1507` : 6 transactions, solde (1 992,04 €) et journal des 390 décisions identiques à la référence (2026-11-04)
-- [ ] S3 étape 3 : disponibilité des données 2015-2021 sur `1be93fd` (`docs/experiments/S3_AVAILABILITY_2015_2021.md`, 2026-11-04), en revue
+- [x] S3 étape 3 : disponibilité des données 2015-2021 sur `1be93fd` (`docs/experiments/S3_AVAILABILITY_2015_2021.md`, PR #15, 2026-11-04), close
+- [x] S3 étape 4 : outil `forex-s3-backtest`, protocole figé et passages A 2015-2021 sur `15d2c83` (PR #16, 2026-11-04) ; bilan `docs/experiments/S3_REFERENCE_2015_2021_BILAN.md` validé (ADR-020)
 - [ ] Apprentissage par l'expérience (cahier v1.2, ADR-019) : exigence future, **non implémentée** ; développement sur décision distincte, après fixation du budget d'expériences et des périodes autorisées
 
 ### ✅ Terminé
