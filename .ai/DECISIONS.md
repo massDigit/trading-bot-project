@@ -143,3 +143,12 @@
 - **Source** : message de l'opérateur du 2026-11-04, après le bilan `docs/experiments/S2_REFERENCE_2015_2021_BILAN.md` (PR #9, `f71a1ac`).
 - **Décision** : le bilan de l'étape 4 est validé. H1 reste la référence de S2, H4 la comparaison préenregistrée. Statut de S2 : **étudiée sur la partition de développement, résultats insuffisants pour conclure** (7 transactions, net dépendant d'une seule). Aucun paramètre n'est modifié ; B, C et le rejet à l'exécution ne sont pas lancés, leurs conditions (§4 du protocole) n'étant pas réunies. Avant fusion, le compteur annuel des cassures S2 suit la définition du compteur global, sans modification du rapport S1.
 - **Suite autorisée** : fusion de la PR #9 après vérification, puis rédaction de la fiche S3 (cassure après compression de volatilité) depuis `main`, fiche seulement : ni implémentation, ni optimisation, ni entraînement, ni lecture de 2022-2025, ni ordre.
+
+### ADR-017 : Étude descriptive de volatilité S2 validée ; sortie unique de la référence S3
+- **Date** : 2026-11-04
+- **Statut** : `ACCEPTED` (décision de l'opérateur)
+- **Source** : message de l'opérateur du 2026-11-04, après l'étude `docs/experiments/S2_VOLATILITY_2015_2021.md` (PR #11).
+- **Décision** :
+  1. L'étude est validée ; S2 reste inchangée et aucun autre calcul S2 n'est demandé. Conclusion retenue : « Sur les 66 cassures EUR/USD étudiées, la cible et le stop sont plus éloignés dans le groupe le plus volatil, mais le rapport cible/stop ne s'améliore pas de façon régulière. » Elle ne prouve ni que la volatilité est sans effet, ni qu'une autre paire serait préférable.
+  2. Fiche S3 (PR #10), première référence : une seule règle de sortie de stratégie, la sortie suiveuse sur clôture H4 de l'autre côté de la moyenne de Bollinger, en plus du stop garanti de protection. La première réintégration de la boîte est journalisée sans déclencher de sortie ; une version sortant à la réintégration relèverait d'un protocole séparé, comme le test de sensibilité (ni grille ni optimisation). D1 → H4 reste la référence, H4 sans filtre D1 la comparaison, une seule tentative par boîte.
+- **Portée** : documentation seulement ; ASSUMP-026 reste `PROPOSED` jusqu'à revue du diff de la fiche. Aucune implémentation S3, aucun backtest, aucune donnée 2022-2025.
