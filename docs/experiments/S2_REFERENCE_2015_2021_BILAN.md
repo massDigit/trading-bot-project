@@ -3,7 +3,8 @@
 **Statut** : passages du 2026-11-04, autorisés par l'opérateur (fiche S2 §9, étape 4), selon le
 protocole `docs/experiments/S2_REFERENCE_2015_2021.md` figé et poussé avant tout lancement
 (commit `c35d565`). Aucun paramètre modifié après lecture des résultats. Ni validation de
-performance, ni autorisation de trading. Bilan non figé avant la revue de l'opérateur.
+performance, ni autorisation de trading. **Bilan validé par l'opérateur le 2026-11-04 (ADR-016)** :
+S2 est étudiée sur la partition de développement, résultats insuffisants pour conclure.
 
 ## 1. Provenance et passages lancés
 
@@ -15,6 +16,12 @@ performance, ni autorisation de trading. Bilan non figé avant la revue de l'op�
   de qualité, 2 557 fichiers de ticks, 195 559 278 ticks, tous dans [2015-01-01, 2022-01-01).
   H1 : 5 465 s, 367 Mio ; H4 : 5 358 s, 343 Mio. Sorties et journaux hors Git
   (`data/reports/backtests/s2_ref_2015_2021_<h1|h4>_a*`).
+- **Compteur annuel des cassures** : aligné après le bilan sur la définition de l'entonnoir (toute
+  ligne avec une cassure détectée, y compris non évaluable ou pendant une position). Le compteur
+  repris du rapport S1 ne comptait que les entrées décidées ou refusées. Vérifié sur les journaux
+  locaux, sans nouveau passage : les totaux annuels sont inchangés (H1 20, 3, 14, 6, 3, 9, 11 = 66 ;
+  H4 1, 0, 2, 0, 0, 0, 0 = 3), aucune cassure de ces passages n'étant non évaluable ou pendant
+  une position.
 
 **Conditions du §4 du protocole, évaluées sur les passages A :**
 
