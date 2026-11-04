@@ -1,7 +1,7 @@
 # CONTEXT.md - Mémoire Stable & Identité du Projet
 
 > **Ce fichier définit ce QU'EST le projet. Il reste stable dans le temps et ne contient pas le suivi des tâches quotidiennes.**
-> Référence : `Cahier_des_charges_Robot_Forex_V1.md` v1.1 (27/10/2026, hors dépôt).
+> Référence : `Cahier_des_charges_Robot_Forex_V1.md` v1.2 (04/11/2026, hors dépôt ; v1.1 du 27/10/2026).
 
 ## 🎯 Vision du Produit
 Robot de trading Forex adaptatif : analyse du contexte de marché, sélection d'une stratégie
