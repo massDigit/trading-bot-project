@@ -154,11 +154,12 @@ def select_files(
             continue
         if p_start < start or p_end > end:
             raise ValueError(f"fichier à cheval sur la fenêtre ({p_start.isoformat()} - {p_end.isoformat()})")
-        path = store.ticks_dir(source, instrument) / f"{manifest['entry']}.parquet"
+        entry = manifest.get("entry", manifest["sha256"])  # older manifests name the file by digest
+        path = store.ticks_dir(source, instrument) / f"{entry}.parquet"
         if not path.is_file():
-            raise FileNotFoundError(f"fichier normalisé absent pour {manifest['entry'][:12]}")
+            raise FileNotFoundError(f"fichier normalisé absent pour {entry[:12]}")
         rows = int((pq.read_schema(path).metadata or {})[b"rows"])
-        selected.append(SelectedFile(manifest["entry"], path, p_start, p_end, rows))
+        selected.append(SelectedFile(entry, path, p_start, p_end, rows))
     if not selected:
         raise FileNotFoundError("aucun fichier de ticks dans la fenêtre")
     return sorted(selected, key=lambda f: f.period_start_utc)

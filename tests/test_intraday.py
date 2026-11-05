@@ -347,3 +347,18 @@ def test_gaps_follow_the_reader_convention(tmp_path: Path) -> None:
 
     store = _day_store(tmp_path)
     assert build(store).gaps == summarize_ticks(store, "dukascopy", "EURUSD").gaps
+
+
+def test_older_manifest_without_entry_names_the_file_by_digest(tmp_path: Path) -> None:
+    import json
+
+    store = store_with(
+        tmp_path, "s", [(every_minute(utc(2019, 3, 7, 10), utc(2019, 3, 7, 11)), utc(2019, 3, 7), utc(2019, 3, 8))]
+    )
+    (manifest_path,) = store.raw_dir("dukascopy", "EURUSD").glob("*.json")
+    manifest = json.loads(manifest_path.read_text())
+    del manifest["entry"]
+    manifest_path.chmod(0o644)
+    manifest_path.write_text(json.dumps(manifest))
+    (selected,) = select_files(store, "dukascopy", "EURUSD", WINDOW_START, WINDOW_END)
+    assert selected.entry == manifest["sha256"] and selected.rows == 60
