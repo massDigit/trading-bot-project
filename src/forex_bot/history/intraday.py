@@ -47,6 +47,22 @@ WINDOW_END = datetime(2022, 1, 1, tzinfo=UTC)
 # is decided by the operator after the audit, before any DAY_01 engine.
 PROVISIONAL_AUDIT_SILENCE = DEFAULT_GAP_THRESHOLD
 
+
+@dataclass(frozen=True)
+class QualityConvention:
+    """Research convention for the status of M5/M15 candles; never changes prices or tick files."""
+
+    name: str
+    threshold: timedelta  # a silence is an interruption if strictly longer, in expected-open time
+    empty_subslot_not_ok: bool  # an M15 with an expected M5 sub-slot without valid tick is not OK
+
+
+# First audit (protocol §6), kept as the comparison reference.
+REFERENCE_10MIN = QualityConvention("ref_10min", PROVISIONAL_AUDIT_SILENCE, empty_subslot_not_ok=False)
+# Operator decision of 2026-11-05 for DAY_01 (protocol §9, ASSUMP-028).
+DAY01_5MIN = QualityConvention("day01_5min", timedelta(minutes=5), empty_subslot_not_ok=True)
+CONVENTIONS = {c.name: c for c in (REFERENCE_10MIN, DAY01_5MIN)}
+
 US_PER_MINUTE = 60_000_000
 
 
@@ -117,7 +133,7 @@ class Silence:
 @dataclass
 class IntradayBuild:
     window: tuple[datetime, datetime]
-    threshold: timedelta
+    convention: QualityConvention
     files: list[SelectedFile]
     coverage: list[tuple[datetime, datetime]]
     ticks: dict[str, int]
@@ -126,6 +142,10 @@ class IntradayBuild:
     short_intervals: dict[str, int]  # counts of intervals between consecutive valid ticks <= 60 s
     out_of_order_ts: list[datetime]
     bars: dict[Grid, list[dict[str, Any]]] = field(default_factory=dict)
+
+    @property
+    def threshold(self) -> timedelta:
+        return self.convention.threshold
 
 
 def _utc(epoch_us: int) -> datetime:
@@ -377,8 +397,13 @@ def _covered(start: datetime, end: datetime, coverage: list[tuple[datetime, date
     return any(c_start <= start and end <= c_end for c_start, c_end in coverage)
 
 
-def _is_complete(flags: list[str]) -> bool:
-    return not any(marker in flag for flag in flags for marker in INTRADAY_INCOMPLETE_MARKERS)
+def _is_complete(flags: list[str], convention: QualityConvention) -> bool:
+    markers = (
+        (*INTRADAY_INCOMPLETE_MARKERS, SUBSLOTS_FLAG)
+        if convention.empty_subslot_not_ok
+        else INTRADAY_INCOMPLETE_MARKERS
+    )
+    return not any(marker in flag for flag in flags for marker in markers)
 
 
 def _finish(
@@ -386,9 +411,10 @@ def _finish(
     grid: Grid,
     coverage: list[tuple[datetime, datetime]],
     gaps: _GapLookup,
-    threshold: timedelta,
+    convention: QualityConvention,
 ) -> None:
     """Retrospective and close-time statuses, both from this candle's own ticks and the tick gaps."""
+    threshold = convention.threshold
     start, end = bar["start_utc"], bar["end_utc"]
     state = market_state(start)
     bar["expected_open"] = state is MarketState.OPEN
@@ -403,7 +429,7 @@ def _finish(
         common.append(NO_TICK)
     elif bar["content"] is Content.INVALID_ONLY:
         common.append(NO_VALID_TICK)
-    gap_flag = f"trou de cotation > {int(threshold.total_seconds() // 60)} min pendant l'ouverture prévue"
+    gap_flag = f"trou de cotation > {threshold.total_seconds() / 60:g} min pendant l'ouverture prévue"
     invalid = [f"{bar['excluded_ticks']} tick(s) invalides exclus"] if bar["excluded_ticks"] else []
     info = []
     if grid is Grid.M15 and bar["expected_open"] and bar["valid_m5_subslots"] < 3:
@@ -413,8 +439,8 @@ def _finish(
     known = overlaps_gap(start, end, near, threshold, known_until=end)
     bar["flags"] = common + ([gap_flag] if retro else []) + invalid + info
     bar["flags_at_close"] = common + ([gap_flag] if known else []) + invalid + info
-    bar["complete"] = _is_complete(bar["flags"])
-    bar["complete_at_close"] = _is_complete(bar["flags_at_close"])
+    bar["complete"] = _is_complete(bar["flags"], convention)
+    bar["complete_at_close"] = _is_complete(bar["flags_at_close"], convention)
 
 
 def build_intraday(
@@ -423,26 +449,68 @@ def build_intraday(
     instrument: str,
     start: datetime = WINDOW_START,
     end: datetime = WINDOW_END,
-    threshold: timedelta = PROVISIONAL_AUDIT_SILENCE,
+    convention: QualityConvention = REFERENCE_10MIN,
 ) -> IntradayBuild:
-    files = select_files(store, source, instrument, start, end)
-    coverage = _coverage(files)
-    con = _connect(store, files, start, end)
-    ticks, disorder = _tick_counts(con)
-    gaps, silences, short = _intervals(con, coverage, threshold)
-    lookup = _GapLookup(gaps)
-    build = IntradayBuild((start, end), threshold, files, coverage, ticks, gaps, silences, short, disorder)
+    build, con = _prepare(store, source, instrument, start, end, convention)
+    lookup = _GapLookup(build.gaps)
     for grid in Grid:
         present = {row["start_utc"]: row for row in _slot_rows(con, grid)}
-        for slot in expected_slots(coverage, grid):
+        for slot in expected_slots(build.coverage, grid):
             if slot not in present:
                 present[slot] = _empty(slot, grid)
         bars = [present[s] for s in sorted(present)]
         for bar in bars:
-            _finish(bar, grid, coverage, lookup, threshold)
+            _finish(bar, grid, build.coverage, lookup, convention)
         build.bars[grid] = bars
     con.close()
     return build
+
+
+def _prepare(
+    store: HistoryStore, source: str, instrument: str, start: datetime, end: datetime, convention: QualityConvention
+) -> tuple[IntradayBuild, duckdb.DuckDBPyConnection]:
+    files = select_files(store, source, instrument, start, end)
+    coverage = _coverage(files)
+    con = _connect(store, files, start, end)
+    ticks, disorder = _tick_counts(con)
+    gaps, silences, short = _intervals(con, coverage, convention.threshold)
+    return IntradayBuild((start, end), convention, files, coverage, ticks, gaps, silences, short, disorder), con
+
+
+def restatus_intraday(
+    store: HistoryStore,
+    source: str,
+    instrument: str,
+    bars: dict[Grid, list[dict[str, Any]]],
+    convention: QualityConvention,
+    start: datetime = WINDOW_START,
+    end: datetime = WINDOW_END,
+) -> IntradayBuild:
+    """Statuses of already built candles under another convention; prices, counts and contents are reused.
+
+    Only the silences are read again from the ticks of [start, end); candles ending after `end` are dropped.
+    """
+    build, con = _prepare(store, source, instrument, start, end, convention)
+    con.close()
+    lookup = _GapLookup(build.gaps)
+    for grid in Grid:
+        rows = []
+        for source_row in bars[grid]:
+            if source_row["start_utc"] < start or source_row["end_utc"] > end:
+                continue
+            row = {k: v for k, v in source_row.items() if k not in ("flags", "flags_at_close")}
+            _finish(row, grid, build.coverage, lookup, convention)
+            rows.append(row)
+        build.bars[grid] = rows
+    return build
+
+
+def read_intraday(path: Path) -> list[dict[str, Any]]:
+    """Candles written by `intraday_table`, with their content as `Content`."""
+    rows: list[dict[str, Any]] = pq.read_table(path).to_pylist()
+    for row in rows:
+        row["content"] = Content(row["content"])
+    return rows
 
 
 def intraday_table(source: str, instrument: str, grid: Grid, bars: list[dict[str, Any]]) -> pa.Table:
@@ -539,8 +607,11 @@ def check_m5_to_m15(m5: list[dict[str, Any]], m15: list[dict[str, Any]]) -> dict
     }
 
 
-def check_m15_to_h1(m15: list[dict[str, Any]], h1: list[dict[str, Any]]) -> dict[str, Any]:
-    """Each existing H1 against its four M15; an H1 exists only for an hour with a valid tick."""
+def check_m15_to_h1(m15: list[dict[str, Any]], h1: list[dict[str, Any]], compare_status: bool = True) -> dict[str, Any]:
+    """Each existing H1 against its four M15; an H1 exists only for an hour with a valid tick.
+
+    `compare_status=False` when the M15 follow another silence convention than the H1 (10 min).
+    """
     groups = _children([], m15, timedelta(hours=1))
     by_hour = {b["start_utc"]: b for b in h1}
     mismatches: list[dict[str, Any]] = []
@@ -562,7 +633,7 @@ def check_m15_to_h1(m15: list[dict[str, Any]], h1: list[dict[str, Any]]) -> dict
         diff = [f for f in COMPARED if bar[f] != expected[f]]
         if diff:
             mismatches.append({"start_utc": hour.isoformat(), "fields": diff})
-        for key in ("flags_at_close", "flags"):
+        for key in ("flags_at_close", "flags") if compare_status else ():
             if _has_gap(bar[key]) != any(_has_gap(c[key]) for c in children):
                 status_mismatches.append({"start_utc": hour.isoformat(), "status": key})
     extra_h1 += [h.isoformat() for h in by_hour if h not in groups]

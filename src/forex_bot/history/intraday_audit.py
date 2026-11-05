@@ -1,6 +1,7 @@
 """Builds and audits the M5/M15 candles (protocol docs/experiments/DATA_M5_M15_2015_2021.md).
 
-    uv run forex-intraday --leak-cut 2018-07-01
+    uv run forex-intraday --leak-cut 2018-07-01                         # build + reference audit (10 min)
+    uv run forex-intraday --leak-cut 2018-07-01 --convention day01_5min  # statuses recomputed on the built candles
 
 Data only: no strategy, no signal, no performance measure. Reads 2015-2021 ticks only. Writes the
 candles and the detailed report under data/ (outside Git); exits with status 3 if a conservation or
@@ -10,6 +11,7 @@ anti-leak check fails, so that the run stops for a diagnosis.
 from __future__ import annotations
 
 import argparse
+import bisect
 import hashlib
 import json
 import os
@@ -25,19 +27,26 @@ from zoneinfo import ZoneInfo
 
 import pyarrow.parquet as pq
 
-from forex_bot.history.calendar import ONE_HOUR, MarketState, market_state
+from forex_bot.history.calendar import ONE_HOUR, MarketState, expected_open_minutes, market_state
 from forex_bot.history.intraday import (
+    CONVENTIONS,
+    REFERENCE_10MIN,
+    SUBSLOTS_FLAG,
     WINDOW_END,
     WINDOW_START,
     Content,
     Grid,
     IntradayBuild,
+    QualityConvention,
+    Silence,
     build_intraday,
     check_m5_to_m15,
     check_m15_to_h1,
     check_no_leak,
     check_totals,
     intraday_table,
+    read_intraday,
+    restatus_intraday,
 )
 from forex_bot.history.store import HistoryStore
 
@@ -239,6 +248,167 @@ def _silences(build: IntradayBuild) -> dict[str, Any]:
     }
 
 
+def window_intersections(silences: list[Silence], days: list[date]) -> dict[str, Any]:
+    """Silences that intersect a DAY_01 window, even when they start before it.
+
+    Each silence is counted once per class, with its total intersection (raw and expected-open
+    minutes) and the sessions it touches; classes by the silence's whole expected-open duration.
+    """
+    windows = sorted((london_instant(d, DAY01_WINDOW[0]), london_instant(d, DAY01_WINDOW[1]), d) for d in days)
+    starts = [w[0] for w in windows]
+    classes = {"gt_60s": 0.0, "gt_5min": 5.0, "gt_10min": 10.0}
+    result: dict[str, Any] = {}
+    for name, floor in classes.items():
+        distinct = started_before = with_open_part = 0
+        raw = open_part = 0.0
+        sessions: set[date] = set()
+        sessions_open: set[date] = set()
+        subwindows: dict[str, set[date]] = {k: set() for k in SUBWINDOWS}
+        for s in silences:
+            if s.open_minutes <= floor and floor > 0:
+                continue
+            j = bisect.bisect_left(starts, s.end_utc) - 1
+            hits = []
+            while j >= 0 and windows[j][1] > s.start_utc:
+                hits.append(windows[j])
+                j -= 1
+            if not hits:
+                continue
+            distinct += 1
+            started_before += s.start_utc < min(h[0] for h in hits)
+            silence_open = 0.0
+            for lo, hi, day in hits:
+                a, b = max(lo, s.start_utc), min(hi, s.end_utc)
+                raw += (b - a).total_seconds() / 60
+                minutes = expected_open_minutes(a, b)
+                silence_open += minutes
+                sessions.add(day)
+                if minutes > 0:
+                    sessions_open.add(day)
+                for key, (w_lo, w_hi) in SUBWINDOWS.items():
+                    if max(a, london_instant(day, w_lo)) < min(b, london_instant(day, w_hi)):
+                        subwindows[key].add(day)
+            open_part += silence_open
+            with_open_part += silence_open > 0
+        result[name] = {
+            "distinct_silences": distinct,
+            "started_before_window": started_before,
+            "with_expected_open_intersection": with_open_part,
+            "intersection_raw_minutes": round(raw, 1),
+            "intersection_open_minutes": round(open_part, 1),
+            "sessions_touched": len(sessions),
+            "sessions_touched_in_expected_open_time": len(sessions_open),
+            "sessions_touched_by_subwindow": {k: len(v) for k, v in subwindows.items()},
+        }
+    return result
+
+
+def _cause(ref: dict[str, Any], new: dict[str, Any]) -> str:
+    """Single exclusive cause for a candle that is not OK at close under the new convention."""
+    if not ref["complete_at_close"]:
+        return "already_not_ok_10min"
+    gap = any(f.startswith("trou de cotation") for f in new["flags_at_close"])
+    sub = any(f.startswith(SUBSLOTS_FLAG) for f in new["flags_at_close"])
+    if gap and sub:
+        return "new_silence_and_subslot"
+    if gap:
+        return "new_silence_gt_5min_only"
+    if sub:
+        return "new_empty_subslot_only"
+    return "new_other"
+
+
+CAUSES = (
+    "already_not_ok_10min",
+    "new_silence_gt_5min_only",
+    "new_empty_subslot_only",
+    "new_silence_and_subslot",
+    "new_other",
+)
+
+
+def compare_conventions(
+    ref: dict[Grid, list[dict[str, Any]]], new: dict[Grid, list[dict[str, Any]]], days: list[date]
+) -> dict[str, Any]:
+    """Before / after per expected candle and per session; every candle or session in one cause only."""
+    index = {g: ({b["start_utc"]: b for b in ref[g]}, {b["start_utc"]: b for b in new[g]}) for g in Grid}
+    candles: dict[str, Any] = {}
+    for grid in Grid:
+        old_rows, new_rows = index[grid]
+        scopes: dict[str, Counter[str]] = defaultdict(Counter)
+        for start, b in new_rows.items():
+            if not b["expected_open"]:
+                continue
+            a = old_rows[start]
+            names = ["all_expected_open"]
+            if _in_day01(start):
+                local = start.astimezone(LONDON).time()
+                names.append("day01_01_16")
+                names += [k for k, (lo, hi) in SUBWINDOWS.items() if lo <= local < hi]
+            for name in names:
+                c = scopes[name]
+                c["expected"] += 1
+                c["not_ok_before"] += not a["complete_at_close"]
+                c["not_ok_after"] += not b["complete_at_close"]
+                c["ok_before_not_after_0_expected"] += b["complete_at_close"] and not a["complete_at_close"]
+                if not b["complete_at_close"]:
+                    c[_cause(a, b)] += 1
+        candles[grid.value] = {k: dict(v) for k, v in scopes.items()}
+
+    def slots(grid: Grid, rows: dict[datetime, dict[str, Any]], day: date, lo: time, hi: time) -> list[Any]:
+        start, end, step = london_instant(day, lo), london_instant(day, hi), timedelta(minutes=grid.minutes)
+        out, cursor = [], start
+        while cursor < end:
+            out.append(rows.get(cursor))
+            cursor += step
+        return out
+
+    checks = {
+        "range_28_m15_01_08": (Grid.M15, time(1), time(8)),
+        "m5_08_12": (Grid.M5, time(8), time(12)),
+        "m5_12_16": (Grid.M5, time(12), time(16)),
+        "m15_08_12": (Grid.M15, time(8), time(12)),
+        "m15_12_16": (Grid.M15, time(12), time(16)),
+        "any_m5_or_m15_01_16": None,
+    }
+    sessions: dict[str, Counter[str]] = defaultdict(Counter)
+    for day in days:
+        if market_state(london_instant(day, DAY01_WINDOW[0])) is MarketState.PROBABLE_HOLIDAY:
+            continue
+        for name, spec in checks.items():
+            pairs = []
+            specs = [spec] if spec else [(Grid.M5, time(1), time(16)), (Grid.M15, time(1), time(16))]
+            for grid, lo, hi in specs:
+                pairs += list(
+                    zip(slots(grid, index[grid][0], day, lo, hi), slots(grid, index[grid][1], day, lo, hi), strict=True)
+                )
+            c = sessions[name]
+            c["sessions_non_holiday"] += 1
+            bad_before = any(a is None or not a["complete_at_close"] for a, _ in pairs)
+            bad_after = [(a, b) for a, b in pairs if b is None or not b["complete_at_close"]]
+            c["affected_before"] += bad_before
+            c["affected_after"] += bool(bad_after)
+            if not bad_after:
+                continue
+            if bad_before:
+                c["already_affected_10min"] += 1
+                continue
+            causes = {_cause(a, b) for a, b in bad_after}
+            gap = bool(causes & {"new_silence_gt_5min_only", "new_silence_and_subslot"})
+            sub = bool(causes & {"new_empty_subslot_only", "new_silence_and_subslot"})
+            key = (
+                "new_silence_and_subslot"
+                if gap and sub
+                else "new_silence_gt_5min_only"
+                if gap
+                else "new_empty_subslot_only"
+                if sub
+                else "new_other"
+            )
+            c[key] += 1
+    return {"candles": candles, "sessions": {k: dict(v) for k, v in sessions.items()}, "causes": list(CAUSES)}
+
+
 def audit(
     build: IntradayBuild,
     h1: list[dict[str, Any]],
@@ -250,7 +420,8 @@ def audit(
     checks = {
         "totals": check_totals(build),
         "m5_to_m15": check_m5_to_m15(m5, m15),
-        "m15_to_h1": check_m15_to_h1(m15, h1),
+        # The existing H1 follow the 10-min convention: their silence status is compared only under it.
+        "m15_to_h1": check_m15_to_h1(m15, h1, compare_status=build.convention == REFERENCE_10MIN),
         "london_sessions": session_anomalies(days),
     }
     if truncated is not None:
@@ -263,8 +434,14 @@ def audit(
         mismatch["explained_by_window_end"] = bool(tail) and hour + ONE_HOUR > tail[0]
     return {
         "window": [start.isoformat(), end.isoformat()],
+        "convention": build.convention.name,
         "silence_threshold_min": build.threshold.total_seconds() / 60,
-        "silence_threshold_status": "convention provisoire d'audit (ASSUMP-017), règle M5/M15 à décider",
+        "empty_subslot_not_ok": build.convention.empty_subslot_not_ok,
+        "silence_threshold_status": (
+            "convention provisoire d'audit (ASSUMP-017), conservée comme référence de comparaison"
+            if build.convention == REFERENCE_10MIN
+            else "convention de recherche DAY_01 (décision de l'opérateur du 2026-11-05, ASSUMP-028)"
+        ),
         "files": {
             "count": len(build.files),
             "first_period_start_utc": build.files[0].period_start_utc.isoformat(),
@@ -289,6 +466,7 @@ def audit(
         ),
         "day01": _day01(build, days),
         "silences": _silences(build),
+        "silences_intersecting_day01": window_intersections(build.silences, days),
     }
 
 
@@ -306,6 +484,8 @@ def checks_failed(report: dict[str, Any]) -> list[str]:
         failed.append("états de silence M5 -> M15")
     if any(c["london_sessions"].values()):
         failed.append("fenêtres de Londres")
+    if report.get("reuse", {}).get("reference_restatus_differences"):
+        failed.append("réutilisation des bougies de référence")
     leak = c.get("no_leak")
     if leak and any(leak[g.value]["close_time_differences"] for g in Grid):
         failed.append("anti-fuite")
@@ -339,8 +519,13 @@ def read_h1(store: HistoryStore, source: str, instrument: str) -> list[dict[str,
     return list(table.to_pylist())
 
 
+def output_dir(store: HistoryStore, source: str, instrument: str, convention: QualityConvention) -> Path:
+    suffix = "" if convention == REFERENCE_10MIN else f"_{convention.name}"
+    return store.data_dir / "bars" / source / instrument / f"intraday_2015_2021{suffix}"
+
+
 def write_outputs(store: HistoryStore, source: str, instrument: str, build: IntradayBuild) -> dict[str, str]:
-    directory = store.data_dir / "bars" / source / instrument / "intraday_2015_2021"
+    directory = output_dir(store, source, instrument, build.convention)
     directory.mkdir(parents=True, exist_ok=True)
     hashes = {}
     for grid in Grid:
@@ -425,11 +610,29 @@ def to_markdown(report: dict[str, Any]) -> str:
         json.dumps(report["silences"], indent=2, ensure_ascii=False),
         "```",
     ]
+    for key, title in (
+        ("silences_intersecting_day01", "Silences qui intersectent les fenêtres DAY_01"),
+        ("comparison_with_reference", "Avant / après (référence 10 min → convention)"),
+        ("reuse", "Réutilisation des bougies de référence"),
+    ):
+        if key in report:
+            lines += ["", f"## {title}", "", "```json", json.dumps(report[key], indent=2, ensure_ascii=False), "```"]
     return "\n".join(lines) + "\n"
 
 
 def _date(text: str) -> datetime:
     return datetime.combine(date.fromisoformat(text), time(), tzinfo=UTC)
+
+
+def _reference_restatus_differences(reused: dict[Grid, list[dict[str, Any]]], again: IntradayBuild) -> int:
+    """Statuses recomputed under the reference convention must equal the stored ones (reuse path check)."""
+    keys = ("expected_open", "complete", "flags", "complete_at_close", "flags_at_close")
+    return sum(
+        1
+        for grid in Grid
+        for a, b in zip(reused[grid], again.bars[grid], strict=True)
+        if any(a[k] != b[k] for k in keys)
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -438,21 +641,57 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--source", default="dukascopy")
     parser.add_argument("--instrument", default="EURUSD")
     parser.add_argument("--leak-cut", type=_date, required=True, help="date de la construction tronquée (anti-fuite)")
+    parser.add_argument("--convention", choices=sorted(CONVENTIONS), default=REFERENCE_10MIN.name)
     args = parser.parse_args(argv)
+    convention = CONVENTIONS[args.convention]
     store = HistoryStore(args.data_dir)
+    reports = store.data_dir / "reports"
+    reports.mkdir(parents=True, exist_ok=True)
+    reference_stem = reports / f"intraday_{args.source}_{args.instrument}_2015_2021"
     before = existing_bar_hashes(store, args.source, args.instrument)
-    build = build_intraday(store, args.source, args.instrument)
-    outputs = write_outputs(store, args.source, args.instrument, build)
-    truncated = build_intraday(store, args.source, args.instrument, WINDOW_START, args.leak_cut)
+    extra: dict[str, Any] = {}
+    if convention == REFERENCE_10MIN:
+        build = build_intraday(store, args.source, args.instrument)
+        outputs = write_outputs(store, args.source, args.instrument, build)
+        truncated = build_intraday(store, args.source, args.instrument, WINDOW_START, args.leak_cut)
+        stem = reference_stem
+    else:
+        # Reuse the reference candles (prices, counts, contents); only statuses are recomputed.
+        reference = json.loads(reference_stem.with_suffix(".json").read_text(encoding="utf-8"))
+        directory = output_dir(store, args.source, args.instrument, REFERENCE_10MIN)
+        reused: dict[Grid, list[dict[str, Any]]] = {}
+        source_hashes = {}
+        for grid in Grid:
+            path = directory / f"{grid.value}.parquet"
+            digest = sha256_file(path)
+            if digest != reference["outputs_sha256"].get(path.as_posix()):
+                print(f"ÉCHEC : {path} ne correspond pas au rapport de référence", file=sys.stderr)
+                return 3
+            source_hashes[path.as_posix()] = digest
+            reused[grid] = read_intraday(path)
+        again = restatus_intraday(store, args.source, args.instrument, reused, REFERENCE_10MIN)
+        extra["reuse"] = {
+            "source_sha256": source_hashes,
+            "reference_commit": reference["provenance"]["commit"],
+            "reference_restatus_differences": _reference_restatus_differences(reused, again),
+        }
+        del again
+        build = restatus_intraday(store, args.source, args.instrument, reused, convention)
+        truncated = restatus_intraday(
+            store, args.source, args.instrument, reused, convention, WINDOW_START, args.leak_cut
+        )
+        outputs = write_outputs(store, args.source, args.instrument, build)
+        extra["comparison_with_reference"] = compare_conventions(
+            reused, build.bars, london_sessions(WINDOW_START, WINDOW_END)
+        )
+        stem = reports / f"intraday_{args.source}_{args.instrument}_2015_2021_{convention.name}"
     report = audit(build, read_h1(store, args.source, args.instrument), truncated)
+    report.update(extra)
     after = existing_bar_hashes(store, args.source, args.instrument)
     report["provenance"] = provenance(argv)
     report["outputs_sha256"] = outputs
     report["existing_bars_sha256"] = {"before": before, "after": after, "unchanged": before == after}
     report["failed_checks"] = checks_failed(report) + ([] if before == after else ["fichiers H1/H4/D1 modifiés"])
-    reports = store.data_dir / "reports"
-    reports.mkdir(parents=True, exist_ok=True)
-    stem = reports / f"intraday_{args.source}_{args.instrument}_2015_2021"
     stem.with_suffix(".json").write_text(
         json.dumps(report, indent=2, ensure_ascii=False, default=str), encoding="utf-8"
     )

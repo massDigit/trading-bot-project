@@ -15,22 +15,37 @@ import pytest
 from forex_bot.history.bars import build_bars
 from forex_bot.history.calendar import Timeframe
 from forex_bot.history.intraday import (
+    DAY01_5MIN,
     NO_TICK,
     NO_VALID_TICK,
+    REFERENCE_10MIN,
     WINDOW_END,
     WINDOW_START,
     Content,
     Grid,
     IntradayBuild,
+    QualityConvention,
+    Silence,
     build_intraday,
     check_m5_to_m15,
     check_m15_to_h1,
     check_no_leak,
     check_totals,
     check_window,
+    intraday_table,
+    read_intraday,
+    restatus_intraday,
     select_files,
 )
-from forex_bot.history.intraday_audit import audit, checks_failed, london_instant, london_sessions, session_anomalies
+from forex_bot.history.intraday_audit import (
+    audit,
+    checks_failed,
+    compare_conventions,
+    london_instant,
+    london_sessions,
+    session_anomalies,
+    window_intersections,
+)
 from forex_bot.history.store import HistoryStore, IngestRequest
 
 HEADER = "Gmt time,Ask,Bid,AskVolume,BidVolume\n"
@@ -314,7 +329,8 @@ def test_audit_report_passes_on_consistent_synthetic_data(tmp_path: Path) -> Non
 def test_silence_distribution_does_not_depend_on_the_threshold(tmp_path: Path) -> None:
     store = _day_store(tmp_path)
     ten = build(store)
-    short = build_intraday(store, "dukascopy", "EURUSD", WINDOW_START, WINDOW_END, timedelta(seconds=30))
+    test_30s = QualityConvention("test_30s", timedelta(seconds=30), empty_subslot_not_ok=False)
+    short = build_intraday(store, "dukascopy", "EURUSD", WINDOW_START, WINDOW_END, test_30s)
     assert ten.silences == short.silences and ten.short_intervals == short.short_intervals
     assert len(short.gaps) > len(ten.gaps) == 2
 
@@ -362,3 +378,130 @@ def test_older_manifest_without_entry_names_the_file_by_digest(tmp_path: Path) -
     manifest_path.write_text(json.dumps(manifest))
     (selected,) = select_files(store, "dukascopy", "EURUSD", WINDOW_START, WINDOW_END)
     assert selected.entry == manifest["sha256"] and selected.rows == 60
+
+
+# ---------------------------------------------------------------- DAY_01 convention (protocol §9)
+
+GAP5 = "trou de cotation > 5 min pendant l'ouverture prévue"
+
+
+def _minutes_without(start: datetime, end: datetime, holes: list[tuple[int, int]]) -> list[str]:
+    """Ticks every minute from `start`, minus the minutes [a, b) of each hole (counted from `start`)."""
+    rows = every_minute(start, end)
+    return [r for i, r in enumerate(rows) if not any(a <= i < b for a, b in holes)]
+
+
+@pytest.mark.parametrize(("extra_us", "interruption"), [(0, False), (1000, True)], ids=["exactly-5min", "5min+1ms"])
+def test_silence_threshold_is_strictly_above_five_minutes(tmp_path: Path, extra_us: int, interruption: bool) -> None:
+    """Last tick 08:10:00, next 08:15:00.000 (exactly 5 min) or 08:15:00.001."""
+    rows = every_minute(utc(2019, 3, 7, 8), utc(2019, 3, 7, 8, 11))
+    rows.append(line(utc(2019, 3, 7, 8, 15, 0, extra_us), "1.20010", "1.20000"))
+    rows += every_minute(utc(2019, 3, 7, 8, 16), utc(2019, 3, 7, 9), base="1.20000")
+    store = store_with(tmp_path, "s", [(rows, utc(2019, 3, 7, 8), utc(2019, 3, 7, 9))])
+    result = build_intraday(store, "dukascopy", "EURUSD", convention=DAY01_5MIN)
+    gap_slot = bar(result, Grid.M5, utc(2019, 3, 7, 8, 10))
+    after = bar(result, Grid.M5, utc(2019, 3, 7, 8, 15))
+    # At 08:15:00 exactly 5 min are known in both cases: never above the threshold at that close.
+    assert GAP5 not in gap_slot["flags_at_close"] and gap_slot["complete_at_close"]
+    assert (GAP5 in gap_slot["flags"]) is interruption  # retrospective audit
+    assert (GAP5 in after["flags_at_close"]) is interruption  # known at 08:20 once the tick has come
+    assert bar(result, Grid.M15, utc(2019, 3, 7, 8))["complete_at_close"]  # 5 min known at 08:15 either way
+    assert bar(result, Grid.M15, utc(2019, 3, 7, 8, 15))["complete_at_close"] is not interruption
+
+
+def test_close_time_quality_uses_only_the_known_duration_under_day01(tmp_path: Path) -> None:
+    """Last tick 08:01, next 08:07 (6 min): 4 min known at 08:05, 6 at 08:10."""
+    rows = _minutes_without(utc(2019, 3, 7, 8), utc(2019, 3, 7, 9), [(2, 7)])
+    store = store_with(tmp_path, "s", [(rows, utc(2019, 3, 7, 8), utc(2019, 3, 7, 9))])
+    day01 = build_intraday(store, "dukascopy", "EURUSD", convention=DAY01_5MIN)
+    ref = build_intraday(store, "dukascopy", "EURUSD", convention=REFERENCE_10MIN)
+    first, second = bar(day01, Grid.M5, utc(2019, 3, 7, 8)), bar(day01, Grid.M5, utc(2019, 3, 7, 8, 5))
+    assert first["complete_at_close"] and not first["complete"]  # only the audit sees 6 min at 08:05
+    assert GAP5 in second["flags_at_close"]
+    assert GAP5 in bar(day01, Grid.M15, utc(2019, 3, 7, 8))["flags_at_close"]
+    assert all(b["complete_at_close"] for b in ref.bars[Grid.M5] + ref.bars[Grid.M15])  # 6 min <= 10
+
+
+def test_m15_with_an_empty_expected_subslot_is_not_ok_under_day01_with_prices_kept(tmp_path: Path) -> None:
+    rows = _minutes_without(utc(2019, 3, 7, 8), utc(2019, 3, 7, 9), [(20, 25)])  # 08:20-08:25 empty
+    store = store_with(tmp_path, "s", [(rows, utc(2019, 3, 7, 8), utc(2019, 3, 7, 9))])
+    ref = bar(build_intraday(store, "dukascopy", "EURUSD"), Grid.M15, utc(2019, 3, 7, 8, 15))
+    day01 = bar(build_intraday(store, "dukascopy", "EURUSD", convention=DAY01_5MIN), Grid.M15, utc(2019, 3, 7, 8, 15))
+    assert ref["complete_at_close"]
+    assert not day01["complete_at_close"]
+    assert "sous-créneaux M5 sans tick valide : 1/3" in day01["flags_at_close"]
+    assert prices(day01) == prices(ref) and day01["tick_count"] == ref["tick_count"] == 10
+
+
+def test_restatus_on_stored_candles_equals_a_full_build(tmp_path: Path) -> None:
+    store = _day_store(tmp_path)
+    ref = build(store)
+    stored = {}
+    for grid in Grid:
+        path = tmp_path / f"{grid.value}.parquet"
+        import pyarrow.parquet as pq
+
+        pq.write_table(intraday_table("dukascopy", "EURUSD", grid, ref.bars[grid]), path)
+        stored[grid] = read_intraday(path)
+    keys = ("start_utc", "content", "expected_open", "complete", "flags", "complete_at_close", "flags_at_close")
+    for convention in (REFERENCE_10MIN, DAY01_5MIN):
+        direct = build_intraday(store, "dukascopy", "EURUSD", convention=convention)
+        again = restatus_intraday(store, "dukascopy", "EURUSD", stored, convention)
+        for grid in Grid:
+            assert [tuple(b[k] for k in keys) for b in again.bars[grid]] == [
+                tuple(b[k] for k in keys) for b in direct.bars[grid]
+            ]
+
+
+def test_truncated_restatus_gives_the_same_close_time_statuses(tmp_path: Path) -> None:
+    thursday = _minutes_without(utc(2019, 3, 7, 0), utc(2019, 3, 8, 0), [(1430, 1437)])  # 23:50 -> 23:57
+    friday = every_minute(utc(2019, 3, 8, 0), utc(2019, 3, 8, 22), base="1.20000")
+    store = store_with(
+        tmp_path, "s", [(thursday, utc(2019, 3, 7), utc(2019, 3, 8)), (friday, utc(2019, 3, 8), utc(2019, 3, 9))]
+    )
+    stored = build(store).bars
+    full = restatus_intraday(store, "dukascopy", "EURUSD", stored, DAY01_5MIN)
+    truncated = restatus_intraday(store, "dukascopy", "EURUSD", stored, DAY01_5MIN, WINDOW_START, utc(2019, 3, 8))
+    assert all(b["end_utc"] <= utc(2019, 3, 8) for b in truncated.bars[Grid.M5])
+    assert any(GAP5 in b["flags_at_close"] for b in truncated.bars[Grid.M5])
+    leak = check_no_leak(full, truncated)
+    assert leak["5m"]["compared"] == 288 and leak["5m"]["close_time_differences"] == []
+
+
+def test_before_after_counts_each_candle_and_session_once(tmp_path: Path) -> None:
+    """09:20 -> 09:27 (7 min): new under DAY_01. 13:00 -> 13:12 (12 min): already not OK at 10 min."""
+    rows = _minutes_without(utc(2019, 3, 7, 0), utc(2019, 3, 7, 17), [(561, 567), (781, 792)])
+    store = store_with(tmp_path, "s", [(rows, utc(2019, 3, 7, 0), utc(2019, 3, 7, 17))])
+    ref = build_intraday(store, "dukascopy", "EURUSD")
+    new = build_intraday(store, "dukascopy", "EURUSD", convention=DAY01_5MIN)
+    result = compare_conventions(ref.bars, new.bars, [date(2019, 3, 7)])
+    m5 = result["candles"]["5m"]["day01_01_16"]
+    # M5: [13:05) empty and [13:10) silence of 12 min were not OK at 10 min; [09:25) knows 7 min at 09:30.
+    assert (m5["not_ok_before"], m5["not_ok_after"]) == (2, 3)
+    assert (m5["already_not_ok_10min"], m5["new_silence_gt_5min_only"]) == (2, 1)
+    m15 = result["candles"]["15m"]["day01_01_16"]
+    assert (m15["not_ok_before"], m15["not_ok_after"], m15["new_silence_gt_5min_only"]) == (1, 2, 1)
+    for scope in (m5, m15):
+        assert sum(scope.get(c, 0) for c in result["causes"]) == scope["not_ok_after"]
+    sessions = result["sessions"]
+    assert sessions["m5_08_12"] == {
+        "sessions_non_holiday": 1, "affected_before": 0, "affected_after": 1, "new_silence_gt_5min_only": 1
+    }  # fmt: skip
+    assert sessions["m5_12_16"]["already_affected_10min"] == 1
+    assert sessions["any_m5_or_m15_01_16"]["already_affected_10min"] == 1  # one session, counted once
+    assert sessions["range_28_m15_01_08"]["affected_after"] == 0
+
+
+def test_silences_intersecting_a_day01_window_are_counted_even_if_they_start_before() -> None:
+    day = date(2019, 3, 7)  # London = UTC
+    silences = [
+        Silence(utc(2019, 3, 7, 0, 55), utc(2019, 3, 7, 1, 8), 13.0),  # starts before 01:00
+        Silence(utc(2019, 3, 7, 9, 0), utc(2019, 3, 7, 9, 6), 6.0),
+        Silence(utc(2019, 3, 7, 16, 30), utc(2019, 3, 7, 16, 45), 15.0),  # after the window
+    ]
+    result = window_intersections(silences, [day])
+    gt5, gt10 = result["gt_5min"], result["gt_10min"]
+    assert (gt5["distinct_silences"], gt5["started_before_window"], gt5["sessions_touched"]) == (2, 1, 1)
+    assert gt5["intersection_raw_minutes"] == 14.0  # 8 + 6
+    assert (gt10["distinct_silences"], gt10["intersection_open_minutes"]) == (1, 8.0)
+    assert gt5["sessions_touched_by_subwindow"] == {"01-08": 1, "08-12": 1, "12-16": 0}
