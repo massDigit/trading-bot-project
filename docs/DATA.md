@@ -206,7 +206,10 @@ comptées mais conservées, car indiscernables d'une cotation répétée.
   manifeste) ; toute autre fenêtre est refusée.
 - Contenu du créneau : `VALID`, `INVALID_ONLY` ou `EMPTY` (créneau d'ouverture prévue sans tick),
   prix vides hors `VALID`, aucun comblement. État à la clôture calculé pour chaque unité ; audit
-  rétrospectif à part. Seuil de silence de 10 min : convention provisoire d'audit.
+  rétrospectif à part. Seuil de silence de 10 min : référence de comparaison (premier audit).
+- **Convention de qualité DAY_01** (2026-11-05) : silence > 5 min, M5 sans tick et M15 à
+  sous-créneau M5 vide non `OK` ; statuts recalculés sur les bougies existantes, sorties à part
+  (`intraday_2015_2021_day01_5min/`) ; `forex-intraday --leak-cut 2018-07-01 --convention day01_5min`.
 - Protocole, contrôles et résultats : `docs/experiments/DATA_M5_M15_2015_2021.md` et `_BILAN.md`.
 
 ## 6. Rapport qualité
