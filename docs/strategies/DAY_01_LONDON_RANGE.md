@@ -266,11 +266,14 @@ clôturer au-delà de `RH`. Elle est alors à la fois la M5 de retest et la M5 d
     de la séance est consommée.
   - **Transactions exécutées** : une transaction déjà exécutée n'est jamais supprimée. Une
     interruption pendant une position ouverte relève du §5 (scénarios A, B et C).
-- **Conséquence pour l'échéance** (ADR-022) : la cotation à `D` date de moins de 5 minutes. Sans
-  tick admissible dans `]D, D + 5 min]`, le silence dépasse donc 5 minutes **avant** l'échéance,
-  et l'entrée est annulée pour interruption (`ENTRÉE_ANNULÉE_INTERRUPTION`, à l'instant où le
-  silence dépasse 5 minutes). `ENTRÉE_EXPIRÉE` reste définie, mais ne pourrait survenir que si
-  l'ouverture prévue s'arrêtait pendant la validité, ce qu'aucune séance DAY_01 ne permet.
+- **Conséquence pour l'échéance** (ADR-022) : la cotation à `D` date de 5 minutes au plus. Sans
+  tick admissible dans `]D, D + 5 min]` :
+  - si la dernière cotation est **antérieure** à `D`, le silence dépasse 5 minutes **avant**
+    l'échéance. L'entrée est annulée pour interruption (`ENTRÉE_ANNULÉE_INTERRUPTION`), à
+    l'instant où le silence dépasse 5 minutes ;
+  - si un tick est horodaté **exactement à `D`**, il compte comme cotation sans exécuter l'ordre.
+    Le silence vaut alors exactement 5 minutes à l'échéance, ce qui ne dépasse pas le seuil.
+    L'issue est `ENTRÉE_EXPIRÉE`. C'est le seul cas où elle survient dans une séance ouverte.
 
 ### 4.6 Nombre de tentatives (proposé)
 
@@ -460,14 +463,13 @@ pas été lue : abandon de la tentative à 08:40:00, sans contact ni confirmatio
 **Exemple C — confirmation exactement à 12:00.** Cassure connue à `K = 11:00` (M15 [10:45, 11:00)).
 La M5 [11:55, 12:00) confirme : `D = 12:00:00.000`, dernière décision possible (`K + 60 min`).
 
-| Instant | Événement | Effet |
-|---|---|---|
-| 12:00:00.000 | décision ; un tick est horodaté exactement à 12:00:00.000 | ce tick n'exécute pas l'ordre (`ts > D` exigé) |
-| ]12:00:00, 12:05:00] | premier tick admissible, moins de 5 min après la cotation à `D` | **entrée** à son prix |
-| ]12:00:00, 12:05:00] | silence depuis la cotation à `D` (par exemple 11:59:58.300) supérieur à 5 min (ici à 12:04:58.300), ou premier tick qui le révèle | **`ENTRÉE_ANNULÉE_INTERRUPTION`** ; ce tick n'exécute pas ; aucune exécution supposée ; séance consommée (§4.5) |
+Dernier tick de la M5 de confirmation : 11:59:58.300.
 
-`ENTRÉE_EXPIRÉE` à 12:05:00 supposerait qu'aucun tick n'arrive sans que le silence dépasse 5 minutes.
-C'est impossible ici : la cotation à `D` date de moins de 5 minutes (§4.5).
+| Cas | Ticks après 11:59:58.300 | Effet |
+|---|---|---|
+| 1 | un tick exactement à 12:00:00.000, puis un tick à 12:03:10 | le tick de 12:00:00.000 n'exécute pas (`ts > D` exigé) mais compte pour le silence ; **entrée** à 12:03:10 |
+| 2 | aucun tick avant 12:04:58.300 | le silence dépasse 5 min juste après 12:04:58.300 : **`ENTRÉE_ANNULÉE_INTERRUPTION`** ; un tick arrivé ensuite (12:05:00 compris) n'exécute pas ; séance consommée (§4.5) |
+| 3 | un tick exactement à 12:00:00.000, puis aucun jusqu'à 12:05:00 inclus | silence d'exactement 5 min à l'échéance, sans dépasser le seuil : **`ENTRÉE_EXPIRÉE`** à 12:05:00 ; séance consommée |
 
 ## 8. Abstentions et non-exécutions (première cause journalisée)
 
@@ -491,8 +493,8 @@ Une **entrée décidée** a ensuite une seule issue :
 - exécutée, position ouverte ;
 - exécutée puis liquidée (`STOP_DÉPASSÉ_À_L'EXÉCUTION`) ;
 - exécutée puis sortie à la cible sur le même tick (`CIBLE_ATTEINTE_À_L'EXÉCUTION`) ;
-- **non exécutée** : `ENTRÉE_EXPIRÉE` (aucun tick admissible avant l'échéance du §4.5 ; ne peut pas
-  survenir dans une séance DAY_01 ouverte, voir la conséquence du §4.5) ;
+- **non exécutée** : `ENTRÉE_EXPIRÉE` (aucun tick admissible avant l'échéance du §4.5 ; seulement
+  après une cotation horodatée exactement à `D`, voir la conséquence du §4.5) ;
 - **non exécutée** : `ENTRÉE_ANNULÉE_INTERRUPTION` (interruption connue avant l'exécution, y compris
   révélée par le premier tick suivant, §4.5) ; tentative consommée.
 
