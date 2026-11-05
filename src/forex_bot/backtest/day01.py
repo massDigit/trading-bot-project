@@ -11,15 +11,24 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
+from enum import StrEnum
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from forex_bot.history.calendar import MarketState, market_state
+from forex_bot.backtest.feed import Silence
+from forex_bot.history.calendar import MarketState, market_state, trading_day
 from forex_bot.risk import Side
 
 LONDON = ZoneInfo("Europe/London")
 M5 = timedelta(minutes=5)
 M15 = timedelta(minutes=15)
+
+
+class Trigger(StrEnum):
+    """Unit of the retest, invalidation, confirmation and stop (sheet §3.1)."""
+
+    M5 = "M5"  # reference H4 -> M15 -> M5
+    M15 = "M15"  # preregistered simpler comparison "H4 -> M15, retest and confirmation on M15"
 
 
 @dataclass(frozen=True)
@@ -42,6 +51,12 @@ class Day01Params:
     # pending entries and open positions alike. The H4 ATR keeps its own rules (ResearchConfig).
     interruption_threshold: timedelta = timedelta(minutes=5)
     atr_period: int = 14
+    # Same rules and same 60 min delay on M15: first confirmation at K + 15 min, entry still valid 5 min.
+    trigger: Trigger = Trigger.M5
+
+    @property
+    def trigger_step(self) -> timedelta:
+        return M5 if self.trigger is Trigger.M5 else M15
 
     @property
     def range_slots(self) -> int:
@@ -120,9 +135,37 @@ REJECTED_AT_EXECUTION = "ENTRÉE_REJETÉE"  # only under StopAtExecution.REJECT 
 EXPIRED = "ENTRÉE_EXPIRÉE"
 CANCELLED_INTERRUPTION = "ENTRÉE_ANNULÉE_INTERRUPTION"
 
-LIQUIDATION = "LIQUIDATION_16H"
-DELAYED_LIQUIDATION = "LIQUIDATION_RETARDÉE"
-UNPLANNED_NIGHT = "NUIT_NON_PRÉVUE"
+# Liquidation (sheet §5). Three separate quantities are reported for every liquidation order: the
+# delay after 16:00, the silence closed by the closing tick, and the closing reason.
+LIQUIDATION = "LIQUIDATION_16H"  # closing reason: the 16:00 order itself closed the position
+# Counted exactly when the 16:00 order closes the position on the first tick after a silence strictly
+# longer than 5 min of expected-open time (unexplained). Former label LIQUIDATION_RETARDÉE (ADR-023).
+LIQUIDATION_AFTER_INTERRUPTION = "LIQUIDATION_APRÈS_INTERRUPTION"
+UNPLANNED_NIGHT = "NUIT_NON_PRÉVUE"  # the position closed on a later trading day than its 16:00 order
+
+
+@dataclass(frozen=True)
+class Liquidation:
+    """How a 16:00 liquidation order ended, with its three quantities kept apart."""
+
+    decided_utc: datetime  # 16:00:00 London
+    closed_utc: datetime  # tick that closed the position, by the order or by a stop or target first
+    close_reason: str  # LIQUIDATION_16H, or the stop or target reason that took precedence (§5, item 2)
+    silence: timedelta | None  # wall-clock gap from the previous tick to the closing tick
+    silence_kind: Silence  # under the DAY_01 threshold, strictly above 5 min of expected-open time
+
+    @property
+    def delay_after_16h(self) -> timedelta:
+        return self.closed_utc - self.decided_utc
+
+    @property
+    def after_interruption(self) -> bool:
+        """Definition of LIQUIDATION_APRÈS_INTERRUPTION; nothing else is counted under that label."""
+        return self.close_reason == LIQUIDATION and self.silence_kind is Silence.UNEXPLAINED
+
+    @property
+    def unplanned_night(self) -> bool:
+        return trading_day(self.closed_utc) != trading_day(self.decided_utc)
 
 
 @dataclass

@@ -9,13 +9,18 @@ Specific to DAY_01, session by session (London date, times in Europe/London):
 - range of the 28 M15 of [01:00, 08:00), frozen at 08:00 with the H4 ATR known then (ATR and its
   H4 states keep the S2/S3 rules and the `ResearchConfig` threshold, ADR-021);
 - breakout on an M15 close, retest and confirmation on M5, read only from candles `OK` at their
-  close under the DAY_01 convention (ADR-021), quality checked before any close is read;
+  close under the DAY_01 convention (ADR-021), quality checked before any close is read; the
+  preregistered comparison `Trigger.M15` reads the retest, invalidation, confirmation and stop on
+  M15 with the same rules and the same 60 min delay (first confirmation at K + 15 min, quote at D
+  in the confirming M15, entry still valid 5 min);
 - one attempt per session, decision bounds, quote at D, stop and target of the sheet §5;
 - pending entry valid in ]D, D + 5 min], cancelled as soon as a silence strictly longer than 5 min
   of expected-open time is known before its execution, including when the next tick reveals it
   (that tick never executes); expired otherwise;
 - target exit at the first executable quote that reaches it; liquidation at the first tick
-  strictly after 16:00, delayed liquidation and unplanned night reported;
+  strictly after 16:00. Each liquidation order reports its delay after 16:00, the silence closed by
+  the closing tick and the closing reason; LIQUIDATION_APRÈS_INTERRUPTION and NUIT_NON_PRÉVUE are
+  derived from them (`Liquidation`);
 - open position across a silence strictly longer than 5 min: the trade is kept, marked
   indeterminate, and handled by scenario A (observed only), B (stop first) or C (target first),
   one trajectory each, as for S2. A known closure is not an unexplained interruption.
@@ -37,12 +42,11 @@ from forex_bot.backtest.day01 import (
     ATR_UNAVAILABLE,
     BREAKOUT_DATA,
     CANCELLED_INTERRUPTION,
-    DELAYED_LIQUIDATION,
     EXECUTED,
     EXPIRED,
     INVALIDATED,
     LIQUIDATION,
-    M5,
+    LIQUIDATION_AFTER_INTERRUPTION,
     M15,
     MARKET_CLOSED,
     NO_BREAKOUT,
@@ -60,7 +64,9 @@ from forex_bot.backtest.day01 import (
     TARGET_AT_EXECUTION,
     UNPLANNED_NIGHT,
     Day01Params,
+    Liquidation,
     Session,
+    Trigger,
     bar_ok,
     london,
     session_open,
@@ -82,7 +88,7 @@ from forex_bot.backtest.feed import Silence, Tick, classify_silence
 from forex_bot.backtest.s1 import EntrySignal, S1Params
 from forex_bot.backtest.s2 import ContinuousWilderAtr, GapScenario
 from forex_bot.history.bars import Gap
-from forex_bot.history.calendar import MarketState, market_state, trading_day
+from forex_bot.history.calendar import MarketState, market_state
 from forex_bot.market import Quote
 from forex_bot.risk import Holding, LossEstimate, Side, estimate_loss_per_contract, usd_to_eur_from_eurusd_bid
 
@@ -92,7 +98,7 @@ class Day01Result(BacktestResult):
     day01_params: Day01Params = field(default_factory=Day01Params)
     scenario: GapScenario = GapScenario.OBSERVED_ONLY
     sessions: list[Session] = field(default_factory=list)
-    liquidations: list[dict[str, Any]] = field(default_factory=list)
+    liquidations: list[Liquidation] = field(default_factory=list)
 
 
 class Day01Backtest(S1Backtest):
@@ -120,8 +126,9 @@ class Day01Backtest(S1Backtest):
         self.atr = ContinuousWilderAtr(h4, params.atr_period)  # continuity of the expected H4 (S2/S3 rule)
         self.m5 = {b["start_utc"]: b for b in m5}
         self.m15 = {b["start_utc"]: b for b in m15}
+        self.trigger_bars = self.m5 if params.trigger is Trigger.M5 else self.m15
         self.sessions: list[Session] = []
-        self.liquidations: list[dict[str, Any]] = []
+        self.liquidations: list[Liquidation] = []
         self.target: Decimal | None = None  # of the open position
         self._pending_target: Decimal | None = None
         self._pending_session: Session | None = None
@@ -232,23 +239,24 @@ class Day01Backtest(S1Backtest):
             session.block(NO_BREAKOUT)
             return
 
-        # Retest, invalidation and confirmation on M5 (sheet §4.3, §4.8).
+        # Retest, invalidation and confirmation on M5, or on M15 in the comparison (sheet §3.1, §4.3, §4.8).
         z_low, z_high = zone(side, rh, rl, a, p)
         long = side is Side.LONG
+        step, unit = p.trigger_step, p.trigger.value
         contact: datetime | None = None
         extreme: Decimal | None = None
         decision: datetime | None = None
         start = k
-        while start + M5 <= k + p.retest_delay:
-            end = start + M5
+        while start + step <= k + p.retest_delay:
+            end = start + step
             self._advance(end, inclusive=False)
-            bar = self.m5.get(start)
+            bar = self.trigger_bars.get(start)
             if not bar_ok(bar) or bar is None:
-                session.block(RETEST_DATA, f"M5 {start.isoformat()}, clôture non lue")
+                session.block(RETEST_DATA, f"{unit} {start.isoformat()}, clôture non lue")
                 return
             close = bar["bid_close"]
             if (long and close < z_low) or (not long and close > z_high):
-                session.block(INVALIDATED, f"M5 {start.isoformat()} clôture {close}")
+                session.block(INVALIDATED, f"{unit} {start.isoformat()} clôture {close}")
                 return
             if contact is None and touches(bar, z_low, z_high):
                 contact = start
@@ -259,7 +267,7 @@ class Day01Backtest(S1Backtest):
                     decision = end
                     break
             start = end
-        session.retest = {"zone": (z_low, z_high), "contact_utc": contact, "extreme": extreme}
+        session.retest = {"trigger": unit, "zone": (z_low, z_high), "contact_utc": contact, "extreme": extreme}
         if decision is None or extreme is None:
             session.block(RETEST_TIMEOUT)
             return
@@ -322,7 +330,8 @@ class Day01Backtest(S1Backtest):
         if market_state(decision) is not MarketState.OPEN:
             refuse(MARKET_CLOSED)
             return
-        if last is None or last.ts_utc < decision - M5 or not (0 < last.bid <= last.ask):
+        # Quote at D: last tick strictly before D inside the confirming candle (M5, or M15 in the comparison).
+        if last is None or last.ts_utc < decision - p.trigger_step or not (0 < last.bid <= last.ask):
             refuse(NO_QUOTE)
             return
         stop = extreme - p.stop_margin * a if long else extreme + p.stop_margin * a
@@ -416,10 +425,10 @@ class Day01Backtest(S1Backtest):
                 self._observed_stop(tick)
             if self.position is not None and self._target_reached(tick):
                 self._close(tick, self._exit_side(tick), "CIBLE", stop_triggered=False)
-            if self.pending_exit is not None and tick.ts_utc > self.pending_exit.decided_utc:
-                pending, self.pending_exit = self.pending_exit, None
-                if self.position is not None:
-                    self._liquidate(tick, pending, previous)
+            pending = self.pending_exit
+            if pending is not None and self.position is not None and tick.ts_utc > pending.decided_utc:
+                # The liquidation order closes the position here unless a stop or target did first.
+                self._close(tick, self._exit_side(tick), LIQUIDATION, stop_triggered=False)
             if self.pending_entry is not None:
                 if previous is not None and self._interrupted(previous.ts_utc, tick.ts_utc):
                     # The interruption is known at the latest on this tick: it never executes the order.
@@ -478,20 +487,6 @@ class Day01Backtest(S1Backtest):
         else:
             self._log(tick.ts_utc, "SCÉNARIO_A", f"{span} : franchissement possible non observé, position maintenue")
 
-    def _liquidate(self, tick: Tick, pending: _PendingExit, previous: Tick | None) -> None:
-        delay = tick.ts_utc - pending.decided_utc
-        delayed = previous is not None and self._interrupted(previous.ts_utc, tick.ts_utc)
-        night = trading_day(tick.ts_utc) != trading_day(pending.decided_utc)
-        self._close(tick, self._exit_side(tick), LIQUIDATION, stop_triggered=False)
-        self.liquidations.append(
-            {"decided_utc": pending.decided_utc, "executed_utc": tick.ts_utc, "delay": delay, "delayed": delayed,
-             "unplanned_night": night}
-        )  # fmt: skip
-        if delayed:
-            self._log(tick.ts_utc, DELAYED_LIQUIDATION, f"aucune cotation à 16:00 : exécutée après {delay}")
-        if night:
-            self._log(tick.ts_utc, UNPLANNED_NIGHT, "liquidation après la fin de la journée de cotation")
-
     def _open(self, tick: Tick) -> None:
         pending, target, session = self.pending_entry, self._pending_target, self._pending_session
         self._pending_target, self._pending_session = None, None
@@ -521,9 +516,35 @@ class Day01Backtest(S1Backtest):
     def _close(
         self, tick: Tick, price: Decimal, reason: str, stop_triggered: bool, hypotheses: list[str] | None = None
     ) -> None:
-        dropped = self.pending_exit
+        pending = self.pending_exit
+        previous = self._last_tick  # still the tick before `tick`: it is updated after the events
         self.pending_exit = None  # the S1 engine would log a channel exit: DAY_01 has only the liquidation
         super()._close(tick, price, reason, stop_triggered, hypotheses)
         self.target = None
-        if dropped is not None:
+        if pending is not None:
+            self._record_liquidation(tick, pending, previous, reason)
+
+    def _record_liquidation(self, tick: Tick, pending: _PendingExit, previous: Tick | None, reason: str) -> None:
+        """Delay after 16:00, silence closed by the closing tick and closing reason, kept apart (sheet §5)."""
+        threshold, closures = self.day01.interruption_threshold, self.config.documented_closures
+        kind = Silence.NONE if previous is None else classify_silence(previous.ts_utc, tick.ts_utc, threshold, closures)
+        record = Liquidation(
+            pending.decided_utc,
+            tick.ts_utc,
+            reason,
+            None if previous is None else tick.ts_utc - previous.ts_utc,
+            kind,
+        )
+        self.liquidations.append(record)
+        silence = "inconnu" if record.silence is None else f"{record.silence} ({kind.value})"
+        self._log(
+            tick.ts_utc,
+            "LIQUIDATION_RÉSOLUE",
+            f"motif {reason} ; délai après 16:00 {record.delay_after_16h} ; silence clos par ce tick {silence}",
+        )
+        if reason != LIQUIDATION:
             self._log(tick.ts_utc, "LIQUIDATION_ABANDONNÉE", f"{reason} avant l'exécution de la liquidation")
+        if record.after_interruption:
+            self._log(tick.ts_utc, LIQUIDATION_AFTER_INTERRUPTION, f"silence {record.silence} > {threshold}")
+        if record.unplanned_night:
+            self._log(tick.ts_utc, UNPLANNED_NIGHT, "clôture après la fin de la journée de cotation de l'ordre")

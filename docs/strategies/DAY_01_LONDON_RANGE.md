@@ -284,7 +284,7 @@ d'un protocole distinct.
 
 ### 4.7 Position encore ouverte d'une séance précédente
 
-Une liquidation retardée (§5) peut laisser une position ouverte au début de la séance suivante.
+Une liquidation sans cotation à 16:00 (§5) peut laisser une position ouverte au début de la séance suivante.
 - Tant qu'elle subsiste, **aucune nouvelle entrée** n'est autorisée.
 - La séance du jour est quand même évaluée et journalisée : range, cassure, retest. Les comptes de
   disponibilité restent comparables.
@@ -356,8 +356,12 @@ Une liquidation retardée (§5) peut laisser une position ouverte au début de l
     Londres) : aucune nuit, donc aucun financement.
 - **Aucune cotation à 16:00** : convention proposée, sans prix invisible.
   1. Aucun prix n'est supposé à 16:00. La position reste ouverte, avec son stop et sa cible,
-     jusqu'au premier tick postérieur, qui l'exécute. Le délai est journalisé
-     (`LIQUIDATION_RETARDÉE`, avec sa durée).
+     jusqu'au premier tick postérieur, qui l'exécute. Trois grandeurs sont journalisées pour chaque
+     liquidation, sans les confondre (ADR-023) : le **délai après 16:00**, le **silence clos par le
+     tick de clôture** (durée et nature) et le **motif de clôture** (`LIQUIDATION_16H`, ou le stop ou
+     la cible qui l'ont précédée). `LIQUIDATION_APRÈS_INTERRUPTION` (ancien libellé
+     `LIQUIDATION_RETARDÉE`) compte exactement les liquidations exécutées par l'ordre de 16:00 au
+     premier tick qui clôt un silence de strictement plus de 5 minutes d'ouverture prévue.
   2. Si ce premier tick franchit déjà le stop ou la cible, la priorité du moteur s'applique : le
      stop d'abord (ASSUMP-024), puis la cible, puis la liquidation en attente.
   3. Si le silence est une interruption inexpliquée pendant laquelle le stop ou la cible ont pu
@@ -521,7 +525,8 @@ Rapportés, en plus des mesures du cahier (§9) et de celles de S3 :
 - parcours des séances aux entrées ;
 - résultats par jour de la semaine, par heure d'entrée, en heure d'hiver ou d'été et pendant les
   semaines de décalage ;
-- liquidations à 16:00, liquidations retardées, entrées expirées ;
+- liquidations à 16:00 (délai après 16:00, silence clos, motif de clôture), liquidations après
+  interruption, nuits non prévues, entrées expirées ;
 - rapports des distances estimés, nets estimés et obtenus à l'exécution, côte à côte ;
 - chevauchement et pertes simultanées avec S1, S2 et S3 ;
 - part des séances avec annonces non mesurable (limite du §3.4).
