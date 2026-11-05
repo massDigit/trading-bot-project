@@ -505,3 +505,18 @@ def test_silences_intersecting_a_day01_window_are_counted_even_if_they_start_bef
     assert gt5["intersection_raw_minutes"] == 14.0  # 8 + 6
     assert (gt10["distinct_silences"], gt10["intersection_open_minutes"]) == (1, 8.0)
     assert gt5["sessions_touched_by_subwindow"] == {"01-08": 1, "08-12": 1, "12-16": 0}
+
+
+def test_provenance_is_taken_at_launch_and_changes_during_the_run_are_reported_apart() -> None:
+    from forex_bot.history.intraday_audit import end_check
+
+    launch = {"commit": "abc", "uncommitted_diff_sha256": None, "uncommitted_files": []}
+    same = end_check(launch, dict(launch))
+    assert not same["changed_during_run"] and same["files_changed_during_run"] == []
+    edited = end_check(launch, {"commit": "abc", "uncommitted_diff_sha256": "d1", "uncommitted_files": ["docs/x.md"]})
+    assert edited["changed_during_run"] and edited["files_changed_during_run"] == ["docs/x.md"]
+    again = {"commit": "abc", "uncommitted_diff_sha256": "d1", "uncommitted_files": ["docs/x.md"]}
+    further = end_check(again, {**again, "uncommitted_diff_sha256": "d2"})
+    assert further["changed_during_run"] and further["files_changed_during_run"] == ["docs/x.md"]
+    moved = end_check(launch, {"commit": "def", "uncommitted_diff_sha256": None, "uncommitted_files": []})
+    assert moved["changed_during_run"]

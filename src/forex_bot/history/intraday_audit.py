@@ -537,32 +537,57 @@ def write_outputs(store: HistoryStore, source: str, instrument: str, build: Intr
     return hashes
 
 
-def provenance(argv: list[str] | None) -> dict[str, Any]:
+def _git(*command: str) -> str:
     executable = shutil.which("git")
+    if executable is None:
+        return ""
+    done = subprocess.run([executable, *command], capture_output=True, text=True, check=False)  # noqa: S603
+    return done.stdout.strip()
 
-    def git(*command: str) -> str:
-        if executable is None:
-            return ""
-        done = subprocess.run([executable, *command], capture_output=True, text=True, check=False)  # noqa: S603
-        return done.stdout.strip()
 
-    diff = git("diff", "HEAD")
+def tree_state() -> dict[str, Any]:
+    """Commit and uncommitted changes of the working tree, now."""
+    diff = _git("diff", "HEAD")
     return {
-        "commit": git("rev-parse", "HEAD"),
-        "branch": git("rev-parse", "--abbrev-ref", "HEAD"),
+        "commit": _git("rev-parse", "HEAD"),
         "uncommitted_diff_sha256": hashlib.sha256(diff.encode()).hexdigest() if diff else None,
+        "uncommitted_files": _git("diff", "HEAD", "--name-only").splitlines(),
+    }
+
+
+def provenance(argv: list[str] | None) -> dict[str, Any]:
+    """Provenance of a run, captured when it starts (the code that runs is the code at launch)."""
+    return {
+        **tree_state(),
+        "branch": _git("rev-parse", "--abbrev-ref", "HEAD"),
         "command": ["forex-intraday", *(sys.argv[1:] if argv is None else argv)],
-        "generated_at_utc": datetime.now(UTC).isoformat(timespec="seconds"),
+        "started_at_utc": datetime.now(UTC).isoformat(timespec="seconds"),
+    }
+
+
+def end_check(launch: dict[str, Any], end: dict[str, Any]) -> dict[str, Any]:
+    """Changes of the working tree between launch and the end of the run, reported apart."""
+    changed = sorted(set(end["uncommitted_files"]) ^ set(launch["uncommitted_files"])) or (
+        end["uncommitted_files"] if end["uncommitted_diff_sha256"] != launch["uncommitted_diff_sha256"] else []
+    )
+    return {
+        **end,
+        "finished_at_utc": datetime.now(UTC).isoformat(timespec="seconds"),
+        "changed_during_run": end["commit"] != launch["commit"]
+        or end["uncommitted_diff_sha256"] != launch["uncommitted_diff_sha256"],
+        "files_changed_during_run": changed,
     }
 
 
 def to_markdown(report: dict[str, Any]) -> str:
     p, c = report["provenance"], report["checks"]
+    changed = report.get("provenance_end_check", {}).get("files_changed_during_run")
     lines = [
         "# Audit M5/M15 EUR/USD 2015-2021 (détail, hors Git)",
         "",
-        f"Commit `{p['commit']}`, diff non commité : {p['uncommitted_diff_sha256'] or 'aucun'} ; "
+        f"Au lancement : commit `{p['commit']}`, diff non commité : {p['uncommitted_diff_sha256'] or 'aucun'} ; "
         f"commande `{' '.join(p['command'])}`.",
+        f"Changements pendant le passage : {changed or 'aucun'}.",
         f"Seuil de silence : {report['silence_threshold_min']:.0f} min ({report['silence_threshold_status']}).",
         f"Contrôles en échec : {', '.join(report['failed_checks']) or 'aucun'}.",
         "",
@@ -644,6 +669,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--convention", choices=sorted(CONVENTIONS), default=REFERENCE_10MIN.name)
     args = parser.parse_args(argv)
     convention = CONVENTIONS[args.convention]
+    launch = provenance(argv)
     store = HistoryStore(args.data_dir)
     reports = store.data_dir / "reports"
     reports.mkdir(parents=True, exist_ok=True)
@@ -688,7 +714,8 @@ def main(argv: list[str] | None = None) -> int:
     report = audit(build, read_h1(store, args.source, args.instrument), truncated)
     report.update(extra)
     after = existing_bar_hashes(store, args.source, args.instrument)
-    report["provenance"] = provenance(argv)
+    report["provenance"] = launch
+    report["provenance_end_check"] = end_check(launch, tree_state())
     report["outputs_sha256"] = outputs
     report["existing_bars_sha256"] = {"before": before, "after": after, "unchanged": before == after}
     report["failed_checks"] = checks_failed(report) + ([] if before == after else ["fichiers H1/H4/D1 modifiés"])

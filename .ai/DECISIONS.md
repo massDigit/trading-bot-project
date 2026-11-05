@@ -179,3 +179,27 @@
 - **Décision** : les résultats de l'étape 4 sont validés. S3 est **étudiée sur EUR/USD 2015-2021**. D1 → H4 reste la référence ; la variante H4 seule reste une comparaison. Effectif insuffisant pour conclure sur sa rentabilité (5 transactions, net de +5,62 € dépendant d'une seule). Faible apport observé par rapport à S1 selon le critère de chevauchement des pertes (4 pertes sur 4 simultanées à une perte S1). Aucun changement de paramètres ; aucun passage B ni rejet à ajouter, leurs conditions (§4 du protocole) n'étant pas réunies.
 - **Bilan versionné** : agrégé seulement (totaux annuels, meilleur gain, net sans ce gain, chevauchements) ; le détail transaction par transaction reste dans les rapports locaux, hors Git. Les blocages des cassures sont comptés au premier motif, dans l'ordre du moteur (données D1, expansion, direction D1, marché, taille).
 - **Suite autorisée** : fusion de la PR #16. Aucun rejeu, aucune nouvelle expérience ; 2022-2025 reste en réserve.
+
+### ADR-021 : Lot de données M5/M15 2015-2021 clôturé ; conventions de qualité et d'interruption propres à DAY_01
+- **Date** : 2026-11-05
+- **Statut** : `ACCEPTED` (décision de l'opérateur)
+- **Source** : messages de l'opérateur du 2026-11-05, après le bilan `docs/experiments/DATA_M5_M15_2015_2021_BILAN.md` (construction `36daea1`, recalcul DAY_01 `c0272cc`, PR #18).
+- **Décision** :
+  1. *Lot de données* : intégrité de la construction M5/M15 validée et lot clôturé, avec les limites documentées dans le bilan (jours fériés probables exclus, trou du 2015-05-06, ticks Dukascopy et non prix IG). ASSUMP-028 est **approuvée pour la recherche hors ligne**.
+  2. *Qualité des bougies DAY_01* : M5 sans tick absente et non `OK`, sans comblement ni qualification de « marché calme » ; M15 dont un sous-créneau M5 prévu est sans tick valide non `OK`, OHLC observés conservés avec le motif précis ; interruption si le silence dépasse **strictement 5 minutes** d'ouverture prévue, pour les M5 et les M15 ; à la clôture, seule la durée déjà connue compte ; l'audit rétrospectif reste séparé.
+  3. *Entrée encore en attente* : annulée dès qu'une interruption devient connue avant son exécution, y compris si le premier tick suivant la révèle (ce tick n'exécute pas) ; motif journalisé (`ENTRÉE_ANNULÉE_INTERRUPTION`), tentative consommée.
+  4. *Position déjà exécutée* : même seuil, strictement supérieur à 5 minutes d'ouverture prévue ; un silence d'exactement 5 minutes ne le dépasse pas. Une interruption ne signifie pas qu'un stop ou une cible a été touché : la transaction est conservée, jamais supprimée ni annulée rétroactivement ; le trou est traité selon les scénarios A/B/C prévus pour les issues non observables et journalisé. Une fermeture connue reste distincte d'une interruption inexpliquée.
+- **Portée** : conventions de recherche propres à DAY_01. Elles ne changent ni les ticks, ni les statuts H1/H4/D1 existants, ni l'ATR H4 déjà spécifié (qui garde ses règles et son seuil), ni les moteurs et références S1-S3. La référence d'audit à 10 minutes est conservée pour comparaison.
+- **Suite autorisée** : fusion de la PR #18 après mise à jour de la fiche et contrôles.
+
+### ADR-022 : Fiche DAY_01 figée (ASSUMP-027) pour la recherche hors ligne
+- **Date** : 2026-11-05
+- **Statut** : `ACCEPTED` (décision de l'opérateur, sous condition vérifiée)
+- **Source** : message de l'opérateur du 2026-11-05 : figer ASSUMP-027 après vérification qu'aucun arbitrage n'est encore implicitement ouvert. Vérification faite sur la fiche entière : aucun arbitrage ne demande de décision (fiche §11).
+- **Décision** : ASSUMP-027 est **approuvée pour la recherche hors ligne** ; `docs/strategies/DAY_01_LONDON_RANGE.md` est figée.
+  1. Choix retenus explicitement par l'opérateur le 2026-11-05 : confirmation possible sur la M5 du contact ; `k = 1,5` sans filtre sur le rapport net ; validité de l'entrée de 5 minutes ; stop garanti simulé sans minimum IG confirmé, hypothèse qui ne valide pas son exécutabilité chez IG ; conventions de l'ADR-021.
+  2. Les autres lignes du §11 sont retenues telles que proposées : valeurs choisies a priori, revues par l'opérateur au fil de trois révisions et fusionnées (PR #17), sans grille ni optimisation.
+  3. Conséquences consignées, sans nouveau choix (fiche §4.5, exemple C) :
+     - une bougie de confirmation `OK` à sa clôture exclut tout silence connu de plus de 5 minutes : le dernier tick avant `D` date donc de 5 minutes au plus, en référence M5 comme en variante M15 ; l'écart entre la cotation à `D` et l'exécution est au plus de 10 minutes dans les deux cas ;
+     - sans tick admissible dans `]D, D + 5 min]`, le silence dépasse 5 minutes avant l'échéance : l'issue est `ENTRÉE_ANNULÉE_INTERRUPTION`, non `ENTRÉE_EXPIRÉE`. `ENTRÉE_EXPIRÉE` reste définie, mais ne pourrait survenir que si l'ouverture prévue s'arrêtait pendant la validité, ce qu'aucune séance DAY_01 ne permet.
+- **Suite autorisée** : depuis `main`, sur une branche distincte, moteur DAY_01 hors ligne et tests synthétiques, en PR brouillon. Aucun passage historique DAY_01, aucun entraînement, aucune lecture de 2022-2025, aucun ordre.
