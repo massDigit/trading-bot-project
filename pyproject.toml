@@ -29,6 +29,7 @@ dev = [
 ig-demo-diagnostic = "forex_bot.diagnostic:main"
 ig-price-probe = "forex_bot.price_probe:main"
 forex-history = "forex_bot.history.cli:main"
+forex-intraday = "forex_bot.history.intraday_audit:main"
 forex-backtest-explore = "forex_bot.backtest.explore:main"
 forex-backtest-compare = "forex_bot.backtest.compare:main"
 forex-s2-availability = "forex_bot.backtest.s2_availability:main"

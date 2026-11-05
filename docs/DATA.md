@@ -198,6 +198,20 @@ comptées mais conservées, car indiscernables d'une cotation répétée.
 - H4 et D1 sont agrégées à partir des H1 (frontières sur des heures pleines : résultat identique
   à une agrégation des ticks).
 
+### 5.1 Bougies M5 et M15 (lot DAY_01, 2015-2021, ASSUMP-028 proposée)
+
+- Construites **directement depuis les ticks** (`history/intraday.py`, `forex-intraday`), sans
+  toucher au code ni aux fichiers H1/H4/D1 ; sorties `data/bars/<source>/<instrument>/intraday_2015_2021/`.
+- Seuls les fichiers dont la période déclarée tombe dans 2015-2021 sont ouverts (sélection par
+  manifeste) ; toute autre fenêtre est refusée.
+- Contenu du créneau : `VALID`, `INVALID_ONLY` ou `EMPTY` (créneau d'ouverture prévue sans tick),
+  prix vides hors `VALID`, aucun comblement. État à la clôture calculé pour chaque unité ; audit
+  rétrospectif à part. Seuil de silence de 10 min : référence de comparaison (premier audit).
+- **Convention de qualité DAY_01** (2026-11-05) : silence > 5 min, M5 sans tick et M15 à
+  sous-créneau M5 vide non `OK` ; statuts recalculés sur les bougies existantes, sorties à part
+  (`intraday_2015_2021_day01_5min/`) ; `forex-intraday --leak-cut 2018-07-01 --convention day01_5min`.
+- Protocole, contrôles et résultats : `docs/experiments/DATA_M5_M15_2015_2021.md` et `_BILAN.md`.
+
 ## 6. Rapport qualité
 
 `data/reports/quality_<source>_<instrument>.{json,md}` : couverture, ordre chronologique,
@@ -269,6 +283,7 @@ tools/jforex-ticks/run.sh --env-file <fichier d'environnement> --from 2015-01-01
 uv run forex-history ingest-jforex --dir data/dukascopy-sdk/ticks/EURUSD
 uv run forex-history build      # bougies H1/H4/D1 + rapport qualité
 uv run forex-history status
+uv run forex-intraday --leak-cut 2018-07-01  # bougies M5/M15 2015-2021 + audit (lot DAY_01)
 uv run forex-history purge-dukascopy             # liste ; --confirm pour supprimer (avertissement Dukascopy)
 ```
 

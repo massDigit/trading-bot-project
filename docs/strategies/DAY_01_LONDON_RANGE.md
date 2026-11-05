@@ -1,10 +1,10 @@
 # Fiche DAY_01 — Cassure du range précédant Londres et retest (day trading)
 
 > Identifiant code : `DAY_01` (candidate « D1 » du cahier des charges ; dans le code, `1d` désigne
-> la bougie journalière). Statut : **candidate en cours de spécification** (cahier §6.6) :
-> **aucun moteur, aucun test, aucun passage**. Les valeurs numériques de cette fiche sont des
-> **propositions** (ASSUMP-027, `PROPOSED`), choisies a priori, sans lecture de données ni
-> optimisation ; elles attendent la validation de l'opérateur. Instrument : **EUR/USD seulement**.
+> la bougie journalière). Statut : **fiche figée le 2026-11-05** (ASSUMP-027 `APPROVED`, ADR-022 ;
+> conventions de données et d'interruption : ADR-021), portée **recherche hors ligne**. Aucun
+> passage historique. Les valeurs numériques ont été choisies a priori, sans lecture de résultats
+> ni optimisation ; elles ne seront pas modifiées au vu des résultats. Instrument : **EUR/USD seulement**.
 > Aucune donnée 2022-2025. Ni validation de performance ni autorisation de trading.
 
 **Libellés.** Comme dans les fiches S2 et S3, **H4, H1, M15 et M5 désignent des unités de temps**,
@@ -14,7 +14,7 @@ heure locale de Londres** (`Europe/London`, GMT l'hiver, BST l'été), sauf ment
 
 **Ce qui est imposé et ce qui est proposé.** Chaque section sépare :
 - **Exigé (cahier v1.2)** : contraintes du cahier des charges, paraphrasées avec leur section ;
-- **Proposé (ASSUMP-027)** : valeurs et conventions de cette fiche, à valider (§11).
+- **Proposé (ASSUMP-027)** : valeurs et conventions de cette fiche, retenues au gel (§11).
 
 ## 1. Hypothèse de marché et références
 
@@ -88,7 +88,20 @@ référence.
 - **Qualité d'abord** : l'état de la bougie est vérifié **avant** d'interpréter sa clôture comme
   une cassure, une invalidation ou une confirmation. Une clôture d'une bougie non `OK` n'est
   jamais lue.
-- Ces états seront définis par le lot de données M15/M5 (§10), pas par cette fiche.
+- **Convention de qualité DAY_01** (retenue par l'opérateur le 2026-11-05, ASSUMP-028, protocole
+  `docs/experiments/DATA_M5_M15_2015_2021.md` §9). C'est une convention de recherche : elle ne
+  change ni les données, ni les H1/H4/D1, ni les références S1-S3.
+  - **M5 sans tick** : absente et non `OK`. Pas de comblement, pas de « marché calme ».
+  - **M15 dont un sous-créneau M5 prévu est sans tick valide** : non `OK`. Ses OHLC observés sont
+    conservés, avec le motif « sous-créneaux M5 sans tick valide : k/3 ».
+  - **Silence** : interruption s'il dépasse **strictement 5 minutes** de temps d'ouverture prévue,
+    pour les M5 comme pour les M15. Un silence d'exactement 5 min n'en est pas une.
+  - **État à la clôture** : seule la durée de silence **déjà connue** à la clôture compte.
+    L'audit rétrospectif reste séparé et ne sert jamais à une décision.
+  - Le même seuil vaut pour les entrées en attente (§4.5) et les positions ouvertes (§5, ADR-021).
+    Une **fermeture connue** (fermeture hebdomadaire prévue) reste distincte d'une interruption
+    inexpliquée. Ces règles ne changent ni les statuts H1/H4/D1, ni l'ATR H4 (§4.1), qui gardent
+    leurs règles et leur seuil de 10 min.
 
 ### 3.3 Heure de Londres et changements d'heure
 
@@ -225,27 +238,39 @@ clôturer au-delà de `RH`. Elle est alors à la fois la M5 de retest et la M5 d
   de toute façon annulée à la liquidation de 16:00.
 - **Confirmation exactement à 12:00** : la M5 [11:55, 12:00) est disponible à `D = 12:00:00.000`.
   Un tick horodaté exactement à 12:00:00.000 n'exécute pas l'ordre (exécution strictement
-  postérieure). Exécution au premier tick admissible de ]12:00:00, 12:05:00], sinon
-  `ENTRÉE_EXPIRÉE` à 12:05:00 (exemple C du §7).
+  postérieure), mais il compte comme cotation pour la mesure du silence. Exécution au premier tick
+  admissible de ]12:00:00, 12:05:00] ; sinon annulation pour interruption dès que le silence dépasse
+  5 minutes (exemple C du §7).
 - **Trois durées distinctes** :
   - **fraîcheur à la décision** : le dernier tick avant `D` doit tomber dans la M5 de confirmation,
     donc dater de 5 minutes au plus (§4.4) ;
   - **validité de l'entrée** : 5 minutes après `D` ;
-  - **seuil de silence** : 10 minutes aujourd'hui, à réexaminer par le lot M15/M5 (§10).
+  - **seuil de silence** : **strictement plus de 5 minutes** d'ouverture prévue (retenu le
+    2026-11-05, §3.2).
 - **Référence M5** : la cotation utilisée à `D` date de `[D − 5 min, D[` et l'exécution tombe dans
-  `]D, D + 5 min]`. Le silence entre ces deux ticks est donc **au plus 10 minutes**. Avec la
-  convention actuelle (interruption si le silence, en temps d'ouverture attendu, dépasse
-  strictement 10 minutes), le tick d'exécution ne peut pas clore une interruption inexpliquée.
-  Cette propriété dépend du seuil : un seuil M5 plus court, décidé après le lot de données,
-  pourrait la rompre.
-- **Variante M15** : la cotation à `D` peut dater de `[D − 15 min, D[` (fraîcheur sur la M15 de
-  confirmation). Avec la même validité de 5 minutes, le silence entre cette cotation et
-  l'exécution peut atteindre **20 minutes** : le tick d'exécution peut alors clore une
-  interruption de plus de 10 minutes.
-- La cohérence de ces trois durées sera vérifiée avec la règle de silence retenue à l'issue du lot
-  M15/M5, avant le moteur. La conduite à tenir pour une entrée en attente dont le premier tick
-  clôt une interruption (exécuter, journaliser ou annuler) **reste ouverte** ; elle sera proposée
-  à l'opérateur à ce moment-là.
+  `]D, D + 5 min]`. Le silence entre ces deux ticks peut donc atteindre 10 minutes, soit **plus que
+  le seuil de 5 minutes**. Une interruption peut ainsi survenir pendant la validité de l'entrée.
+  Avec l'ancien seuil de 10 minutes, ce n'était pas possible.
+- **Variante M15** : la fraîcheur est jugée sur la M15 de confirmation, soit une cotation dans
+  `[D − 15 min, D[`. Mais une M15 `OK` à sa clôture exclut tout silence connu de plus de 5 minutes
+  (§3.2) : la cotation à `D` date donc de **5 minutes au plus**, comme en référence M5. L'écart entre
+  cette cotation et l'exécution est au plus de 10 minutes dans les deux cas (ADR-022). L'écart de 20
+  minutes envisagé avec l'ancien seuil n'existe plus.
+- **Entrée en attente et interruption** (retenu le 2026-11-05) :
+  - **Annulation** : l'entrée en attente est annulée dès qu'une interruption devient connue avant
+    son exécution, c'est-à-dire dès que le silence depuis la dernière cotation dépasse 5 minutes
+    d'ouverture prévue sans tick.
+  - **Tick révélateur** : la règle vaut aussi quand c'est le premier tick suivant qui révèle
+    l'interruption. Ce tick **n'exécute pas** l'ordre.
+  - **Issue** : `ENTRÉE_ANNULÉE_INTERRUPTION`, journalisée avec la durée du silence. La tentative
+    de la séance est consommée.
+  - **Transactions exécutées** : une transaction déjà exécutée n'est jamais supprimée. Une
+    interruption pendant une position ouverte relève du §5 (scénarios A, B et C).
+- **Conséquence pour l'échéance** (ADR-022) : la cotation à `D` date de moins de 5 minutes. Sans
+  tick admissible dans `]D, D + 5 min]`, le silence dépasse donc 5 minutes **avant** l'échéance,
+  et l'entrée est annulée pour interruption (`ENTRÉE_ANNULÉE_INTERRUPTION`, à l'instant où le
+  silence dépasse 5 minutes). `ENTRÉE_EXPIRÉE` reste définie, mais ne pourrait survenir que si
+  l'ouverture prévue s'arrêtait pendant la validité, ce qu'aucune séance DAY_01 ne permet.
 
 ### 4.6 Nombre de tentatives (proposé)
 
@@ -341,6 +366,24 @@ Une liquidation retardée (§5) peut laisser une position ouverte au début de l
      (`NUIT_NON_PRÉVUE`). La séance suivante applique le §4.7.
   5. Si aucun tick n'arrive avant la fin de l'étude : position ouverte valorisée, sans sortie
      inventée (§4.7).
+- **Interruption pendant une position ouverte** (ADR-021), à tout moment entre l'exécution et la
+  sortie, pas seulement à 16:00 :
+  - Interruption : silence de **strictement plus de 5 minutes** d'ouverture prévue. Un silence
+    d'exactement 5 minutes n'en est pas une.
+  - Une interruption ne signifie pas que le stop ou la cible ont été touchés. La transaction est
+    **conservée**, jamais supprimée ni annulée rétroactivement. Elle est marquée indéterminée, et le
+    trou est journalisé (début, fin, cotations qui l'encadrent).
+  - Traitement selon les scénarios de S2 (§7 de S2), chacun rejoué en entier :
+    - **A**, observé seulement : seule la première cotation après le trou compte. Si elle est
+      au-delà d'une borne, cette borne s'exécute ; sinon la position continue ;
+    - **B**, stop d'abord : sortie au niveau du stop garanti, comptabilisée au premier tick qui
+      clôt le trou ;
+    - **C**, cible d'abord : sortie au niveau `T`, comptabilisée au premier tick qui clôt le trou,
+      sans amélioration de prix invisible.
+  - Une **fermeture connue** n'est pas une interruption inexpliquée. La première cotation après la
+    fermeture s'applique comme une cotation observée : stop ou cible si elle les franchit.
+  - **Entrée en attente et position exécutée sont distinctes** : la première est annulée (§4.5),
+    la seconde n'est jamais annulée.
 - **Pas de sortie temporelle intermédiaire** : seuls le stop, la cible ou la liquidation de 16:00
   ferment la position.
 
@@ -420,8 +463,11 @@ La M5 [11:55, 12:00) confirme : `D = 12:00:00.000`, dernière décision possible
 | Instant | Événement | Effet |
 |---|---|---|
 | 12:00:00.000 | décision ; un tick est horodaté exactement à 12:00:00.000 | ce tick n'exécute pas l'ordre (`ts > D` exigé) |
-| ]12:00:00, 12:05:00] | premier tick admissible | **entrée** à son prix |
-| 12:05:00 | aucun tick admissible dans l'intervalle | **`ENTRÉE_EXPIRÉE`**, aucune exécution supposée ; séance consommée |
+| ]12:00:00, 12:05:00] | premier tick admissible, moins de 5 min après la cotation à `D` | **entrée** à son prix |
+| ]12:00:00, 12:05:00] | silence depuis la cotation à `D` (par exemple 11:59:58.300) supérieur à 5 min (ici à 12:04:58.300), ou premier tick qui le révèle | **`ENTRÉE_ANNULÉE_INTERRUPTION`** ; ce tick n'exécute pas ; aucune exécution supposée ; séance consommée (§4.5) |
+
+`ENTRÉE_EXPIRÉE` à 12:05:00 supposerait qu'aucun tick n'arrive sans que le silence dépasse 5 minutes.
+C'est impossible ici : la cotation à `D` date de moins de 5 minutes (§4.5).
 
 ## 8. Abstentions et non-exécutions (première cause journalisée)
 
@@ -445,7 +491,10 @@ Une **entrée décidée** a ensuite une seule issue :
 - exécutée, position ouverte ;
 - exécutée puis liquidée (`STOP_DÉPASSÉ_À_L'EXÉCUTION`) ;
 - exécutée puis sortie à la cible sur le même tick (`CIBLE_ATTEINTE_À_L'EXÉCUTION`) ;
-- **non exécutée** : `ENTRÉE_EXPIRÉE` (aucun tick admissible avant l'échéance du §4.5).
+- **non exécutée** : `ENTRÉE_EXPIRÉE` (aucun tick admissible avant l'échéance du §4.5 ; ne peut pas
+  survenir dans une séance DAY_01 ouverte, voir la conséquence du §4.5) ;
+- **non exécutée** : `ENTRÉE_ANNULÉE_INTERRUPTION` (interruption connue avant l'exécution, y compris
+  révélée par le premier tick suivant, §4.5) ; tentative consommée.
 
 Comme pour S3, les motifs sont comptés **au premier blocage** : un blocage à une étape ne dit
 rien des étapes suivantes. Chaque entrée décidée doit être attestée par une transaction ou par
@@ -475,7 +524,12 @@ Rapportés, en plus des mesures du cahier (§9) et de celles de S3 :
 - chevauchement et pertes simultanées avec S1, S2 et S3 ;
 - part des séances avec annonces non mesurable (limite du §3.4).
 
-## 10. Préalable : lot de données M15/M5 (distinct, à venir)
+## 10. Préalable : lot de données M15/M5
+
+> **Réalisé le 2026-11-05** (PR #18) : M5 et M15 2015-2021 construites directement depuis les
+> ticks, puis auditées (`docs/experiments/DATA_M5_M15_2015_2021.md` et `_BILAN.md`). Intégrité
+> validée par l'opérateur ; convention de qualité DAY_01 au §3.2. Le texte ci-dessous est le
+> cahier des charges du lot, conservé tel qu'écrit avant sa réalisation.
 
 Les bougies M15 et M5 **n'existent pas encore** : le code ne construit que H1, H4 et D1
 (`history/calendar.py`). Les ticks EUR/USD 2015-2021 sont présents en local. Un lot distinct
@@ -547,7 +601,10 @@ couvrir :
   - séances avec les M5 complètes de 08:00 à 12:00.
 - **Bornes** : 2015-2021 seulement, lecteur refusant 2022-2025 ; sorties hors Git (`data/`).
 
-## 11. Arbitrages à valider par l'opérateur
+## 11. Arbitrages (tous tranchés au gel du 2026-11-05, ADR-022)
+
+Les lignes marquées « retenu » ont été choisies explicitement par l'opérateur. Les autres sont
+retenues telles que proposées.
 
 | # | Point | Proposition de référence | Alternatives |
 |---|---|---|---|
@@ -570,4 +627,6 @@ couvrir :
 | 17 | Cotation à `D` | dernier tick avant `D` dans la M5 de confirmation, bid ≤ ask | fraîcheur plus courte (par exemple 60 s) |
 | 18 | Stop admissible | du bon côté du prix de sortie courant, distance strictement positive ; distance minimale IG non modélisée | distance minimale une fois confirmée chez IG (ASSUMP-008) |
 | 19 | Position de la veille | aucune entrée tant qu'elle subsiste ; séance consommée sans rattrapage | autoriser une décision après sa clôture, dans le délai de retest |
-| 20 | Seuil de silence M5 (ouvert) | à examiner par le lot de données, sur les seules cotations ; cohérence avec la fraîcheur à la décision et la validité de l'entrée vérifiée ensuite (§4.5) | conserver 10 min |
+| 20 | Seuil de silence M5 et M15 (**retenu le 2026-11-05** : strictement plus de 5 min) | interruption au-delà de 5 min d'ouverture prévue ; à la clôture, seule la durée déjà connue compte (§3.2) ; même seuil pour les positions ouvertes, transaction conservée, scénarios A/B/C (§5, ADR-021) | 10 min (référence de comparaison conservée) |
+| 21 | M5 sans tick ; M15 à sous-créneau vide (**retenu le 2026-11-05**) | M5 absente, non `OK` ; M15 non `OK`, OHLC observés conservés, motif précis | M15 jugée sur ses seuls ticks |
+| 22 | Entrée en attente et interruption (**retenu le 2026-11-05**) | annulation dès qu'une interruption est connue avant l'exécution, y compris révélée par le premier tick suivant ; `ENTRÉE_ANNULÉE_INTERRUPTION`, tentative consommée ; aucune transaction exécutée supprimée | exécuter et journaliser |
