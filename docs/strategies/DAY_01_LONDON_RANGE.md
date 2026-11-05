@@ -232,14 +232,20 @@ clôturer au-delà de `RH`. Elle est alors à la fois la M5 de retest et la M5 d
     donc dater de 5 minutes au plus (§4.4) ;
   - **validité de l'entrée** : 5 minutes après `D` ;
   - **seuil de silence** : 10 minutes aujourd'hui, à réexaminer par le lot M15/M5 (§10).
-- Ces durées ne s'additionnent pas simplement. Un silence se mesure depuis la **dernière
-  cotation**, qui peut déjà dater de près de 5 minutes à `D`. Un tick reçu dans la validité de
-  l'entrée peut donc clore un silence proche de 10 minutes, voire plus long, et classé comme
-  interruption. La validité de 5 minutes **n'empêche pas** à elle seule une exécution après une
-  interruption inexpliquée.
+- **Référence M5** : la cotation utilisée à `D` date de `[D − 5 min, D[` et l'exécution tombe dans
+  `]D, D + 5 min]`. Le silence entre ces deux ticks est donc **au plus 10 minutes**. Avec la
+  convention actuelle (interruption si le silence, en temps d'ouverture attendu, dépasse
+  strictement 10 minutes), le tick d'exécution ne peut pas clore une interruption inexpliquée.
+  Cette propriété dépend du seuil : un seuil M5 plus court, décidé après le lot de données,
+  pourrait la rompre.
+- **Variante M15** : la cotation à `D` peut dater de `[D − 15 min, D[` (fraîcheur sur la M15 de
+  confirmation). Avec la même validité de 5 minutes, le silence entre cette cotation et
+  l'exécution peut atteindre **20 minutes** : le tick d'exécution peut alors clore une
+  interruption de plus de 10 minutes.
 - La cohérence de ces trois durées sera vérifiée avec la règle de silence retenue à l'issue du lot
   M15/M5, avant le moteur. La conduite à tenir pour une entrée en attente dont le premier tick
-  clôt une interruption (exécuter, journaliser ou annuler) sera alors proposée à l'opérateur.
+  clôt une interruption (exécuter, journaliser ou annuler) **reste ouverte** ; elle sera proposée
+  à l'opérateur à ce moment-là.
 
 ### 4.6 Nombre de tentatives (proposé)
 
