@@ -37,8 +37,9 @@
 - [ ] Calibrage Dukascopy / IG sur une période commune : prix et bougies, signaux, coûts et conditions d'exécution, séparément (ouverture de 2026 dans l'adaptateur : décision de l'opérateur)
 - [ ] Mention « Powered by Dukascopy » si les données sont intégrées à une interface (licence, section 8)
 - [x] Fiche S2 (`docs/strategies/S2_PULLBACK.md`) : approuvée (ADR-015), implémentée et évaluée sur 2015-2021 (ADR-016)
-- [ ] Fiche DAY_01 (candidate « D1 », première vague) : `docs/strategies/DAY_01_LONDON_RANGE.md`, ASSUMP-027 proposée, en cours de validation ; EUR/USD seulement ; aucun moteur
-- [ ] Lot de données M15/M5 (à venir, avant tout moteur DAY_01) : agrégation bid/ask depuis les ticks locaux, bornes, heure de Londres, bougie absente ou inutilisable, état connu à la clôture, audit de couverture 2015-2021 (fiche DAY_01 §10)
+- [ ] Fiche DAY_01 (candidate « D1 », première vague) : `docs/strategies/DAY_01_LONDON_RANGE.md`, ASSUMP-027 proposée, non figée ; EUR/USD seulement ; aucun moteur
+- [x] Fiche DAY_01 fusionnée (PR #17), points ouverts conservés dans ASSUMP-027
+- [ ] Lot de données M15/M5 2015-2021 : construit et audité (protocole `docs/experiments/DATA_M5_M15_2015_2021.md`, bilan `..._BILAN.md`, ASSUMP-028), contrôles conformes ; **en attente de la décision de l'opérateur** sur la qualité, la règle M5 sans tick et la règle de silence, avant tout moteur DAY_01
 - [x] Fiche S3 (`docs/strategies/S3_SQUEEZE.md`) : ASSUMP-026 approuvée pour la recherche hors ligne (ADR-018, 2026-11-04)
 - [x] S3 étape 1 : moteur hors ligne et 28 tests synthétiques (PR #13, `51f1507`, 2026-11-04)
 - [x] S3 étape 2 : rejeu de non-régression S1 sur avril-juin 2019 sur `51f1507` : 6 transactions, solde (1 992,04 €) et journal des 390 décisions identiques à la référence (2026-11-04)
