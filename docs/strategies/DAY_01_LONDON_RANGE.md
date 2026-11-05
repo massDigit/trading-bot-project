@@ -65,9 +65,10 @@ heure locale de Londres** (`Europe/London`, GMT l'hiver, BST l'été), sauf ment
 Les décalages de Londres et de New York avec UTC sont des nombres entiers d'heures. Les bornes
 M15 et M5 tombent donc aux mêmes instants en UTC, à Londres et à New York.
 
-**Variante plus simple, enregistrée comme comparaison** (cahier §6.5) : **M15 seule**. Le retest,
-l'invalidation, la confirmation et le stop sont lus sur M15 au lieu de M5, avec les mêmes règles
-et les mêmes délais. Elle ne remplace pas la référence.
+**Variante plus simple, enregistrée comme comparaison** (cahier §6.5) : **« H4 → M15, retest et
+confirmation sur M15 »**. Elle garde l'ATR H4 et le range M15 ; le retest, l'invalidation, la
+confirmation et le stop sont lus sur M15 au lieu de M5, avec les mêmes règles et les mêmes délais.
+Elle ne remplace pas la référence.
 
 ### 3.2 Série, disponibilité et états de bougie
 
@@ -76,9 +77,15 @@ et les mêmes délais. Elle ne remplace pas la référence.
 - Disponibilité : `available_at_utc = end_utc + L`, latence `L = 0`, comme S1 (§5 de S1,
   ADR-006). Décision à `D = available_at_utc` de la bougie qui la déclenche, avec les seules
   bougies disponibles à `D`.
-- Bougie **utilisable** : `OK` ou `FERMETURE_DOCUMENTÉE` (S1 §10.1). Une M15 ou une M5 **prévue
-  mais absente**, ou présente mais **inutilisable**, rompt la règle qui en a besoin (§4, §8). Ces
-  états seront définis par le lot de données M15/M5 (§10), pas par cette fiche.
+- **Bougie exigée `OK`** (proposé) : toute M15 ou M5 lue par DAY_01 (range, cassure, retest,
+  invalidation, confirmation) doit être à l'état `OK`. Contrairement à S1, une
+  `FERMETURE_DOCUMENTÉE` ne compte pas comme utilisable : une bougie touchée par une fermeture ne
+  déclenche ni ne construit rien. Une M15 ou une M5 **prévue mais absente**, ou présente mais non
+  `OK`, rompt la règle qui en a besoin (§4, §8).
+- **Qualité d'abord** : l'état de la bougie est vérifié **avant** d'interpréter sa clôture comme
+  une cassure, une invalidation ou une confirmation. Une clôture d'une bougie non `OK` n'est
+  jamais lue.
+- Ces états seront définis par le lot de données M15/M5 (§10), pas par cette fiche.
 
 ### 3.3 Heure de Londres et changements d'heure
 
@@ -116,7 +123,7 @@ et les mêmes délais. Elle ne remplace pas la référence.
 - Un filtre d'annonces relèvera d'un **protocole distinct**, après acquisition d'un calendrier
   historique horodaté et contrôlé. Il ne sera pas réglé sur les résultats de la référence.
 
-## 4. Range, cassure, retest et entrée (achat ; vente au §4.6)
+## 4. Range, cassure, retest et entrée (achat ; vente au §4.8)
 
 Une **séance** est un jour ouvré du lundi au vendredi, en heure de Londres. Pas de séance le
 25 décembre ni le 1er janvier (« jour férié probable », ASSUMP-023), ni un jour où la fenêtre du
@@ -134,7 +141,7 @@ range tombe dans une fermeture.
   `H = RH − RL`. Pour le stop d'une vente : `RAH` = plus haut `ask_high`.
 - **Gel** : à `G` = 08:00:00 Londres, disponibilité de la M15 [07:45, 08:00). Le range n'est
   plus jamais modifié ensuite.
-- **Complétude** : les 28 M15 doivent être présentes et utilisables. Sinon, aucune séance ce
+- **Complétude** : les 28 M15 doivent être présentes et `OK`. Sinon, aucune séance ce
   jour-là (« range incomplet »), sans range partiel.
 - **ATR `A`** : Wilder 14 H4, true range bid, continuité des H4 prévues (règle de S2 et S3),
   calculé sur la dernière H4 disponible à `G`. Il est figé pour la séance. Non calculable :
@@ -150,49 +157,107 @@ range tombe dans une fermeture.
 - **Cassure haussière** : première M15 de la fenêtre dont `bid_close > RH + 0,1 × A`. Une clôture
   au-delà de `RH` mais en deçà de la marge n'est pas une cassure.
 - Instant `K` = disponibilité de cette M15. La cassure consomme la séance (§4.5).
-- **Données** : une M15 de la fenêtre absente ou inutilisable met fin à la recherche de cassure
-  pour la séance, sans supposer de clôture.
+- **Données** : une M15 de la fenêtre absente ou non `OK` met fin à la recherche de cassure pour
+  la séance, sans lire ni supposer de clôture.
 - Aucune cassure confirmée à 11:00 : séance sans signal.
 
 ### 4.3 Retest, invalidation et confirmation (proposé)
 
-Zone de retest : `[RH − 0,1 × A, RH + 0,1 × A]`. Les M5 lues sont celles qui commencent à `K` ou
-après.
+Zone de retest de l'achat : `[Z_b, Z_h] = [RH − 0,1 × A, RH + 0,1 × A]`. Les M5 lues sont celles
+qui commencent à `K` ou après. Chaque M5, à sa disponibilité, est examinée dans cet ordre :
 
-1. **Retour** : première M5 dont `bid_low ≤ RH + 0,1 × A`. Cette M5 est la **M5 de retest**.
-2. **Invalidation** : toute M5, depuis `K` jusqu'à la confirmation, dont `bid_close < RH − 0,1 × A`.
-   La tentative échoue (fausse cassure) et la séance est consommée.
-3. **Confirmation** : première M5, à partir de la M5 de retest incluse, dont `bid_close > RH`,
-   sans invalidation auparavant. Une clôture dans la zone mais en deçà ou à `RH` ne confirme pas
-   et n'invalide pas ; on attend la M5 suivante.
-4. **Délai maximal** : la M5 de confirmation doit se terminer au plus tard à `K + 60 min`
-   (12 M5). Sinon, abandon (« délai de retest dépassé »), y compris quand le prix est parti sans
-   revenir : pas de poursuite du prix.
-5. **Données** : une M5 absente ou inutilisable entre `K` et la confirmation entraîne l'abandon
-   de la tentative.
+1. **Qualité** : la M5 doit être présente et `OK`. Sinon, abandon de la tentative (« données
+   inutilisables pendant le retest »), sans lire sa clôture.
+2. **Invalidation** : `bid_close < Z_b`. La tentative échoue (fausse cassure) et la séance est
+   consommée.
+3. **Contact** (si aucun contact antérieur) : recoupement de la zone, `bid_low ≤ Z_h` **et**
+   `bid_high ≥ Z_b`. La première M5 qui recoupe la zone est la **M5 de retest**.
+4. **Confirmation** : à partir de la M5 de retest **incluse**, première M5 dont `bid_close > RH`.
+   Une clôture dans la zone, en deçà de `RH` ou égale à `RH`, ne confirme pas et n'invalide pas :
+   on attend la M5 suivante.
+5. **Délai** : la M5 de confirmation doit se terminer au plus tard à `K + 60 min` (12 M5). Sinon,
+   abandon (« délai de retest dépassé »), y compris quand le prix est parti sans revenir : pas de
+   poursuite du prix.
 
-L'entrée la plus tardive possible est donc à 12:00 Londres (cassure connue à 11:00, plus 60 min).
+**Recoupement OHLC et ticks.** Le contact est défini sur les extrêmes de la M5. Un recoupement
+OHLC **ne prouve pas** qu'un tick a coté dans la zone : le prix peut la traverser entre deux
+ticks consécutifs. La règle reste celle des bougies, identique en historique et en direct. Le lot
+de données pourra enregistrer, à titre descriptif seulement, si un tick a coté dans la zone.
+
+**Confirmation sur la bougie du contact** (proposée) : une même M5 peut recouper la zone et
+clôturer au-delà de `RH`. Elle est alors à la fois la M5 de retest et la M5 de confirmation
+(exemple B du §7). L'alternative, confirmation sur une M5 postérieure seulement, est un arbitrage
+(§11).
 
 ### 4.4 Décision d'entrée (instant `D`)
 
-`D` = disponibilité de la M5 de confirmation. Entrée décidée si :
-- aucune position DAY_01 ouverte, ce qui est garanti par une seule tentative par séance ;
-- marché ouvert à `D` ;
-- `D` antérieur à la liquidation de 16:00 ;
-- taille admise par le budget de risque (§6.2).
+`D` = disponibilité de la M5 de confirmation. La décision lit l'état **strictement antérieur à
+`D`**. Entrée décidée si, dans cet ordre :
+1. **aucune position DAY_01 ouverte**, y compris une position de la veille dont la liquidation
+   est encore en attente (§4.7). Une seule tentative par séance ne suffit pas à le garantir ;
+2. marché ouvert à `D` selon le calendrier ;
+3. **cotation à `D`** : un dernier tick strictement antérieur à `D`, dans la M5 de confirmation
+   (`ts ≥ D − 5 min`), avec bid et ask positifs et bid ≤ ask. Il donne `P_D` (ask à l'achat,
+   bid à la vente) et le prix de sortie courant (bid à l'achat, ask à la vente). Sinon,
+   abstention « absence de cotation à `D` » ;
+4. **stop admissible** (§5) : à l'achat, `S` strictement en dessous du bid courant et `P_D − S > 0` ;
+   à la vente, `S` strictement au-dessus de l'ask courant et `S − P_D > 0`. Sinon, abstention
+   « stop non admissible ». La distance minimale d'un stop chez IG n'est pas confirmée
+   (ASSUMP-008) : elle n'est pas modélisée ;
+5. **cible du bon côté** : `T > P_D` à l'achat, `T < P_D` à la vente (vrai par construction,
+   vérifié quand même) ;
+6. taille admise par le budget de risque (§6.2).
 
-### 4.5 Nombre de tentatives (proposé)
+### 4.5 Bornes de décision et d'exécution ; entrée en attente (proposé)
+
+- **Borne de décision** : `K + 5 min ≤ D ≤ K + 60 min`. Comme `K ≤ 11:00`, aucune décision après
+  **12:00:00** Londres.
+- **Validité de l'entrée en attente** : **5 minutes** (une M5). L'ordre décidé à `D` est exécuté
+  au **premier tick admissible** de l'intervalle `]D, D + 5 min]`. Admissible : tick valide (non
+  exclu par le lot de données), marché ouvert, hors fermeture.
+- **Échéance** : `min(D + 5 min, 16:00:00)`. Sans tick admissible avant l'échéance, l'entrée est
+  **annulée** (`ENTRÉE_EXPIRÉE`) : entrée décidée mais non exécutée, comptée comme telle. Aucune
+  exécution n'est supposée.
+- **Borne d'exécution** : aucune exécution après **12:05:00** Londres. Une entrée en attente est
+  de toute façon annulée à la liquidation de 16:00.
+- **Confirmation exactement à 12:00** : la M5 [11:55, 12:00) est disponible à `D = 12:00:00.000`.
+  Un tick horodaté exactement à 12:00:00.000 n'exécute pas l'ordre (exécution strictement
+  postérieure). Exécution au premier tick admissible de ]12:00:00, 12:05:00], sinon
+  `ENTRÉE_EXPIRÉE` à 12:05:00 (exemple C du §7).
+- La validité de 5 minutes est plus courte que le seuil de silence de 10 minutes. Une entrée en
+  attente ne peut donc pas s'exécuter après une interruption inexpliquée.
+
+### 4.6 Nombre de tentatives (proposé)
 
 **Une seule tentative par séance**. La première cassure confirmée consomme le range, quelle que
-soit l'issue : entrée, invalidation, délai dépassé, données manquantes ou refus. Pas de seconde
-cassure dans l'autre sens. Une variante à deux tentatives relèverait d'un protocole distinct.
+soit l'issue : entrée, invalidation, délai dépassé, données inutilisables, refus, expiration de
+l'entrée. Pas de seconde cassure dans l'autre sens. Une variante à deux tentatives relèverait
+d'un protocole distinct.
 
-### 4.6 Vente (règle symétrique)
+### 4.7 Position encore ouverte d'une séance précédente
+
+Une liquidation retardée (§5) peut laisser une position ouverte au début de la séance suivante.
+- Tant qu'elle subsiste, **aucune nouvelle entrée** n'est autorisée.
+- La séance du jour est quand même évaluée et journalisée : range, cassure, retest. Les comptes de
+  disponibilité restent comparables.
+- Si une confirmation arrive alors que la position ancienne est encore ouverte à `D`, l'entrée est
+  refusée (« position DAY_01 déjà ouverte ») et la séance est consommée. Pas de rattrapage après
+  la clôture de l'ancienne position.
+- Si l'ancienne position est clôturée strictement avant `D`, la décision du jour est évaluée
+  normalement.
+- Priorité sur un même tick : la clôture en attente de l'ancienne position passe avant toute
+  entrée (§6.1). Comme une entrée ne peut pas être décidée pendant qu'une position est ouverte,
+  une entrée en attente et une liquidation en attente ne coexistent jamais.
+- **Fin de l'étude** : si aucun tick n'arrive avant la fin de la fenêtre étudiée, la position
+  reste ouverte, valorisée au dernier tick, présentée à part, **sans sortie future inventée**
+  (convention de S3).
+
+### 4.8 Vente (règle symétrique)
 
 - Cassure : `bid_close < RL − 0,1 × A`.
-- Zone : `[RL − 0,1 × A, RL + 0,1 × A]`.
-- Retour : `bid_high ≥ RL − 0,1 × A` (série bid, comme l'achat).
-- Invalidation : `bid_close > RL + 0,1 × A`.
+- Zone : `[Z_b, Z_h] = [RL − 0,1 × A, RL + 0,1 × A]`.
+- Contact : même recoupement, `bid_low ≤ Z_h` et `bid_high ≥ Z_b` (série bid, comme l'achat).
+- Invalidation : `bid_close > Z_h`.
 - Confirmation : `bid_close < RL`.
 - Stop : au-dessus du plus haut `ask_high` du retest (§5).
 
@@ -202,17 +267,37 @@ cassure dans l'autre sens. Une variante à deux tentatives relèverait d'un prot
   incluses, moins `0,25 × A` (marge de S2 et S3). Pour une vente : plus haut `ask_high` de ces
   M5, plus `0,25 × A`. Il est fixé à `D` et n'est jamais déplacé. Stop **garanti simulé** avec sa
   prime, comme les références S1 à S3 (arbitrage au §11).
-- **Cible de référence : multiple du risque.** Soit `P_D` le dernier ask connu strictement avant
-  `D` (bid pour une vente). Cible `T = P_D + 1,5 × (P_D − S)` pour un achat, `T = P_D − 1,5 × (S − P_D)`
-  pour une vente. Elle est connue à `D`, avant l'exécution. Exécution à la première cotation
-  exécutable observée qui l'atteint (bid ≥ T à l'achat, ask ≤ T à la vente), au prix de cette
-  cotation, comme S2.
+- **Cible de référence : multiple du risque.** `P_D` est le prix d'entrée estimé à `D` (§4.4) :
+  dernier ask strictement avant `D` à l'achat, dernier bid à la vente.
+  - Cible `T = P_D + k × (P_D − S)` à l'achat, `T = P_D − k × (S − P_D)` à la vente, avec
+    **`k = 1,5`**, appelé **rapport des distances de prix estimées à la décision**. Il est connu à
+    `D`, avant l'exécution, et il est fixe.
+  - Il ne faut pas le confondre avec deux autres rapports, **rapportés sans servir de filtre** :
+    - **rapport net estimé à la décision** : gain net à la cible, coûts compris (glissement,
+      conversion), divisé par la perte estimée au stop, coûts et prime de stop garanti compris.
+      Il est inférieur à `k` ;
+    - **rapport obtenu à l'exécution** : `(T − prix d'entrée exécuté) / (prix d'entrée exécuté − S)`
+      à l'achat, qui diffère de `k` d'un tick à l'autre. Ni `T` ni `S` ne sont recalculés au prix
+      exécuté.
+  - Sortie à la **première cotation exécutable observée** qui atteint la cible : bid ≥ `T` à
+    l'achat, ask ≤ `T` à la vente, au prix de cette cotation. Un écart favorable observé est
+    conservé, comme S2 ; ce n'est pas le comportement confirmé d'un ordre limite IG (ASSUMP-008).
+- **Premier prix d'exécution déjà au-delà d'une borne** (convention S2 §6.3, ADR-009) ; l'entrée
+  n'est jamais annulée au vu de ce prix :
+  - **au-delà du stop** (achat : bid ≤ `S`) : exécutée puis liquidée sur le même tick, comptée
+    `STOP_DÉPASSÉ_À_L'EXÉCUTION` ; rejet à l'exécution en variante seulement si de tels cas
+    existent ;
+  - **au-delà de la cible** (achat : bid ≥ `T`) : exécutée à l'ask puis sortie au bid sur le même
+    tick, comptée `CIBLE_ATTEINTE_À_L'EXÉCUTION`. « Cible atteinte » ne veut pas dire « gagnante » :
+    l'achat à l'ask et la revente au bid peuvent perdre.
 - **Variante séparée : cible sur niveau prédéfini.** Projection de la hauteur du range :
   `RH + H` à l'achat, `RL − H` à la vente. Exigée par le cahier comme **variante séparée** :
   protocole distinct, non lancée avec la référence (§11).
 - **Liquidation de fin de séance : 16:00 Londres.**
   - Toute position encore ouverte reçoit à 16:00:00 un ordre de clôture au marché, exécuté au
     **premier tick strictement postérieur** (bid pour un achat, ask pour une vente).
+  - Une entrée encore en attente à 16:00 est annulée (`ENTRÉE_EXPIRÉE`) ; par construction, elle
+    aurait déjà expiré à 12:05.
   - 16:00 Londres tombe toujours avant la clôture de New York (17:00 New York = 21:00 ou 22:00
     Londres) : aucune nuit, donc aucun financement.
 - **Aucune cotation à 16:00** : convention proposée, sans prix invisible.
@@ -227,7 +312,9 @@ cassure dans l'autre sens. Une variante à deux tentatives relèverait d'un prot
   4. Si aucun tick n'arrive avant la fin de la journée de cotation (fermeture anticipée non
      documentée), la liquidation se fait au premier tick de la réouverture, écart compris. La
      position a alors passé une nuit : le cas est **compté et rapporté**, jamais masqué
-     (`NUIT_NON_PRÉVUE`).
+     (`NUIT_NON_PRÉVUE`). La séance suivante applique le §4.7.
+  5. Si aucun tick n'arrive avant la fin de l'étude : position ouverte valorisée, sans sortie
+     inventée (§4.7).
 - **Pas de sortie temporelle intermédiaire** : seuls le stop, la cible ou la liquidation de 16:00
   ferment la position.
 
@@ -239,8 +326,9 @@ Mêmes règles que S1 (§5 de S1, ASSUMP-024, ADR-009) :
 - décision à `D` sur l'état strictement antérieur à `D` ;
 - exécution au premier tick `ts > D`, achat à l'ask et vente au bid ;
 - un tick horodaté exactement à `D` est rejoué après la décision ;
-- stop déjà franchi au premier tick d'exécution : exécutée puis liquidée (référence), rejet en
-  variante si nécessaire.
+- premier prix d'exécution au-delà du stop ou de la cible : §5 ;
+- **priorité des événements sur un même tick** (ASSUMP-024) : 1) silence précédant le tick ;
+  2) stop de la position ouverte ; 3) cible ; 4) liquidation en attente ; 5) entrée en attente.
 
 ### 6.2 Taille et coûts
 
@@ -258,10 +346,11 @@ Les ticks résolvent l'ordre du stop et de la cible. Si ni les ticks ni les M5 n
 trancher (trou de cotation), la transaction est indéterminée et les scénarios A, B et C
 s'appliquent.
 
-## 7. Exemple horodaté (achat, données inventées)
+## 7. Exemples horodatés (achat, données inventées)
 
-Mardi 12 février 2019, en heure d'hiver : Londres = UTC. ATR H4 figé `A = 0,00200` (20 pips),
-calculé sur la H4 [02:00, 06:00) UTC, disponible à 06:00.
+**Exemple A — retest puis confirmation sur la M5 suivante.** Mardi 12 février 2019, en heure
+d'hiver : Londres = UTC. ATR H4 figé `A = 0,00200` (20 pips), calculé sur la H4 [02:00, 06:00)
+UTC, disponible à 06:00. Toutes les bougies citées sont `OK`.
 
 | Instant (Londres = UTC) | Événement | Connu à cet instant |
 |---|---|---|
@@ -269,54 +358,93 @@ calculé sur la H4 [02:00, 06:00) UTC, disponible à 06:00.
 | **08:00:00** | M15 [07:45, 08:00) disponible : **range figé** | `RH = 1,13250`, `RL = 1,13050`, `H = 20 pips = 1,0 × A`, dans [0,5 ; 2] × `A` |
 | 08:15:00 | M15 [08:00, 08:15) clôture à 1,13262 | au-delà de `RH`, mais pas de `RH + 0,1 × A = 1,13270` : pas de cassure |
 | **08:30:00** | M15 [08:15, 08:30) clôture à 1,13291 > 1,13270 | **cassure haussière**, `K = 08:30` ; zone [1,13230 ; 1,13270] ; délai jusqu'à 09:30 |
-| 08:35:00 | M5 [08:30, 08:35) : plus bas 1,13275 | pas de retour |
-| 08:40:00 | M5 [08:35, 08:40) : plus bas 1,13262 ≤ 1,13270, clôture 1,13248 | **retest** ; clôture ≤ `RH` (pas de confirmation) et ≥ 1,13230 (pas d'invalidation) |
-| **08:45:00** | M5 [08:40, 08:45) : plus bas 1,13241, clôture 1,13259 > `RH` | **signal connu**, `D = 08:45:00.000` |
-| 08:45:00.000 | décision | stop `S = 1,13241 − 0,00050 = 1,13191` ; dernier ask avant `D` : 1,13261 (08:44:59.870) ; cible `T = 1,13261 + 1,5 × 0,00070 = 1,13366` |
+| 08:35:00 | M5 [08:30, 08:35) `OK` : plus bas 1,13275, clôture 1,13281 | plus bas > `Z_h = 1,13270` : pas de contact |
+| 08:40:00 | M5 [08:35, 08:40) `OK` : plus bas 1,13262, plus haut 1,13284, clôture 1,13248 | clôture ≥ `Z_b = 1,13230` : pas d'invalidation ; 1,13262 ≤ `Z_h` et 1,13284 ≥ `Z_b` : **contact** ; clôture ≤ `RH` : pas de confirmation |
+| **08:45:00** | M5 [08:40, 08:45) `OK` : plus bas 1,13241, clôture 1,13259 > `RH` | **signal connu**, `D = 08:45:00.000` |
+| 08:45:00.000 | décision | dernier tick avant `D` : 08:44:59.870, bid 1,13259, ask 1,13261 = `P_D` ; stop `S = 1,13241 − 0,00050 = 1,13191` < bid : admissible ; cible `T = 1,13261 + 1,5 × 0,00070 = 1,13366` ; entrée en attente jusqu'à 08:50:00 |
 | 08:45:00.000 | tick horodaté exactement à `D` | **pas utilisé pour l'entrée** (exécution à `ts > D`) |
 | **08:45:00.140** | premier tick postérieur à `D`, ask 1,13262 | **entrée** à 1,13262 ; taille selon §6.2 |
 | 10:12:31.405 | premier bid ≥ 1,13366 (bid 1,13367) | sortie à la cible, à 1,13367 |
 | (sinon) 16:00:00 | liquidation | au premier tick postérieur à 16:00:00 |
 
+Rapport des distances estimées à la décision : `k = 1,5` (10,5 pips / 7,0 pips). Rapport obtenu à
+l'exécution : (1,13366 − 1,13262) / (1,13262 − 1,13191) = 10,4 / 7,1 ≈ 1,46. Le rapport net
+estimé, coûts compris, est plus bas encore ; il est rapporté, sans filtrer l'entrée.
+
 Le même jour en heure d'été (par exemple le mardi 9 juillet 2019, BST), toutes les heures de
 Londres sont identiques. En UTC, le range va de 00:00 à 07:00, le gel a lieu à 07:00:00 UTC et la
 liquidation à 15:00:00 UTC.
 
-## 8. Abstentions (première cause journalisée)
+**Exemple B — contact et confirmation sur la même M5.** Même range et même cassure qu'en A
+(`K = 08:30`, zone [1,13230 ; 1,13270]).
+
+| Instant | Événement | Lecture, dans l'ordre du §4.3 |
+|---|---|---|
+| 08:35:00 | M5 [08:30, 08:35) `OK` : plus bas 1,13275 | pas d'invalidation ; pas de contact |
+| **08:40:00** | M5 [08:35, 08:40) `OK` : plus bas 1,13262, plus haut 1,13284, clôture 1,13258 | 1) `OK` ; 2) clôture ≥ `Z_b` : pas d'invalidation ; 3) recoupement : **contact** ; 4) clôture > `RH = 1,13250` : **confirmation sur la même M5**, `D = 08:40:00.000` |
+| 08:40:00.000 | décision | stop `S = 1,13262 − 0,00050 = 1,13212` (plus bas de cette seule M5) ; cible depuis `P_D` ; entrée en attente jusqu'à 08:45:00 |
+
+Si cette M5 avait été `INTERRUPTION_INEXPLIQUÉE` ou `FERMETURE_DOCUMENTÉE`, sa clôture n'aurait
+pas été lue : abandon de la tentative à 08:40:00, sans contact ni confirmation.
+
+**Exemple C — confirmation exactement à 12:00.** Cassure connue à `K = 11:00` (M15 [10:45, 11:00)).
+La M5 [11:55, 12:00) confirme : `D = 12:00:00.000`, dernière décision possible (`K + 60 min`).
+
+| Instant | Événement | Effet |
+|---|---|---|
+| 12:00:00.000 | décision ; un tick est horodaté exactement à 12:00:00.000 | ce tick n'exécute pas l'ordre (`ts > D` exigé) |
+| ]12:00:00, 12:05:00] | premier tick admissible | **entrée** à son prix |
+| 12:05:00 | aucun tick admissible dans l'intervalle | **`ENTRÉE_EXPIRÉE`**, aucune exécution supposée ; séance consommée |
+
+## 8. Abstentions et non-exécutions (première cause journalisée)
 
 Dans l'ordre d'évaluation, une seule cause par séance :
 1. pas de séance : jour férié probable, ou fermeture ;
-2. range incomplet : M15 absente ou inutilisable dans la fenêtre ;
+2. range incomplet : M15 absente ou non `OK` dans la fenêtre ;
 3. ATR H4 non calculable ;
 4. range hors largeur admissible (`H / A` journalisé) ;
-5. données manquantes pendant la recherche de cassure ;
+5. données inutilisables pendant la recherche de cassure (M15 absente ou non `OK`) ;
 6. aucune cassure confirmée à 11:00 ;
-7. invalidation (fausse cassure) ;
-8. délai de retest dépassé ;
-9. données manquantes pendant le retest ;
-10. marché fermé à `D` ;
-11. taille minimale supérieure au budget.
+7. données inutilisables pendant le retest (M5 absente ou non `OK`, clôture non lue) ;
+8. invalidation (fausse cassure) ;
+9. délai de retest dépassé ;
+10. position DAY_01 déjà ouverte à `D` (§4.7) ;
+11. marché fermé à `D` ;
+12. absence de cotation à `D` ;
+13. stop non admissible ;
+14. taille minimale supérieure au budget.
+
+Une **entrée décidée** a ensuite une seule issue :
+- exécutée, position ouverte ;
+- exécutée puis liquidée (`STOP_DÉPASSÉ_À_L'EXÉCUTION`) ;
+- exécutée puis sortie à la cible sur le même tick (`CIBLE_ATTEINTE_À_L'EXÉCUTION`) ;
+- **non exécutée** : `ENTRÉE_EXPIRÉE` (aucun tick admissible avant l'échéance du §4.5).
 
 Comme pour S3, les motifs sont comptés **au premier blocage** : un blocage à une étape ne dit
-rien des étapes suivantes.
+rien des étapes suivantes. Chaque entrée décidée doit être attestée par une transaction ou par
+un événement de non-exécution (contrôle de S3, ADR-020).
 
 ## 9. Protocole de test (à figer avant chaque étape)
 
 1. **Lot de données M15/M5** (§10) : construction et audit de couverture 2015-2021, **avant** tout
    moteur DAY_01.
-2. **Moteur et tests synthétiques** : exemple du §7 reproduit, vente, changement d'heure, chacune
-   des abstentions du §8, liquidation sans cotation, `NUIT_NON_PRÉVUE`.
+2. **Moteur et tests synthétiques** : exemples A, B et C du §7 reproduits, vente, changement
+   d'heure, chacune des abstentions et non-exécutions du §8, bougie non `OK` dont la clôture
+   n'est pas lue, liquidation sans cotation, `NUIT_NON_PRÉVUE`, position de la veille, position
+   ouverte à la fin de l'étude.
 3. **Non-régression** : rejeu S1 si un moteur partagé est modifié.
 4. **Disponibilité** 2015-2021 : séances attendues, ranges complets, ranges admissibles, cassures,
    retests, sans exécution.
-5. **Performance** 2015-2021 : référence H4 → M15 → M5 en scénario A, comparaison M15 seule, B, C
-   ou rejet selon des conditions de déclenchement fixées à l'avance, comme pour S2 et S3.
+5. **Performance** 2015-2021 : référence H4 → M15 → M5 en scénario A, comparaison « H4 → M15,
+   retest et confirmation sur M15 », puis B, C ou rejet selon des conditions de déclenchement
+   fixées à l'avance, comme pour S2 et S3.
 
 Rapportés, en plus des mesures du cahier (§9) et de celles de S3 :
 - parcours des séances aux entrées ;
 - résultats par jour de la semaine, par heure d'entrée, en heure d'hiver ou d'été et pendant les
   semaines de décalage ;
-- liquidations à 16:00 et liquidations retardées ;
+- liquidations à 16:00, liquidations retardées, entrées expirées ;
+- rapports des distances estimés, nets estimés et obtenus à l'exécution, côte à côte ;
 - chevauchement et pertes simultanées avec S1, S2 et S3 ;
 - part des séances avec annonces non mesurable (limite du §3.4).
 
@@ -341,6 +469,9 @@ couvrir :
   - fenêtres DAY_01 converties en UTC pour chaque séance 2015-2021, avec les dates du §3.3 ;
   - tests autour de chaque changement britannique et américain, et des semaines de décalage ;
   - aucune séance qui chevauche un changement.
+- **Ticks invalides** : prix nuls ou négatifs, bid > ask, horodatages hors ordre ou dupliqués,
+  ticks pendant la fermeture prévue. Ils sont exclus et comptés, jamais corrigés. Une bougie qui
+  contient un tick exclu est marquée, comme pour les H1, H4 et D1 existantes (S1 §10.1).
 - **Bougie absente ou inutilisable** : calendrier des créneaux M15 et M5 prévus, selon la
   fermeture hebdomadaire et les jours fériés probables.
   - **Absente** : créneau prévu sans aucun tick.
@@ -349,10 +480,22 @@ couvrir :
   - À 5 minutes, un créneau calme sans tick n'est pas forcément une panne. Le lot devra mesurer
     la fréquence de ces créneaux dans les fenêtres DAY_01 (01:00-16:00 Londres) et proposer une
     règle avant le moteur.
+- **Seuil de silence** : le seuil actuel de 10 minutes a été fixé pour des bougies H1 à D1. Le lot
+  devra examiner explicitement s'il convient à des M5 : un silence de 9 minutes recouvre presque
+  deux M5 sans être classé comme interruption. Le lot mesurera la distribution des silences dans
+  les fenêtres DAY_01 et proposera un seuil, ou une règle propre aux M5, **à partir des seules
+  données de cotation**, avant le moteur et sans référence à un résultat de trading.
 - **État connu à la clôture** : l'état d'une bougie à son `available_at_utc` ne doit utiliser
   que l'information connue à cet instant, distinct de l'audit a posteriori (ADR-006). Un silence
   commencé dans la bougie et qui se prolonge après sa clôture n'est connu, à la clôture, que
   pour sa partie déjà écoulée.
+- **Contrôles anti-fuite temporelle**, sur le modèle des tests de PR #3 sur de vraies clôtures
+  H1, H4 et D1 :
+  - aucune bougie lue avant son `available_at_utc` ;
+  - état à la clôture identique, que les ticks postérieurs soient chargés ou non ;
+  - range figé à 08:00 identique, que les données postérieures soient présentes ou tronquées ;
+  - fenêtres en heure de Londres calculées par la date de séance seulement, jamais à partir des
+    prix.
 - **Couverture** : par année, et dans les fenêtres DAY_01 :
   - créneaux prévus, absents et inutilisables ;
   - séances avec un range complet ;
@@ -367,13 +510,19 @@ couvrir :
 | 2 | Rôle de H4 / H1 | H4 pour l'ATR seulement, pas de filtre de direction ; H1 non utilisée | filtre de direction H4 ou H1, en variante distincte |
 | 3 | Largeur admissible | `0,5 × A ≤ H ≤ 2 × A`, `A` = ATR Wilder 14 H4 | ATR D1 ; bornes en pips |
 | 4 | Confirmation de cassure | clôture M15 au-delà de la borne de plus de `0,1 × A`, de 08:15 à 11:00 | sans marge ; fenêtre plus courte |
-| 5 | Retest | M5 qui touche la zone `± 0,1 × A`, puis clôture M5 au-delà de la borne ; invalidation par une clôture en deçà de la zone | confirmation sur la M5 suivant le retest seulement |
+| 5 | Retest | M5 qui recoupe la zone `± 0,1 × A` (`bid_low ≤ Z_h` et `bid_high ≥ Z_b`), puis clôture M5 au-delà de la borne, **éventuellement sur la même M5** ; invalidation par une clôture au-delà de la zone, côté range | confirmation sur une M5 postérieure au contact seulement |
 | 6 | Délai de retest | 60 min (12 M5) après `K` | 30 ou 90 min |
 | 7 | Tentatives | une par séance | deux (protocole distinct) |
 | 8 | Stop | extrême du retest ± `0,25 × A`, garanti simulé | stop normal, si la distance minimale du stop garanti chez IG exclut les stops courts (ASSUMP-008, non confirmé) |
-| 9 | Cible | `1,5 ×` le risque depuis le dernier prix connu avant `D` | `1 ×` ou `2 ×` ; variante séparée : `RH + H` / `RL − H` |
+| 9 | Cible | rapport des distances de prix estimées à la décision `k = 1,5`, depuis `P_D` ; rapports net estimé et obtenu à l'exécution rapportés, **sans filtre** | filtre sur le rapport net estimé (comme `R_min` de S2) ; `k = 1` ou `2` ; variante séparée : `RH + H` / `RL − H` |
 | 10 | Liquidation | 16:00 Londres, au premier tick postérieur ; convention du §5 si aucune cotation | 15:00 ou 16:30 |
 | 11 | Annonces | aucun filtre (limite inscrite au §3.4) | filtre en protocole distinct, après calendrier historique |
-| 12 | Variante simple | M15 seule | — |
+| 12 | Variante simple | « H4 → M15, retest et confirmation sur M15 » | — |
 | 13 | Instrument | EUR/USD seulement | GBP/USD (cahier §2), après données et décision |
 | 14 | Ordre des lots | lot M15/M5 (construction et audit) avant le moteur | — |
+| 15 | Validité de l'entrée en attente | 5 min après `D`, au premier tick admissible ; sinon `ENTRÉE_EXPIRÉE` ; aucune exécution après 12:05 | 1 min ; 15 min |
+| 16 | Bougies admises | `OK` seulement, pour toute M15 et M5 lue ; qualité vérifiée avant la clôture | `OK` ou `FERMETURE_DOCUMENTÉE`, comme S1 |
+| 17 | Cotation à `D` | dernier tick avant `D` dans la M5 de confirmation, bid ≤ ask | fraîcheur plus courte (par exemple 60 s) |
+| 18 | Stop admissible | du bon côté du prix de sortie courant, distance strictement positive ; distance minimale IG non modélisée | distance minimale une fois confirmée chez IG (ASSUMP-008) |
+| 19 | Position de la veille | aucune entrée tant qu'elle subsiste ; séance consommée sans rattrapage | autoriser une décision après sa clôture, dans le délai de retest |
+| 20 | Seuil de silence M5 | à examiner par le lot de données, sur les seules cotations | conserver 10 min |
