@@ -16,6 +16,7 @@ Research only: no tick is read, no order exists, 2022-2025 stays out of reach.
 from __future__ import annotations
 
 import argparse
+import bisect
 import dataclasses
 import itertools
 import json
@@ -32,6 +33,7 @@ import duckdb
 import pyarrow as pa
 import pyarrow.parquet as pq
 
+from forex_bot.backtest.bar_state import BarState, bar_state
 from forex_bot.backtest.data import load_bars, load_gaps, require_development_window
 from forex_bot.backtest.day01 import (
     ATR_UNAVAILABLE,
@@ -53,6 +55,7 @@ from forex_bot.backtest.day01 import (
 from forex_bot.backtest.day01_engine import Day01Backtest
 from forex_bot.backtest.engine import ResearchConfig
 from forex_bot.backtest.explore import RESEARCH_COSTS
+from forex_bot.backtest.s2 import ContinuousWilderAtr
 from forex_bot.history.bars import Gap
 from forex_bot.history.calendar import NEW_YORK, Timeframe
 from forex_bot.history.intraday import NO_TICK, NO_VALID_TICK, SUBSLOTS_FLAG, Content, Grid
@@ -90,6 +93,12 @@ STAGES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ),
 )
 CONFIRMED = "CONFIRMATION"
+# Causes of an H4 ATR unavailable at the freeze, read from the H4 history and its state known then.
+ATR_INITIAL = "amorçage : historique H4 initial insuffisant"
+ATR_ABSENT_H4 = "interruption : H4 prévue absente"
+ATR_UNUSABLE_H4 = "interruption : H4 inutilisable"
+ATR_UNDETERMINED = "non déterminée"
+ATR_AVAILABLE = "incohérence : ATR disponible au gel"  # blocking (C3)
 INCONSISTENT = "INCOHÉRENT"
 COMMON_OUTCOMES = frozenset(o for _, terminal in STAGES[:5] for o in terminal)  # stages 1-5 (check C5)
 
@@ -131,6 +140,42 @@ class AvailabilityBacktest(Day01Backtest):
     ) -> None:
         self.confirmations[day] = decision  # no quote, stop, target, size or pending entry
 
+    def atr_cause(self, instant: datetime) -> tuple[str, str | None]:
+        """Why the H4 ATR is unavailable at `instant` (the freeze), with the H4 concerned.
+
+        Read from the H4 history and the state of each H4 known at `instant`, through a fresh
+        `ContinuousWilderAtr` (same rules, no cache): the usable run that ends at the last H4 known
+        starts at its anchor. Anchor 0: the run starts with the history, which is too short;
+        otherwise the run follows an absent expected H4 or an unusable one. Anything else is left
+        undetermined rather than attributed."""
+        i = bisect.bisect_right(self.h4_available, instant) - 1
+        if i < 0:
+            return ATR_INITIAL, "aucune H4 disponible"
+        cache: dict[int, BarState] = {}
+
+        def state(j: int) -> BarState:
+            if j not in cache:
+                cache[j] = bar_state(
+                    self.h4[j], instant, self.gaps, self.config.gap_threshold, self.config.documented_closures
+                )
+            return cache[j]
+
+        probe = ContinuousWilderAtr(self.h4, self.day01.atr_period)
+        value = probe.at(i, state)
+        if value is not None:
+            return (ATR_AVAILABLE if value > 0 else ATR_UNDETERMINED), f"ATR {value}"
+        anchor = probe._anchor  # set by `at`: first H4 of the usable run ending at H4 i
+        if anchor is None:
+            return ATR_UNDETERMINED, None
+        known = f"{i - anchor + 1} H4 utilisables depuis {self.h4[anchor]['start_utc'].isoformat()}"
+        if anchor == 0:
+            return ATR_INITIAL, known
+        if anchor in probe._holes:
+            return ATR_ABSENT_H4, f"H4 prévue absente avant {self.h4[anchor]['start_utc'].isoformat()} ; {known}"
+        if not state(anchor - 1).usable:
+            return ATR_UNUSABLE_H4, f"H4 {self.h4[anchor - 1]['start_utc'].isoformat()} inutilisable ; {known}"
+        return ATR_UNDETERMINED, known
+
 
 @dataclass
 class Trajectory:
@@ -139,6 +184,7 @@ class Trajectory:
     confirmations: dict[date, datetime]
     outcomes: dict[date, str] = field(default_factory=dict)
     causes: dict[date, str] = field(default_factory=dict)
+    cause_details: dict[date, str] = field(default_factory=dict)
     ticks_read: int = 0
 
     @property
@@ -161,10 +207,13 @@ def run_trajectory(
     trajectory = Trajectory(params, result.sessions, engine.confirmations)
     trajectory.ticks_read = 0 if engine._last_tick is None else 1
     m15_rows = {b["start_utc"]: b for b in m15}
-    atr_seen = False
     for session in result.sessions:
-        outcome, cause = classify(session, engine.confirmations, m15_rows, atr_seen)
-        atr_seen = atr_seen or (session.range is not None and session.range.get("atr") is not None)
+        atr: tuple[str, str | None] | None = None
+        if session.abstention == ATR_UNAVAILABLE:
+            atr = engine.atr_cause(london(session.day, params.freeze))
+            if atr[1] is not None:
+                trajectory.cause_details[session.day] = atr[1]
+        outcome, cause = classify(session, engine.confirmations, m15_rows, None if atr is None else atr[0])
         trajectory.outcomes[session.day] = outcome
         if cause is not None:
             trajectory.causes[session.day] = cause
@@ -189,12 +238,14 @@ def bar_cause(bar: dict[str, Any] | None) -> str:
 
 
 def classify(
-    session: Session, confirmations: dict[date, datetime], m15: dict[datetime, dict[str, Any]], atr_seen: bool
+    session: Session,
+    confirmations: dict[date, datetime],
+    m15: dict[datetime, dict[str, Any]],
+    atr_cause: str | None = None,
 ) -> tuple[str, str | None]:
     """Exclusive outcome of a session, read from what the engine recorded (no rule is re-applied).
 
-    ATR cause: initialisation as long as no earlier session of the study had an ATR, interruption
-    of the H4 continuity afterwards."""
+    `atr_cause` comes from `AvailabilityBacktest.atr_cause`, at the freeze of the session."""
     reason = session.abstention
     if reason is None:
         return (CONFIRMED, None) if session.day in confirmations else (INCONSISTENT, "ni abstention ni confirmation")
@@ -204,7 +255,7 @@ def classify(
         first = datetime.fromisoformat((session.detail or "").rsplit(" : ", 1)[-1])
         return "RANGE_INCOMPLET", bar_cause(m15.get(first))
     if reason == ATR_UNAVAILABLE:
-        return "ATR_NON_CALCULABLE", "interruption" if atr_seen else "amorçage"
+        return "ATR_NON_CALCULABLE", atr_cause or ATR_UNDETERMINED
     if reason == RANGE_WIDTH and session.range is not None:
         narrow = session.range["h_over_a"] < Day01Params().min_width
         return ("RANGE_TROP_ÉTROIT" if narrow else "RANGE_TROP_LARGE"), None
@@ -453,6 +504,9 @@ def trajectory_errors(t: Trajectory, trigger_bars: dict[datetime, dict[str, Any]
     if len(days) != len(set(days)):
         errors["C3"].append("séance comptée plusieurs fois")
     errors["C3"] += [f"{d} : {o} ({t.causes.get(d)})" for d, o in t.outcomes.items() if o == INCONSISTENT]
+    errors["C3"] += [
+        f"{d} : {ATR_AVAILABLE} ({t.cause_details.get(d)})" for d, c in t.causes.items() if c == ATR_AVAILABLE
+    ]
     if set(t.confirmations) != {d for d, o in t.outcomes.items() if o == CONFIRMED}:
         errors["C3"].append("confirmations du moteur ≠ issues CONFIRMATION")
     f = funnel(t.outcomes)
@@ -611,6 +665,7 @@ def availability(
                     "day": s.day,
                     "outcome": t.outcomes[s.day],
                     "cause": t.causes.get(s.day),
+                    "cause_detail": t.cause_details.get(s.day),
                     "range": s.range,
                     "breakout": s.breakout,
                     "retest": s.retest,

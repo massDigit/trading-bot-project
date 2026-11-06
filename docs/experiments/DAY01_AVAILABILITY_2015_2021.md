@@ -67,8 +67,20 @@ confirmation diffèrent.
   (§4.7) : elle n'a donc aucun effet sur ces comptes.
 - **Deux trajectoires**, sur les mêmes entrées et le même commit : `Day01Params()` (référence M5) et
   `Day01Params(trigger=Trigger.M15)` (comparaison M15).
-- **Cause de l'ATR non calculable** : « amorçage » tant qu'aucune séance antérieure de l'étude n'a
-  eu d'ATR, « interruption » de la continuité des H4 ensuite.
+- **Cause de l'ATR non calculable** (correction du 2026-11-06, avant tout passage) : elle est lue
+  dans l'**historique H4 et l'état de chaque H4 connaissable au gel**, par une instance neuve de
+  `ContinuousWilderAtr`, aux mêmes règles et sans cache. La suite de H4 utilisables qui se termine à
+  la dernière H4 connue au gel commence à son ancre :
+  - ancre sur la première H4 de l'historique, ou aucune H4 connue : **amorçage**, historique H4
+    initial insuffisant ;
+  - ancre après une H4 prévue absente : **interruption, H4 prévue absente** ;
+  - ancre après une H4 inutilisable à cet instant : **interruption, H4 inutilisable** ;
+  - autre situation : cause **non déterminée**, plutôt qu'une attribution certaine.
+
+  Le détail (nombre de H4 utilisables, H4 en cause) est conservé par séance. Un ATR disponible au
+  gel pour une séance que le moteur déclare sans ATR est une incohérence bloquante (C3). La cause
+  n'est plus déduite des séances précédentes : une rupture avant la première séance étudiée, malgré
+  un historique antérieur suffisant, est une interruption. Les règles de l'ATR ne changent pas.
 - **Résultats masqués** sur tout contrôle en échec : le rapport ne garde que les contrôles et la
   provenance, sans entonnoir, descriptions ni détail ; code de sortie 2.
 
@@ -88,7 +100,7 @@ confirmation diffèrent.
 |---|---|---|
 | 1. Jours ouvrés de la fenêtre | `pas de séance` (marché non ouvert sur toute la fenêtre du range : jour férié probable ou fermeture) | séances attendues |
 | 2. Range | `range incomplet` (première M15 non `OK`, avec sa cause : absente, silence, sous-créneau vide, les deux) | ranges complets |
-| 3. ATR au gel | `ATR H4 non calculable`, avec sa cause (amorçage, ou interruption de la continuité des H4) | ranges avec ATR |
+| 3. ATR au gel | `ATR H4 non calculable`, avec sa cause lue dans l'historique H4 au gel (§3) : amorçage, H4 prévue absente, H4 inutilisable ou non déterminée | ranges avec ATR |
 | 4. Largeur | `range hors largeur admissible`, **séparé en trop étroit** (`H / A < 0,5`) **et trop large** (`H / A > 2`) | ranges admissibles |
 | 5. Cassure | `données inutilisables pendant la recherche de cassure` (M15 en cause) ; `aucune cassure confirmée à 11:00` | cassures (achat, vente) |
 | 6. Retest, par trajectoire | `données inutilisables pendant le retest` ; `invalidation`, séparée **avant contact** et **après contact** ; `délai de retest dépassé`, séparé **sans contact** et **contact sans confirmation** | **confirmations** |

@@ -7,7 +7,7 @@ the engine reads no tick. A = 0.00200 everywhere (synthetic H4).
 from __future__ import annotations
 
 import dataclasses
-from datetime import date, datetime, time, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal as D
 from pathlib import Path
 from typing import Any
@@ -28,8 +28,13 @@ from test_day01 import (
 
 from forex_bot.backtest.day01 import Day01Params, Trigger, london
 from forex_bot.backtest.day01_availability import (
+    ATR_ABSENT_H4,
+    ATR_AVAILABLE,
+    ATR_INITIAL,
+    ATR_UNUSABLE_H4,
     CONFIRMED,
     Anchors,
+    AvailabilityBacktest,
     availability,
     controls,
     expected_params,
@@ -69,12 +74,15 @@ WEEK = {
 ANCHORS = Anchors(5, frozenset({DAYS[2]}), 0)
 
 
-def study(tmp_path: Path, by_day: dict[date, list[Tick]], anchors: Anchors = ANCHORS) -> dict[str, Any]:
+def study(
+    tmp_path: Path, by_day: dict[date, list[Tick]], anchors: Anchors = ANCHORS, h4: list[dict[str, Any]] | None = None
+) -> dict[str, Any]:
     ticks = [t for day in sorted(by_day) for t in by_day[day]]
     m5, m15 = candles(tmp_path, ticks)
     start, end = london(min(by_day), time(0)), london(max(by_day) + timedelta(days=1), time(0))
     table = intraday_table("dukascopy", "EURUSD", Grid.M15, m15)
-    report, details = availability({Grid.M5: m5, Grid.M15: m15}, table, h4_bars(end), [], CONFIG, start, end, anchors)
+    h4 = h4_bars(end) if h4 is None else h4
+    report, details = availability({Grid.M5: m5, Grid.M15: m15}, table, h4, [], CONFIG, start, end, anchors)
     report["details"] = details
     return report
 
@@ -229,3 +237,60 @@ def test_command_end_to_end_on_a_synthetic_data_directory(tmp_path: Path, monkey
     assert {s["stage"]: s for s in report["funnel"]["M15"]["total"]}["confirmations"]["confirmed"] == 2
     assert len(details.read_text().splitlines()) == 10  # 5 sessions x 2 triggers
     assert out.with_suffix(".md").read_text().startswith("# DAY_01")
+
+
+# ---------------------------------------------------------------- cause of an unavailable H4 ATR
+
+TUESDAY = DAYS[1]  # 2019-02-12, freeze at 08:00 UTC (GMT)
+BREAK = datetime(2019, 2, 11, 22, tzinfo=UTC)  # H4 opening the trading day of the session
+
+
+def _atr(tmp_path: Path, h4: list[dict[str, Any]]) -> dict[str, Any]:
+    report = study(tmp_path, {TUESDAY: example_a(TUESDAY)}, Anchors(1, frozenset(), 0), h4=h4)
+    assert report["failed_checks"] == []
+    return {d["trigger"]: d for d in report["details"]}
+
+
+def test_atr_is_available_with_the_full_h4_history(tmp_path: Path) -> None:
+    rows = _atr(tmp_path, h4_bars(london(TUESDAY + timedelta(days=1), time(0))))
+    assert rows["M5"]["outcome"] == rows["M15"]["outcome"] == CONFIRMED
+
+
+def test_initial_h4_history_really_too_short_is_initialisation(tmp_path: Path) -> None:
+    """History starting 2019-02-11 10:00 UTC: 5 H4 known at the freeze, fewer than 15."""
+    first = datetime(2019, 2, 11, 10, tzinfo=UTC)
+    h4 = [b for b in h4_bars(london(TUESDAY + timedelta(days=1), time(0))) if b["start_utc"] >= first]
+    rows = _atr(tmp_path, h4)
+    for unit in ("M5", "M15"):
+        assert (rows[unit]["outcome"], rows[unit]["cause"]) == ("ATR_NON_CALCULABLE", ATR_INITIAL)
+        assert rows[unit]["cause_detail"].startswith(f"5 H4 utilisables depuis {h4[0]['start_utc'].isoformat()}")
+
+
+def test_absent_h4_before_the_first_session_is_an_interruption_not_initialisation(tmp_path: Path) -> None:
+    """Twelve days of H4 before, but the H4 of 2019-02-11 22:00 UTC is absent: the usable run restarts
+    at 02:00 and holds 2 H4 at the freeze. Both trajectories used to say initialisation."""
+    h4 = [b for b in h4_bars(london(TUESDAY + timedelta(days=1), time(0))) if b["start_utc"] != BREAK]
+    rows = _atr(tmp_path, h4)
+    for unit in ("M5", "M15"):
+        assert (rows[unit]["outcome"], rows[unit]["cause"]) == ("ATR_NON_CALCULABLE", ATR_ABSENT_H4)
+        assert "H4 prévue absente avant 2019-02-12T02:00:00+00:00" in rows[unit]["cause_detail"]
+
+
+def test_unusable_h4_before_the_first_session_is_an_interruption(tmp_path: Path) -> None:
+    h4 = h4_bars(london(TUESDAY + timedelta(days=1), time(0)))
+    for bar in h4:
+        if bar["start_utc"] == BREAK:
+            bar["complete_at_close"], bar["flags_at_close"] = False, ["INTERRUPTION_INEXPLIQUÉE"]
+    rows = _atr(tmp_path, h4)
+    for unit in ("M5", "M15"):
+        assert (rows[unit]["outcome"], rows[unit]["cause"]) == ("ATR_NON_CALCULABLE", ATR_UNUSABLE_H4)
+        assert "H4 2019-02-11T22:00:00+00:00 inutilisable" in rows[unit]["cause_detail"]
+
+
+def test_atr_cause_never_attributes_an_available_atr(tmp_path: Path) -> None:
+    """Guard: asked at a freeze where the ATR is available, the diagnosis flags an inconsistency."""
+    m5, m15 = candles(tmp_path, example_a(TUESDAY))
+    end = london(TUESDAY + timedelta(days=1), time(0))
+    engine = AvailabilityBacktest(m5, m15, h4_bars(end), [], [], Day01Params(), CONFIG)
+    cause, detail = engine.atr_cause(london(TUESDAY, time(8)))
+    assert cause == ATR_AVAILABLE and detail == "ATR 0.00200"
