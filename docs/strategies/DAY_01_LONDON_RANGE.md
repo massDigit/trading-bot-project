@@ -266,11 +266,14 @@ clôturer au-delà de `RH`. Elle est alors à la fois la M5 de retest et la M5 d
     de la séance est consommée.
   - **Transactions exécutées** : une transaction déjà exécutée n'est jamais supprimée. Une
     interruption pendant une position ouverte relève du §5 (scénarios A, B et C).
-- **Conséquence pour l'échéance** (ADR-022) : la cotation à `D` date de moins de 5 minutes. Sans
-  tick admissible dans `]D, D + 5 min]`, le silence dépasse donc 5 minutes **avant** l'échéance,
-  et l'entrée est annulée pour interruption (`ENTRÉE_ANNULÉE_INTERRUPTION`, à l'instant où le
-  silence dépasse 5 minutes). `ENTRÉE_EXPIRÉE` reste définie, mais ne pourrait survenir que si
-  l'ouverture prévue s'arrêtait pendant la validité, ce qu'aucune séance DAY_01 ne permet.
+- **Conséquence pour l'échéance** (ADR-022) : la cotation à `D` date de 5 minutes au plus. Sans
+  tick admissible dans `]D, D + 5 min]` :
+  - si la dernière cotation est **antérieure** à `D`, le silence dépasse 5 minutes **avant**
+    l'échéance. L'entrée est annulée pour interruption (`ENTRÉE_ANNULÉE_INTERRUPTION`), à
+    l'instant où le silence dépasse 5 minutes ;
+  - si un tick est horodaté **exactement à `D`**, il compte comme cotation sans exécuter l'ordre.
+    Le silence vaut alors exactement 5 minutes à l'échéance, ce qui ne dépasse pas le seuil.
+    L'issue est `ENTRÉE_EXPIRÉE`. C'est le seul cas où elle survient dans une séance ouverte.
 
 ### 4.6 Nombre de tentatives (proposé)
 
@@ -281,7 +284,7 @@ d'un protocole distinct.
 
 ### 4.7 Position encore ouverte d'une séance précédente
 
-Une liquidation retardée (§5) peut laisser une position ouverte au début de la séance suivante.
+Une liquidation sans cotation à 16:00 (§5) peut laisser une position ouverte au début de la séance suivante.
 - Tant qu'elle subsiste, **aucune nouvelle entrée** n'est autorisée.
 - La séance du jour est quand même évaluée et journalisée : range, cassure, retest. Les comptes de
   disponibilité restent comparables.
@@ -353,8 +356,12 @@ Une liquidation retardée (§5) peut laisser une position ouverte au début de l
     Londres) : aucune nuit, donc aucun financement.
 - **Aucune cotation à 16:00** : convention proposée, sans prix invisible.
   1. Aucun prix n'est supposé à 16:00. La position reste ouverte, avec son stop et sa cible,
-     jusqu'au premier tick postérieur, qui l'exécute. Le délai est journalisé
-     (`LIQUIDATION_RETARDÉE`, avec sa durée).
+     jusqu'au premier tick postérieur, qui l'exécute. Trois grandeurs sont journalisées pour chaque
+     liquidation, sans les confondre (ADR-023) : le **délai après 16:00**, le **silence clos par le
+     tick de clôture** (durée et nature) et le **motif de clôture** (`LIQUIDATION_16H`, ou le stop ou
+     la cible qui l'ont précédée). `LIQUIDATION_APRÈS_INTERRUPTION` (ancien libellé
+     `LIQUIDATION_RETARDÉE`) compte exactement les liquidations exécutées par l'ordre de 16:00 au
+     premier tick qui clôt un silence de strictement plus de 5 minutes d'ouverture prévue.
   2. Si ce premier tick franchit déjà le stop ou la cible, la priorité du moteur s'applique : le
      stop d'abord (ASSUMP-024), puis la cible, puis la liquidation en attente.
   3. Si le silence est une interruption inexpliquée pendant laquelle le stop ou la cible ont pu
@@ -460,14 +467,13 @@ pas été lue : abandon de la tentative à 08:40:00, sans contact ni confirmatio
 **Exemple C — confirmation exactement à 12:00.** Cassure connue à `K = 11:00` (M15 [10:45, 11:00)).
 La M5 [11:55, 12:00) confirme : `D = 12:00:00.000`, dernière décision possible (`K + 60 min`).
 
-| Instant | Événement | Effet |
-|---|---|---|
-| 12:00:00.000 | décision ; un tick est horodaté exactement à 12:00:00.000 | ce tick n'exécute pas l'ordre (`ts > D` exigé) |
-| ]12:00:00, 12:05:00] | premier tick admissible, moins de 5 min après la cotation à `D` | **entrée** à son prix |
-| ]12:00:00, 12:05:00] | silence depuis la cotation à `D` (par exemple 11:59:58.300) supérieur à 5 min (ici à 12:04:58.300), ou premier tick qui le révèle | **`ENTRÉE_ANNULÉE_INTERRUPTION`** ; ce tick n'exécute pas ; aucune exécution supposée ; séance consommée (§4.5) |
+Dernier tick de la M5 de confirmation : 11:59:58.300.
 
-`ENTRÉE_EXPIRÉE` à 12:05:00 supposerait qu'aucun tick n'arrive sans que le silence dépasse 5 minutes.
-C'est impossible ici : la cotation à `D` date de moins de 5 minutes (§4.5).
+| Cas | Ticks après 11:59:58.300 | Effet |
+|---|---|---|
+| 1 | un tick exactement à 12:00:00.000, puis un tick à 12:03:10 | le tick de 12:00:00.000 n'exécute pas (`ts > D` exigé) mais compte pour le silence ; **entrée** à 12:03:10 |
+| 2 | aucun tick avant 12:04:58.300 | le silence dépasse 5 min juste après 12:04:58.300 : **`ENTRÉE_ANNULÉE_INTERRUPTION`** ; un tick arrivé ensuite (12:05:00 compris) n'exécute pas ; séance consommée (§4.5) |
+| 3 | un tick exactement à 12:00:00.000, puis aucun jusqu'à 12:05:00 inclus | silence d'exactement 5 min à l'échéance, sans dépasser le seuil : **`ENTRÉE_EXPIRÉE`** à 12:05:00 ; séance consommée |
 
 ## 8. Abstentions et non-exécutions (première cause journalisée)
 
@@ -491,8 +497,8 @@ Une **entrée décidée** a ensuite une seule issue :
 - exécutée, position ouverte ;
 - exécutée puis liquidée (`STOP_DÉPASSÉ_À_L'EXÉCUTION`) ;
 - exécutée puis sortie à la cible sur le même tick (`CIBLE_ATTEINTE_À_L'EXÉCUTION`) ;
-- **non exécutée** : `ENTRÉE_EXPIRÉE` (aucun tick admissible avant l'échéance du §4.5 ; ne peut pas
-  survenir dans une séance DAY_01 ouverte, voir la conséquence du §4.5) ;
+- **non exécutée** : `ENTRÉE_EXPIRÉE` (aucun tick admissible avant l'échéance du §4.5 ; seulement
+  après une cotation horodatée exactement à `D`, voir la conséquence du §4.5) ;
 - **non exécutée** : `ENTRÉE_ANNULÉE_INTERRUPTION` (interruption connue avant l'exécution, y compris
   révélée par le premier tick suivant, §4.5) ; tentative consommée.
 
@@ -519,7 +525,8 @@ Rapportés, en plus des mesures du cahier (§9) et de celles de S3 :
 - parcours des séances aux entrées ;
 - résultats par jour de la semaine, par heure d'entrée, en heure d'hiver ou d'été et pendant les
   semaines de décalage ;
-- liquidations à 16:00, liquidations retardées, entrées expirées ;
+- liquidations à 16:00 (délai après 16:00, silence clos, motif de clôture), liquidations après
+  interruption, nuits non prévues, entrées expirées ;
 - rapports des distances estimés, nets estimés et obtenus à l'exécution, côte à côte ;
 - chevauchement et pertes simultanées avec S1, S2 et S3 ;
 - part des séances avec annonces non mesurable (limite du §3.4).

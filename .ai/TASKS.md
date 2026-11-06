@@ -38,9 +38,9 @@
 - [ ] Mention « Powered by Dukascopy » si les données sont intégrées à une interface (licence, section 8)
 - [x] Fiche S2 (`docs/strategies/S2_PULLBACK.md`) : approuvée (ADR-015), implémentée et évaluée sur 2015-2021 (ADR-016)
 - [x] Fiche DAY_01 (candidate « D1 », première vague) figée : `docs/strategies/DAY_01_LONDON_RANGE.md`, ASSUMP-027 approuvée (ADR-022) ; EUR/USD seulement
-- [ ] Moteur DAY_01 hors ligne et tests synthétiques (PR brouillon), sans passage historique
+- [ ] Moteur DAY_01 hors ligne (`backtest/day01.py`, `backtest/day01_engine.py`), référence M5 et variante M15, et tests synthétiques (`tests/test_day01.py`), PR #19 brouillon, en revue ; libellés de liquidation clarifiés (ADR-023) ; aucun passage historique
 - [x] Fiche DAY_01 fusionnée (PR #17), points ouverts conservés dans ASSUMP-027
-- [x] Lot de données M15/M5 2015-2021 (clôturé, ADR-021) : construit et audité (protocole `docs/experiments/DATA_M5_M15_2015_2021.md`, bilan `..._BILAN.md`, ASSUMP-028), contrôles conformes, intégrité validée ; convention de qualité DAY_01 (silence > 5 min, M5 sans tick et M15 à sous-créneau vide non `OK`) appliquée par recalcul des statuts ; **revue du bilan recalculé par l'opérateur attendue** avant la clôture du lot et tout moteur DAY_01
+- [x] Lot de données M15/M5 2015-2021 (clôturé, ADR-021) : construit et audité (protocole `docs/experiments/DATA_M5_M15_2015_2021.md`, bilan `..._BILAN.md`, ASSUMP-028), contrôles conformes, intégrité validée ; convention de qualité DAY_01 (silence > 5 min, M5 sans tick et M15 à sous-créneau vide non `OK`) appliquée par recalcul des statuts 
 - [x] Fiche S3 (`docs/strategies/S3_SQUEEZE.md`) : ASSUMP-026 approuvée pour la recherche hors ligne (ADR-018, 2026-11-04)
 - [x] S3 étape 1 : moteur hors ligne et 28 tests synthétiques (PR #13, `51f1507`, 2026-11-04)
 - [x] S3 étape 2 : rejeu de non-régression S1 sur avril-juin 2019 sur `51f1507` : 6 transactions, solde (1 992,04 €) et journal des 390 décisions identiques à la référence (2026-11-04)

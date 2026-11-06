@@ -510,7 +510,7 @@ def test_silences_intersecting_a_day01_window_are_counted_even_if_they_start_bef
 def test_provenance_is_taken_at_launch_and_changes_during_the_run_are_reported_apart() -> None:
     from forex_bot.history.intraday_audit import end_check
 
-    launch = {"commit": "abc", "uncommitted_diff_sha256": None, "uncommitted_files": []}
+    launch: dict[str, Any] = {"commit": "abc", "uncommitted_diff_sha256": None, "uncommitted_files": []}
     same = end_check(launch, dict(launch))
     assert not same["changed_during_run"] and same["files_changed_during_run"] == []
     edited = end_check(launch, {"commit": "abc", "uncommitted_diff_sha256": "d1", "uncommitted_files": ["docs/x.md"]})
