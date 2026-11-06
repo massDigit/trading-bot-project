@@ -555,12 +555,12 @@ def tree_state() -> dict[str, Any]:
     }
 
 
-def provenance(argv: list[str] | None) -> dict[str, Any]:
+def provenance(argv: list[str] | None, tool: str = "forex-intraday") -> dict[str, Any]:
     """Provenance of a run, captured when it starts (the code that runs is the code at launch)."""
     return {
         **tree_state(),
         "branch": _git("rev-parse", "--abbrev-ref", "HEAD"),
-        "command": ["forex-intraday", *(sys.argv[1:] if argv is None else argv)],
+        "command": [tool, *(sys.argv[1:] if argv is None else argv)],
         "started_at_utc": datetime.now(UTC).isoformat(timespec="seconds"),
     }
 

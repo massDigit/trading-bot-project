@@ -1,6 +1,7 @@
 # DAY_01 — Disponibilité des données, développement 2015-2021 (protocole)
 
-**Statut** : protocole **proposé**, soumis à l'opérateur **avant tout lancement historique**
+**Statut** : protocole **approuvé dans son principe** par l'opérateur le 2026-11-06, avec deux
+précisions intégrées (§3, C9) ; outil et tests synthétiques prêts, **aucun lancement historique**
 (fiche `docs/strategies/DAY_01_LONDON_RANGE.md` §9, étape 4). Ni outil lancé, ni donnée lue à ce
 stade. Cette étude ne produit ni transaction, ni gain ou perte, ni drawdown. Ce n'est ni une
 validation de performance, ni une autorisation de trading.
@@ -39,15 +40,37 @@ confirmation diffèrent.
 
 ## 3. Méthode : le moteur, arrêté à la confirmation
 
-- L'outil réutilise `Day01Backtest` **sans le modifier**, avec un flux de ticks vide. Une
-  sous-classe d'étude remplace seulement la décision d'entrée : à la confirmation, elle enregistre
-  la séance comme **confirmée** et n'évalue rien d'autre. Comme pour S2 et S3, les séances comptées
-  sont donc exactement celles que verra le moteur de performance.
+- **Moteur réutilisé** : l'outil (`backtest/day01_availability.py`, `forex-day01-availability`)
+  exécute `Day01Backtest` avec un flux de ticks vide. Une sous-classe d'étude remplace seulement la
+  décision d'entrée : à la confirmation, elle enregistre l'instant `D` et n'évalue rien d'autre
+  (ni position, ni cotation, ni stop, ni cible, ni taille, ni entrée en attente). Comme pour S2 et
+  S3, les séances comptées sont exactement celles que verra le moteur de performance.
+- **Observation du retest dans le moteur** (ajout du 2026-11-06, approuvé par l'opérateur) : le
+  moteur renseigne `Session.retest` **dès le début du retest** et le met à jour à chaque bougie lue,
+  au lieu de ne l'écrire qu'à la fin. Il conserve ainsi, quelle que soit l'issue (données
+  inutilisables, invalidation, délai dépassé, confirmation) :
+  - l'unité de déclenchement et la zone ;
+  - l'instant du contact, s'il a eu lieu, et l'extrême du retest depuis ce contact ;
+  - le début de la dernière bougie examinée (`last_examined_utc`).
+
+  Ce sont des métadonnées d'observation : elles ne modifient ni les décisions ni les règles. Les
+  tests du moteur existants passent sans modification. L'ordre existant est conservé : sur une
+  bougie, l'invalidation est examinée **avant** la reconnaissance d'un nouveau contact. Une bougie
+  qui recoupe la zone mais clôture au-delà de `Z_b` (achat) est donc une **invalidation avant
+  contact**.
+- **Aucune copie des règles du retest** dans l'outil : il lit l'abstention du moteur et
+  `Session.retest` pour classer chaque séance (§4.2). Seuls le range et la cassure sont
+  **recalculés indépendamment** (contrôle C6), et les invariants du retest sont vérifiés (C7, C8).
 - **Indépendance vis-à-vis des ticks et des positions** : jusqu'à `D`, le parcours d'une séance ne
   lit que les bougies M15/M5 et l'ATR H4 ; il est consommé par la première cassure, quelle que soit
   l'issue (une tentative par séance, §4.6). Une position de la veille n'intervient qu'à `D`
   (§4.7) : elle n'a donc aucun effet sur ces comptes.
-- Un passage par trajectoire (M5, M15), sur les mêmes entrées et le même commit.
+- **Deux trajectoires**, sur les mêmes entrées et le même commit : `Day01Params()` (référence M5) et
+  `Day01Params(trigger=Trigger.M15)` (comparaison M15).
+- **Cause de l'ATR non calculable** : « amorçage » tant qu'aucune séance antérieure de l'étude n'a
+  eu d'ATR, « interruption » de la continuité des H4 ensuite.
+- **Résultats masqués** sur tout contrôle en échec : le rapport ne garde que les contrôles et la
+  provenance, sans entonnoir, descriptions ni détail ; code de sortie 2.
 
 ## 4. Conventions de comptage
 
@@ -104,8 +127,8 @@ Un écart inexpliqué à l'un de ces contrôles **arrête l'étude** : résultat
 | C6 | Recalcul indépendant du range et de la cassure | `RH`, `RL` (28 M15) et première clôture de cassure recalculés directement sur les fichiers parquet, par une requête distincte du moteur : 0 différence |
 | C7 | Bornes temporelles | gel à 08:00 UTC en GMT et 07:00 UTC en BST ; `K` sur la grille M15 dans [08:15, 11:00] Londres ; `D − K` multiple de l'unité, dans [5, 60] min (M5) ou [15, 60] min (M15) ; `D` ≤ 12:00 Londres |
 | C8 | Cohérence du retest | contact au plus tard sur la bougie de confirmation ; extrême lu sur les bougies du contact à la confirmation incluses ; aucune bougie lue au-delà de `K + 60 min` |
-| C9 | Anti-fuite et entrées | 0 tick lu ; aucune bougie lue après le 2022-01-01 ; empreintes M5, M15 et H4 identiques avant et après ; paramètres enregistrés égaux à `Day01Params()` |
-| C10 | Provenance | commit et état de l'arbre capturés **au lancement** ; changements survenus pendant le passage contrôlés à part, à la fin |
+| C9 | Anti-fuite, entrées et paramètres | 0 tick lu ; aucune bougie lue après le 2022-01-01 ; empreintes M5 et M15 égales à celles de l'audit **avant toute lecture**, et M5, M15 et H4 identiques avant et après ; paramètres enregistrés dans chaque rapport : référence M5 = `Day01Params()`, comparaison M15 = `Day01Params(trigger=Trigger.M15)`, **tous les autres paramètres identiques** entre les deux |
+| C10 | Provenance | commit et état de l'arbre capturés **au lancement**, arbre propre exigé ; changements survenus pendant le passage contrôlés à part, à la fin : bloquants s'ils touchent le code (`src/`, `pyproject.toml`, `uv.lock`) ou le commit, rapportés sinon |
 
 **Rapprochement avec l'étape de performance** (à reprendre dans son protocole, comme pour S3) : sur
 la même fenêtre et les mêmes données, le moteur de performance devra reproduire, séance par séance,
@@ -121,13 +144,19 @@ des entrées évaluées, avant les refus à `D`.
   `docs/experiments/DAY01_AVAILABILITY_2015_2021_BILAN.md`, sans détail par séance au-delà des
   séances citées par les contrôles.
 
-## 7. Ordre de travail proposé
+## 7. Ordre de travail
 
-1. Validation de ce protocole par l'opérateur.
+1. Protocole approuvé dans son principe (2026-11-06), précisions intégrées.
 2. Outil d'étude (`backtest/day01_availability.py`, commande `forex-day01-availability`) et tests
-   synthétiques : entonnoir, causes exclusives, identité des étapes communes M5/M15, contrôles
-   C1 à C10 sur des séances construites. Aucun passage historique à ce stade.
-3. Passage 2015-2021, sur autorisation, puis bilan agrégé soumis à revue.
+   synthétiques (`tests/test_day01_availability.py`, observation du retest dans
+   `tests/test_day01.py`) : fait, sans passage historique.
+3. Passage 2015-2021, **sur autorisation explicite**, puis bilan agrégé soumis à revue :
+
+   ```
+   uv run forex-day01-availability \
+       --out data/reports/backtests/day01_availability_2015_2021_<commit>.json \
+       --details-out data/reports/backtests/day01_availability_2015_2021_<commit>_details.jsonl
+   ```
 
 ## 8. Limites
 

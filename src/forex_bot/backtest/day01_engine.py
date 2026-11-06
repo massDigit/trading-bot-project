@@ -288,10 +288,16 @@ class Day01Backtest(S1Backtest):
         contact: datetime | None = None
         extreme: Decimal | None = None
         decision: datetime | None = None
+        # Observation only, filled as the candles are read so that it survives every outcome of the
+        # retest (data, invalidation, timeout, confirmation); it never feeds a decision.
+        observed: dict[str, Any] = {"trigger": unit, "zone": (z_low, z_high), "contact_utc": None, "extreme": None}
+        observed["last_examined_utc"] = None  # start of the last candle examined (its quality at least)
+        session.retest = observed
         start = k
         while start + step <= k + p.retest_delay:
             end = start + step
             self._advance(end, inclusive=False)
+            observed["last_examined_utc"] = start
             bar = self.trigger_bars.get(start)
             if not bar_ok(bar) or bar is None:
                 session.block(RETEST_DATA, f"{unit} {start.isoformat()}, clôture non lue")
@@ -301,15 +307,15 @@ class Day01Backtest(S1Backtest):
                 session.block(INVALIDATED, f"{unit} {start.isoformat()} clôture {close}")
                 return
             if contact is None and touches(bar, z_low, z_high):
-                contact = start
+                contact = observed["contact_utc"] = start
             if contact is not None:
                 level = bar["bid_low"] if long else bar["ask_high"]
                 extreme = level if extreme is None else (min(extreme, level) if long else max(extreme, level))
+                observed["extreme"] = extreme
                 if (long and close > rh) or (not long and close < rl):
                     decision = end
                     break
             start = end
-        session.retest = {"trigger": unit, "zone": (z_low, z_high), "contact_utc": contact, "extreme": extreme}
         if decision is None or extreme is None:
             session.block(RETEST_TIMEOUT)
             return
