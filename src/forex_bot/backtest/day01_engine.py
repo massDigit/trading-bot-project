@@ -23,7 +23,11 @@ Specific to DAY_01, session by session (London date, times in Europe/London):
   derived from them (`Liquidation`);
 - open position across a silence strictly longer than 5 min: the trade is kept, marked
   indeterminate, and handled by scenario A (observed only), B (stop first) or C (target first),
-  one trajectory each, as for S2. A known closure is not an unexplained interruption.
+  one trajectory each, as for S2. A known closure is not an unexplained interruption;
+- at an explicit end of the study, the silence since the last quote of a position still open is
+  measured: an interruption still in progress marks the trade indeterminate, distinct from a gap
+  closed by a quote, with no tick, price or exit invented under any scenario; a liquidation order
+  not executed by then is reported as such.
 
 Research only: no order is ever sent and nothing here talks to a broker.
 """
@@ -99,6 +103,9 @@ class Day01Result(BacktestResult):
     scenario: GapScenario = GapScenario.OBSERVED_ONLY
     sessions: list[Session] = field(default_factory=list)
     liquidations: list[Liquidation] = field(default_factory=list)
+    # Position still open at an explicit end of the study: silence since its last quote, still in progress.
+    silence_at_end: dict[str, Any] | None = None
+    unexecuted_liquidation_utc: datetime | None = None  # 16:00 order still pending at the end of the study
 
 
 class Day01Backtest(S1Backtest):
@@ -129,6 +136,8 @@ class Day01Backtest(S1Backtest):
         self.trigger_bars = self.m5 if params.trigger is Trigger.M5 else self.m15
         self.sessions: list[Session] = []
         self.liquidations: list[Liquidation] = []
+        self.silence_at_end: dict[str, Any] | None = None
+        self.unexecuted_liquidation_utc: datetime | None = None
         self.target: Decimal | None = None  # of the open position
         self._pending_target: Decimal | None = None
         self._pending_session: Session | None = None
@@ -148,6 +157,7 @@ class Day01Backtest(S1Backtest):
         if self.end_utc is not None:
             final: datetime | None = self.end_utc
             self._advance(self.end_utc, inclusive=False)
+            self._open_at_end(self.end_utc)
         else:
             self._advance(None, inclusive=True)
             instants = [m for m in (decided, self._last_tick.ts_utc if self._last_tick else None) if m is not None]
@@ -168,7 +178,39 @@ class Day01Backtest(S1Backtest):
             scenario=self.scenario,
             sessions=self.sessions,
             liquidations=self.liquidations,
+            silence_at_end=self.silence_at_end,
+            unexecuted_liquidation_utc=self.unexecuted_liquidation_utc,
         )
+
+    def _open_at_end(self, end: datetime) -> None:
+        """Position still open at the explicit end: nothing is closed, priced or invented (sheet §4.7)."""
+        position, last = self.position, self._last_tick
+        if position is None or last is None:
+            return
+        kind = classify_silence(last.ts_utc, end, self.day01.interruption_threshold, self.config.documented_closures)
+        self.silence_at_end = {
+            "last_quote_utc": last.ts_utc,
+            "end_of_study_utc": end,
+            "duration": end - last.ts_utc,
+            "kind": kind,
+            "in_progress": True,  # no quote closes it: unlike the gaps closed by a tick
+        }
+        if kind is Silence.UNEXPLAINED:
+            span = f"{last.ts_utc.isoformat()} → en cours à la fin de l'étude ({end.isoformat()})"
+            position.unobservable_crossings.append(span)
+            self._log(
+                end,
+                "INTERRUPTION_EN_COURS",
+                f"{span} : silence non clos, aucune cotation ; transaction conservée, indéterminée, "
+                "ouverte et valorisée au dernier tick observé",
+            )
+        if self.pending_exit is not None:
+            self.unexecuted_liquidation_utc = self.pending_exit.decided_utc
+            self._log(
+                end,
+                "LIQUIDATION_NON_EXÉCUTÉE",
+                f"ordre décidé à {self.pending_exit.decided_utc.isoformat()}, aucun tick postérieur avant la fin",
+            )
 
     # ------------------------------------------------------------------ session
 

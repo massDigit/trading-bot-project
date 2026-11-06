@@ -595,6 +595,50 @@ def test_position_still_open_at_the_end_of_the_study_is_valued_without_invented_
     assert result.open_trade.exit_utc is None and result.unrealized != 0
 
 
+@pytest.mark.parametrize("scenario", list(GapScenario), ids=["A", "B", "C"])
+def test_interruption_still_in_progress_at_the_end_of_the_study_is_reported_without_exit(
+    tmp_path: Path, scenario: GapScenario
+) -> None:
+    """Entry 08:45:00.140, last tick 09:59:30, liquidation decided at 16:00, explicit end at midnight:
+    the silence is never closed by a quote. The trade stays open, valued at the last tick observed,
+    and becomes indeterminate; no tick, price or exit is invented, under any scenario."""
+    ticks = example_a(
+        WINTER, [tick(at(WINTER, 8, 45, 0, 140), "1.13260"), *fill(at(WINTER, 8, 45, 30), at(WINTER, 10, 0), "1.13300")]
+    )
+    result = run(tmp_path, ticks, WINTER, scenario=scenario)
+    end = at(WINTER + timedelta(days=1), 0, 0)
+    assert result.trades == [] and result.liquidations == []
+    trade = got(result.open_trade)
+    assert trade.exit_utc is None and trade.indeterminate
+    assert trade.unobservable_crossings == [
+        f"{at(WINTER, 9, 59, 30).isoformat()} → en cours à la fin de l'étude ({end.isoformat()})"
+    ]
+    silence = got(result.silence_at_end)
+    assert (silence["last_quote_utc"], silence["end_of_study_utc"]) == (at(WINTER, 9, 59, 30), end)
+    assert silence["kind"] is Silence.UNEXPLAINED and silence["in_progress"]
+    assert "INTERRUPTION_EN_COURS" in kinds(result) and "INTERRUPTION_POSITION" not in kinds(result)
+    assert result.unexecuted_liquidation_utc == at(WINTER, 16, 0) and "LIQUIDATION_NON_EXÉCUTÉE" in kinds(result)
+    assert result.end_utc == end and result.unrealized != 0  # valued at the last tick, sampled at the end
+
+
+@pytest.mark.parametrize(("extra_ms", "interrupted"), [(0, False), (1, True)], ids=["exactly-5min", "5min-1ms"])
+def test_silence_at_the_end_of_the_study_threshold_is_strictly_above_5_min(
+    tmp_path: Path, extra_ms: int, interrupted: bool
+) -> None:
+    """Last tick 15:59:30; explicit end 16:04:30 (exactly 5 min, not an interruption) or 1 ms later."""
+    ticks = example_a(
+        WINTER, [tick(at(WINTER, 8, 45, 0, 140), "1.13260"), *fill(at(WINTER, 8, 45, 30), at(WINTER, 16, 0), "1.13300")]
+    )
+    end = at(WINTER, 16, 4, 30, 0) + timedelta(milliseconds=extra_ms)
+    result = run(tmp_path, ticks, WINTER, end_utc=end)
+    trade = got(result.open_trade)
+    silence = got(result.silence_at_end)
+    assert silence["duration"] == timedelta(minutes=5, milliseconds=extra_ms)
+    assert (silence["kind"] is Silence.UNEXPLAINED) is interrupted and trade.indeterminate is interrupted
+    assert ("INTERRUPTION_EN_COURS" in kinds(result)) is interrupted
+    assert result.unexecuted_liquidation_utc == at(WINTER, 16, 0) and result.trades == []
+
+
 # ---------------------------------------------------------------- abstentions (sheet §8)
 
 
