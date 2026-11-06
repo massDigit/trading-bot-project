@@ -123,6 +123,6 @@ décisions identique octet pour octet) ; 194 s, 175 Mio. Étape 3 rejouée aprè
 
 ## 🏁 Prochaine Étape / Milestone
 1. S1, S2 et S3 étudiées sur 2015-2021 (ADR-016, ADR-020), sans conclusion de rentabilité. Suite (stratégie, paramètres, capital ou risque, modèle de sélection) sur décision de l'opérateur seulement ; aucune expérience en cours.
-   Première vague (cahier v1.2 §6.6, §15 lot 3A) : fiche DAY_01 figée (ADR-022) ; lot de données M5/M15 2015-2021 clôturé (ADR-021, convention DAY_01 : silence > 5 min) ; moteur DAY_01 hors ligne (référence M5 et variante M15) et tests synthétiques en PR brouillon (#19), en revue ; libellés de liquidation clarifiés (ADR-023) ; aucun passage historique.
+   Première vague (cahier v1.2 §6.6, §15 lot 3A) : fiche DAY_01 figée (ADR-022) ; lot de données M5/M15 2015-2021 clôturé (ADR-021, convention DAY_01 : silence > 5 min) ; moteur DAY_01 hors ligne (référence M5 et variante M15) et tests synthétiques fusionnés (PR #19, ADR-023) ; protocole de l'étude de disponibilité 2015-2021 proposé, en attente de validation ; aucun passage historique.
 2. En parallèle : fermetures particulières et confirmations IG.
 3. Garder 2022-2023 pour l'évaluation des variantes figées, puis 2024-2025 pour le test final (ADR-007).
