@@ -146,8 +146,9 @@ class AvailabilityBacktest(Day01Backtest):
         Read from the H4 history and the state of each H4 known at `instant`, through a fresh
         `ContinuousWilderAtr` (same rules, no cache): the usable run that ends at the last H4 known
         starts at its anchor. Anchor 0: the run starts with the history, which is too short;
-        otherwise the run follows an absent expected H4 or an unusable one. Anything else is left
-        undetermined rather than attributed."""
+        otherwise the run follows an absent expected H4 or an unusable one; an anchor after the last
+        H4 known means that H4 is unusable and no usable one is known yet. No H4 after the last one
+        known is ever read. Anything else is left undetermined rather than attributed."""
         i = bisect.bisect_right(self.h4_available, instant) - 1
         if i < 0:
             return ATR_INITIAL, "aucune H4 disponible"
@@ -167,6 +168,11 @@ class AvailabilityBacktest(Day01Backtest):
         anchor = probe._anchor  # set by `at`: first H4 of the usable run ending at H4 i
         if anchor is None:
             return ATR_UNDETERMINED, None
+        if anchor > i:  # the last H4 known is itself unusable: no usable H4 yet after the break
+            return (
+                ATR_UNUSABLE_H4,
+                f"H4 {self.h4[i]['start_utc'].isoformat()} inutilisable ; 0 H4 utilisable depuis la rupture",
+            )
         known = f"{i - anchor + 1} H4 utilisables depuis {self.h4[anchor]['start_utc'].isoformat()}"
         if anchor == 0:
             return ATR_INITIAL, known

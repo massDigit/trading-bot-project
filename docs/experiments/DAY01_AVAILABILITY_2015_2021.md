@@ -75,6 +75,8 @@ confirmation diffèrent.
     initial insuffisant ;
   - ancre après une H4 prévue absente : **interruption, H4 prévue absente** ;
   - ancre après une H4 inutilisable à cet instant : **interruption, H4 inutilisable** ;
+    c'est aussi le cas quand la dernière H4 connue au gel est elle-même inutilisable : aucune H4
+    utilisable n'est encore connue après la rupture (0 H4), et aucune bougie postérieure n'est lue ;
   - autre situation : cause **non déterminée**, plutôt qu'une attribution certaine.
 
   Le détail (nombre de H4 utilisables, H4 en cause) est conservé par séance. Un ATR disponible au

@@ -294,3 +294,20 @@ def test_atr_cause_never_attributes_an_available_atr(tmp_path: Path) -> None:
     engine = AvailabilityBacktest(m5, m15, h4_bars(end), [], [], Day01Params(), CONFIG)
     cause, detail = engine.atr_cause(london(TUESDAY, time(8)))
     assert cause == ATR_AVAILABLE and detail == "ATR 0.00200"
+
+
+def test_last_known_h4_unusable_gives_the_same_diagnosis_with_or_without_later_candles(tmp_path: Path) -> None:
+    """The H4 02:00-06:00 of 2019-02-12, the last one known at the 08:00 freeze, is unusable: no usable
+    H4 follows the break yet. The diagnosis names it and never reads the H4 06:00-10:00, which is
+    unknown at the freeze: the history cut at the freeze gives the same answer as the full one."""
+    m5, m15 = candles(tmp_path, example_a(TUESDAY))
+    freeze, last = london(TUESDAY, time(8)), datetime(2019, 2, 12, 2, tzinfo=UTC)
+    full = h4_bars(london(TUESDAY + timedelta(days=1), time(0)))
+    for bar in full:
+        if bar["start_utc"] == last:
+            bar["complete_at_close"], bar["flags_at_close"] = False, ["INTERRUPTION_INEXPLIQUÉE"]
+    cut = [b for b in full if b["end_utc"] <= freeze]
+    assert cut[-1]["start_utc"] == last and len(cut) < len(full)
+    answers = [AvailabilityBacktest(m5, m15, h4, [], [], Day01Params(), CONFIG).atr_cause(freeze) for h4 in (full, cut)]
+    expected = (ATR_UNUSABLE_H4, "H4 2019-02-12T02:00:00+00:00 inutilisable ; 0 H4 utilisable depuis la rupture")
+    assert answers == [expected, expected]
