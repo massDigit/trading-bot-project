@@ -39,7 +39,8 @@
 - [x] Fiche S2 (`docs/strategies/S2_PULLBACK.md`) : approuvée (ADR-015), implémentée et évaluée sur 2015-2021 (ADR-016)
 - [x] Fiche DAY_02 (candidate « D2 », lot 3B, ADR-025) figée : `docs/strategies/DAY_02_FLAG_CONTINUATION.md`, ASSUMP-029 `APPROVED` pour la recherche hors ligne (ADR-028), PR #23 ; base de rédaction, chronologie, valeurs de référence et dérogation sur les limites journalière et hebdomadaire retenues (ADR-026, ADR-027) ; fiche figée ; aucun moteur ni passage
 - [x] DAY_02 : proposition technique de réutilisation du code validée (ADR-029)
-- [ ] DAY_02 : moteur hors ligne (`backtest/day02.py`, `backtest/day02_engine.py`) et 45 tests synthétiques (`tests/test_day02.py`), PR brouillon #24, correctif après revue, soumis à revue ; aucun passage historique
+- [x] DAY_02 : moteur hors ligne (`backtest/day02.py`, `backtest/day02_engine.py`) et 45 tests synthétiques (`tests/test_day02.py`), PR #24 fusionnée (`653cdac`), lot clos (ADR-030) ; aucun passage historique
+- [ ] DAY_02 : protocole de l'étude de disponibilité 2015-2021 (`docs/experiments/DAY02_AVAILABILITY_2015_2021.md`), proposé, PR brouillon ; outil et passage sur autorisation seulement
 - [ ] DAY_02 : décision sur les conditions IG avant les passages de performance
 - [x] Fiche DAY_01 (candidate « D1 », première vague) figée : `docs/strategies/DAY_01_LONDON_RANGE.md`, ASSUMP-027 approuvée (ADR-022) ; EUR/USD seulement
 - [x] Moteur DAY_01 hors ligne (`backtest/day01.py`, `backtest/day01_engine.py`), référence M5 et variante M15, et tests synthétiques (`tests/test_day01.py`), fusionné (PR #19) ; libellés de liquidation clarifiés (ADR-023) ; aucun passage historique
