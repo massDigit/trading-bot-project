@@ -3,9 +3,11 @@
 > Identifiant code : `DAY_02` (candidate « D2 » du cahier des charges). Statut : **proposition**
 > (ASSUMP-029 `PROPOSED`), rédigée le 2026-11-07 sur autorisation de l'opérateur (ADR-025),
 > documentation seulement ; base de rédaction retenue et corrections demandées le 2026-11-07
-> (ADR-026, §12). Portée **recherche hors ligne**. Aucun moteur, aucune analyse historique, aucun
-> backtest. Toutes les valeurs nouvelles de cette fiche sont **proposées**, choisies a priori sans
-> lecture de données ni de résultats, et restent `PROPOSED` jusqu'à validation (§12). Instrument :
+> (ADR-026) ; chronologie, limites de risque et valeurs de référence retenues le 2026-11-07
+> (ADR-027, §12). **Proposée pour le gel**, en attente de validation. Portée **recherche hors
+> ligne**. Aucun moteur, aucune analyse historique, aucun backtest. Toutes les valeurs nouvelles de
+> cette fiche ont été choisies a priori, sans lecture de données ni de résultats ; ce sont des
+> hypothèses de recherche, `PROPOSED` jusqu'au gel (§12). Instrument :
 > **EUR/USD seulement**. Aucune donnée 2022-2025. Ni validation de performance ni autorisation de
 > trading.
 
@@ -65,7 +67,7 @@ Les heures sont données **en heure locale de Londres** (`Europe/London`), sauf 
 
 | Unité | Rôle dans la référence | Justification par la logique de la stratégie |
 |---|---|---|
-| **H1** | **contexte de volatilité seulement** : ATR Wilder 14 H1 `A`, échelle de mesure de l'impulsion, de la profondeur et des marges (§5.1). Aucun filtre de direction | L'impulsion dure de 15 min à 1 h (§5.1) : la volatilité de référence doit couvrir quelques heures, pas plusieurs jours. Une H1 sur 14 couvre environ une demi-journée ; une H4 sur 14 couvrirait plus de deux jours de cotation, une échelle plus lente que la figure. La direction est donnée par l'impulsion elle-même : un filtre de tendance H1 ajouterait une condition non exigée par la recette ; il relève d'une variante distincte (§12) |
+| **H1** | **contexte de volatilité seulement** : ATR Wilder 14 H1 `A`, échelle de mesure de l'impulsion, de la profondeur et des marges (§5.1). Aucun filtre de direction | L'impulsion dure de 15 min à 1 h (§5.1) : la volatilité de référence doit couvrir quelques heures, pas plusieurs jours. Une H1 sur 14 couvre environ une demi-journée ; une H4 sur 14 couvrirait plus de deux jours de cotation, une échelle plus lente que la figure. La direction est donnée par l'impulsion elle-même : un filtre de tendance H1 ajouterait une condition non exigée par la recette ; il relèverait d'une variante distincte, non prévue dans cette étude (§12) |
 | **M15** | **configuration** : impulsion, puis formation du drapeau | Une impulsion intrajournalière de 1 à 4 M15 et une pause de 2 à 6 M15 sont lisibles en M15 sans réduire la figure à une ou deux bougies |
 | **M5** | **déclenchement** : sortie du drapeau, surveillance de la profondeur après la formation, extrême du drapeau pour le stop | Lire la sortie du drapeau sur l'unité plus fine permet d'entrer plus près de la borne ; c'est l'apport que le cahier demande de mesurer (§6.5) |
 | H4 | non utilisée dans la référence | — |
@@ -115,7 +117,7 @@ décrivent le même mouvement à deux résolutions, et `A` n'est qu'une échelle
 - **Aucun calendrier historique d'annonces** avec heures de publication n'est disponible dans le
   projet. Le cahier refuse de reproduire une décision ancienne à partir de données sans historique
   de publication (§5).
-- **Référence proposée : sans filtre d'annonces**, sous réserve de validation (§12).
+- **Référence : sans filtre d'annonces**, retenu le 2026-11-07 (ADR-026, §12).
 - Conséquence propre à DAY_02, plus forte que pour DAY_01 : une **impulsion** est souvent la
   réaction à une publication (par exemple zone euro vers 09:00-10:00 Londres, États-Unis à 13:30
   ou 15:00 Londres). Une partie des configurations détectées peut donc être causée par des
@@ -179,8 +181,8 @@ suivies au tick jusqu'à leur clôture, normalement peu après 17:00 au plus tar
 faute de cotation (§6.3). L'étude de disponibilité de DAY_02 rapportera la fréquence des M5/M15 non
 `OK` et des silences dans cette fenêtre propre, à titre descriptif, sans changer le seuil (§10.1).
 
-**Alternative** : seuil de référence de 10 min (comparaison conservée par ADR-021). Si l'extension
-n'est pas validée, DAY_02 attend une décision sur sa convention avant toute implémentation.
+**Retenu le 2026-11-07** (ADR-026) : extension à cinq minutes, sans modification des H1. Le seuil de
+10 min d'ADR-021 reste une référence d'audit pour DAY_01 ; il n'est pas utilisé par DAY_02.
 
 ## 5. Impulsion, drapeau, sortie et entrée (achat ; vente au §5.8)
 
@@ -212,27 +214,33 @@ d'impulsion** `W_j` : les **4 M15** qui se terminent à `t_j` (bougies `j − 3`
    **première** qui l'atteint.
 4. **Sommet** : `E` = plus haut `bid_high` des 4 M15 de `W_j` (toute la fenêtre, pas seulement
    après `o`) ; bougie du sommet `p` = la **dernière** qui l'atteint.
-5. **Ordre des extrêmes** : il faut **`o < p` strictement** (le plus bas est atteint dans une
-   bougie antérieure à celle du plus haut) **et `p = j`** (l'impulsion est reconnue à la clôture de
-   sa bougie de sommet). Si `o ≥ p`, l'ordre des extrêmes n'est pas établi ou le sommet précède
-   l'origine : pas d'impulsion haussière. Si `p < j`, des bougies postérieures au sommet sont déjà
-   closes : la reconnaissance n'a pas lieu à `t_j` (elle aurait dû avoir lieu à la clôture du
-   sommet, avec la fenêtre de ce moment).
-6. **Amplitude** : `I = E − O`.
-7. **Impulsion haussière reconnue** si, en plus : 
+5. **Ordre des extrêmes** : il faut **`o < p` strictement** : le plus bas est atteint dans une
+   bougie antérieure à celle du plus haut. Si `o ≥ p`, l'ordre des extrêmes n'est pas établi ou le
+   sommet précède l'origine : pas d'impulsion haussière.
+6. **Sommet sur la dernière bougie, `p = j`** : **restriction supplémentaire choisie pour la
+   référence**, qui ne découle pas de `o < p`. L'impulsion n'est reconnue qu'à la clôture de sa
+   bougie de sommet. Si `p < j`, des bougies postérieures au sommet sont déjà closes : pas de
+   reconnaissance à `t_j`. Raison : la pause doit commencer après la reconnaissance, pour que
+   toutes ses bougies soient lues par les règles du §5.3 ; sans cette restriction, des bougies de
+   pause seraient déjà closes au moment de la reconnaissance.
+7. **Amplitude** : `I = E − O`.
+8. **Impulsion haussière reconnue** si, en plus :
    - **amplitude relative** : `bid_close_j − O ≥ 1,5 × A` ;
    - **clôture forte** : `bid_close_j ≥ E − 0,25 × I` (la clôture de la bougie du sommet reste dans
      le quart supérieur de l'amplitude).
 
    Si les conditions de hausse et de baisse (§5.8) sont réunies à la même M15, aucune impulsion
-   n'est reconnue (cas ambigu, journalisé) : la règle ne choisit pas un sens après coup. Avec
-   `p = j` dans les deux sens, ce cas exige que la même M15 porte le plus haut et le plus bas de la
-   fenêtre ; il est donc exclu par `o < p` et ne subsiste que comme garde-fou.
-8. L'impulsion reconnue ouvre une **configuration**. `O`, `o` et `A` sont figés. `E`, `p` et `I`
+   n'est reconnue (cas ambigu, journalisé) : la règle ne choisit pas un sens après coup. L'ordre
+   des extrêmes ne peut être satisfait dans les deux sens qu'avec des égalités (la dernière M15
+   atteint à la fois le plus haut et le plus bas de la fenêtre, chacun déjà atteint par une bougie
+   antérieure) ; les deux amplitudes sont alors égales, et une même clôture ne peut pas être à la
+   fois dans le quart supérieur et dans le quart inférieur. Le cas est donc impossible avec ces
+   règles ; il reste écrit comme garde-fou.
+9. L'impulsion reconnue ouvre une **configuration**. `O`, `o` et `A` sont figés. `E`, `p` et `I`
    ne changent que par extension (§5.3).
 
 **Durée de l'impulsion** (bougies `o` à `p`) : de **2 à 4 M15** à la reconnaissance (`o < p = j`
-dans une fenêtre de 4 M15) ; jusqu'à 6 M15 après extension (§5.3).
+dans une fenêtre de 4 M15, avec la restriction `p = j`) ; jusqu'à 6 M15 après extension (§5.3).
 
 ### 5.2 Fenêtre horaire de la séance (proposé)
 
@@ -295,7 +303,7 @@ une **boîte** sous le sommet, définie par des prix observés, sans tracé de d
 **Pente** (« à fixer », cahier §6.3) : **non contrainte** dans la référence. Un drapeau descendant,
 horizontal ou montant sous `E` est admis tant qu'il respecte la profondeur et la durée. La pente
 (clôture de la dernière bougie de pause moins clôture de la première, rapportée à `A`) est
-journalisée à titre descriptif. Une contrainte de pente relèverait d'une variante distincte (§12).
+journalisée à titre descriptif. Une contrainte de pente relèverait d'une variante distincte, non prévue dans cette étude (§12).
 
 ### 5.4 Sortie du drapeau (M5 en référence, M15 en comparaison) (proposé)
 
@@ -342,18 +350,18 @@ des bougies de déclenchement lues de `F` à la bougie de sortie incluse (pour u
 
 La décision lit l'état **strictement antérieur à `D`**. Entrée décidée si, dans cet ordre :
 1. aucune position DAY_02 ouverte ni entrée DAY_02 en attente (§5.7) ;
-2. **limite de perte journalière non atteinte**, si elle est retenue (§7.1) ;
-3. marché ouvert à `D` selon le calendrier ;
-4. **cotation à `D`** : dernier tick strictement antérieur à `D`, dans la bougie de sortie
+2. marché ouvert à `D` selon le calendrier ;
+3. **cotation à `D`** : dernier tick strictement antérieur à `D`, dans la bougie de sortie
    (`ts ≥ D − 5 min` en référence, `ts ≥ D − 15 min` en comparaison M15), bid et ask positifs,
    bid ≤ ask. Il donne `P_D` (ask à l'achat) et le prix de sortie courant (bid à l'achat). Sinon,
    abstention « absence de cotation à `D` » ;
-5. **stop admissible** (§6.1) : `S` strictement sous le bid courant et `P_D − S > 0` ; sinon,
+4. **stop admissible** (§6.1) : `S` strictement sous le bid courant et `P_D − S > 0` ; sinon,
    abstention « stop non admissible ». Aucune distance minimale IG n'est modélisée (§8) ;
-6. **cible du bon côté** : `T > P_D` (§6.2) ; sinon, abstention « cible déjà dépassée à `D` ».
+5. **cible du bon côté** : `T > P_D` (§6.2) ; sinon, abstention « cible déjà dépassée à `D` ».
    Contrairement à un multiple du risque, la cible projetée n'est pas du bon côté par
    construction : le prix peut avoir déjà parcouru l'amplitude projetée à `D` ;
-7. taille admise par le budget de risque (§7).
+6. taille admise par le budget de risque (§7). Aucun blocage journalier ou hebdomadaire n'est
+   appliqué (§7.1).
 
 Une abstention à `D` met fin à la configuration (§5.7).
 
@@ -366,7 +374,6 @@ décidée non exécutée ; aucune exécution supposée.
 - **Interruption avant l'exécution** (convention du §4.1) : annulation dès qu'un silence de
   strictement plus de 5 min est connu, y compris révélé par le premier tick suivant, qui n'exécute
   pas (`ENTRÉE_ANNULÉE_INTERRUPTION`).
-- **Limite de perte journalière atteinte pendant l'attente** (si retenue) : annulation (§7.1).
 - Aucune exécution après **15:05** Londres.
 
 ### 5.7 Tentatives et configurations successives (proposé)
@@ -387,9 +394,8 @@ décidée non exécutée ; aucune exécution supposée.
   l'identique toutes les configurations du passage de performance (§10.1).
 - **Pas de plafond journalier de tentatives** dans la référence : la recette ne porte pas sur un
   événement unique de la séance, et plusieurs impulsions peuvent se produire dans une journée. Le
-  nombre de configurations, d'entrées et de pertes par séance sera rapporté. Alternatives au §12.
-  La limite de perte journalière du cahier est traitée à part (§7.1) : ce n'est pas un plafond de
-  tentatives.
+  nombre de configurations, d'entrées et de pertes par séance sera rapporté. Les limites de perte
+  du cahier sont traitées à part (§7.1) : ce ne sont pas des plafonds de tentatives.
 
 ### 5.8 Vente (règle symétrique)
 
@@ -432,14 +438,14 @@ décidée non exécutée ; aucune exécution supposée.
   comportement confirmé d'un ordre limite IG, §8).
 - **Rapports rapportés sans servir de filtre** : rapport des distances estimées à la décision
   `(T − P_D) / (P_D − S)`, qui **varie** d'une configuration à l'autre ; rapport net estimé à `D`,
-  coûts compris ; rapport obtenu à l'exécution. Aucun rapport minimal n'est exigé dans la
-  référence (alternative au §12).
+  coûts compris ; rapport obtenu à l'exécution. Aucun rapport minimal n'est exigé.
 - **Premier prix d'exécution déjà au-delà d'une borne** (ADR-009) : au-delà du stop, exécutée puis
   liquidée (`STOP_DÉPASSÉ_À_L'EXÉCUTION`) ; au-delà de la cible, exécutée puis sortie sur le même
   tick (`CIBLE_ATTEINTE_À_L'EXÉCUTION`, qui n'est pas forcément un gain).
-- **Variantes séparées**, non lancées avec la référence (cahier §6.3 : sortie avant un obstacle,
-  cible définie ou règle suiveuse, testées séparément) : multiple du risque ; sortie avant un
-  obstacle supérieur ; sortie suiveuse (§12).
+- **Autres sorties** (cahier §6.3 : sortie avant un obstacle, cible définie ou règle suiveuse,
+  testées séparément) : multiple du risque, sortie avant un obstacle supérieur, sortie suiveuse.
+  Elles relèveraient de protocoles distincts ; **aucune n'est prévue ni autorisée** dans cette
+  étude (§12).
 
 ### 6.3 Sortie temporelle et liquidation de fin de séance
 
@@ -486,9 +492,7 @@ décidée non exécutée ; aucune exécution supposée.
 - Décision à `D` sur l'état strictement antérieur à `D` ; exécution au premier tick `ts > D` ; un
   tick horodaté exactement à `D` est rejoué après la décision.
 - Priorité sur un même tick (ASSUMP-024) : silence précédant le tick ; stop ; cible ; clôture en
-  attente (sortie temporelle ou liquidation) ; contrôle de la limite de perte journalière, si elle
-  est retenue (§7.1) ; entrée en attente. Un tick qui fait franchir la limite n'exécute donc pas
-  une entrée en attente.
+  attente (sortie temporelle ou liquidation) ; entrée en attente.
 - Les ticks résolvent l'ordre du stop et de la cible ; un trou de cotation qui empêche de trancher
   rend la transaction indéterminée (scénarios A, B, C).
 
@@ -504,61 +508,34 @@ décidée non exécutée ; aucune exécution supposée.
   Rien dans cette fiche ne suppose qu'une construction différente des stops changerait ce constat
   pour DAY_02 : la part des coûts fixes dans le risque sera mesurée, pas présumée.
 
-### 7.1 Limite de perte journalière (proposé ; à trancher)
+### 7.1 Limites de perte journalière et hebdomadaire : dérogation pour cette étude (décision du 2026-11-07, ADR-027)
 
-Son omission **n'est pas acquise** : que les moteurs S1 à DAY_01 ne la simulent pas ne dispense pas
-de l'appliquer si elle est exigée.
+**Ce que demande le cahier** (§8, paraphrasé ; le cahier n'est pas publié dans ce dépôt) : un seuil
+de perte journalière de 1 % et un seuil hebdomadaire de 2 %, proposés pour le compte de référence,
+pertes comprenant réalisé, latent et frais, sur des fenêtres aux horaires fixés ; leur
+franchissement bloque les nouvelles entrées, annule les entrées en attente, déclenche une alerte et
+conserve les protections ; la reprise exige une revue et une action explicite. Une baisse de 6 %
+depuis le sommet entraîne une revue.
 
-**Ce que demande le cahier** (§8, paraphrasé ; le cahier n'est pas publié dans ce dépôt) :
-- un **seuil de perte journalière de 1 %** (20 € pour 2 000 €), proposé pour le compte de
-  référence, à côté d'un seuil hebdomadaire de 2 % et d'une revue à 6 % de baisse depuis le
-  sommet ; ces limites ne sont pas encore approuvées pour le réel ;
-- les pertes journalières **incluent le réalisé, le latent et les frais**, corrigées des apports et
-  retraits ; les fenêtres de calcul ont des **horaires fixés et documentés** ;
-- le **franchissement d'un seuil** bloque les nouvelles entrées et les augmentations d'exposition,
-  annule les ordres d'entrée en attente quand la connexion le permet, déclenche une alerte et
-  conserve la gestion des protections existantes ; la liquidation immédiate est une commande
-  distincte ; une **reprise après arrêt de risque exige une revue et une action explicite**.
+**Décision** : la référence de recherche **isolée** DAY_02 **n'applique pas** les blocages
+journalier de 1 % et hebdomadaire de 2 %. Leur simulation opérationnelle est **reportée au compte
+partagé**, où décisions, capital, exposition et protections devront être évalués ensemble.
+- C'est une **dérogation explicite et limitée à cette étude hors ligne**. Elle ne modifie pas les
+  exigences du futur compte et n'autorise aucun trading.
+- Aucune remise à zéro automatique n'est introduite, et rien n'est présenté comme une revue
+  humaine : il n'y a pas de blocage à lever.
+- Restent **inchangés** : risque de 0,25 % par opération, dimensionnement, protections (stop
+  garanti simulé), sorties (cible, sortie temporelle, liquidation de 17:00).
+- **Seuil de 6 %** : seuil de **revue rapporté**, la trajectoire continuant, comme pour les
+  références précédentes (premier franchissement du drawdown relatif au tick).
+- **Aucune variante** supplémentaire avec ou sans limites n'est autorisée.
 
-**Traduction opérationnelle proposée pour le backtest DAY_02** :
-
-| Élément | Proposition | Raison |
-|---|---|---|
-| Fenêtre journalière | journée de cotation New York, 17:00 → 17:00 New York (ASSUMP-015) | ancrage déjà utilisé par le projet ; une séance DAY_02 (07:00-17:00 Londres) tombe entière dans une seule journée de cotation |
-| Fonds propres de référence `R_d` | fonds propres au début de la fenêtre : solde, plus la position éventuellement encore ouverte valorisée à la dernière cotation connue avant le début | « fonds propres actualisés, positions ouvertes comprises » (cahier §8) |
-| Perte du jour `L(t)` | `R_d − fonds propres(t)` ; fonds propres = solde (réalisé, **tous coûts déjà comptés** : glissement, prime, conversion, financement) + latent de la position ouverte, valorisé côté sortie à la cotation courante (bid à l'achat), converti en euros | réalisé, latent et frais (cahier §8) ; même valorisation que le drawdown au tick des passages précédents ; pas d'apports ni de retraits en backtest |
-| Franchissement | `L(t) ≥ 0,01 × R_d` (atteindre le seuil suffit) | lecture prudente de « franchissement » |
-| Instants de contrôle | **à chaque tick** rejoué, et avant chaque décision à `D` (état strictement antérieur à `D`) | le latent change à chaque tick ; l'état bloqué doit être connu avant toute décision |
-| Effet sur les nouvelles entrées | à partir du tick de franchissement, **aucune entrée décidée** jusqu'à la remise à zéro : les configurations restent détectées et journalisées, et une sortie confirmée donne l'abstention « limite de perte journalière atteinte » (configuration consommée) | blocage des nouvelles entrées ; garder le parcours observable |
-| Augmentation d'exposition | sans objet (une position à la fois, ni renforcement ni pyramidage) | — |
-| Entrée en attente | annulée au tick de franchissement, ce tick n'exécute pas (`ENTRÉE_ANNULÉE_LIMITE`) ; le contrôle passe avant l'exécution sur un même tick | « annule les ordres d'entrée en attente » ; avec une seule position à la fois, une entrée en attente n'a pas de position ouverte à côté, le cas ne peut donc survenir que si les fonds propres changent sans position (non prévu) : règle écrite pour être complète |
-| Position ouverte | **conservée**, avec son stop, sa cible, sa sortie temporelle et la liquidation de 17:00 ; aucune liquidation forcée | « conserve la gestion des protections » ; la liquidation immédiate est une commande distincte, non simulée |
-| Alerte | événement journalisé `LIMITE_JOURNALIÈRE_ATTEINTE` (instant, `R_d`, `L`, fonds propres, position ouverte) | « déclenche une alerte » |
-| Remise à zéro | **convention de simulation** : blocage levé au début de la fenêtre suivante, avec un nouveau `R_d` ; chaque blocage est compté et rapporté | le cahier exige une revue et une action explicite, impossibles en backtest : cette convention les **remplace** explicitement, elle ne les reproduit pas |
-| Portée | trajectoire DAY_02 seule, avec son propre capital | sur un compte réel, la limite porterait sur tout le compte et toutes les stratégies ; ce n'est pas simulé (pas de portefeuille partagé) |
-
-**Choix restant à trancher** (§12) :
-1. appliquer la limite dans la référence DAY_02, ou la reporter à la simulation d'un compte
-   commun (avec alors un simple comptage descriptif, qui **ne remplace pas** son application si
-   elle est exigée) ;
-2. fenêtre : journée de New York ou journée civile de Londres ;
-3. latent : valorisation côté sortie sans coûts futurs (proposé), ou en déduisant les coûts de
-   sortie estimés (glissement, conversion) ;
-4. franchissement : `≥` (proposé) ou `>` ;
-5. remise à zéro : à la fenêtre suivante (proposé), à la semaine suivante, ou arrêt de la
-   trajectoire jusqu'à revue (résultats après l'arrêt non simulés) ;
-6. **seuil hebdomadaire de 2 %**, exigé par le même passage : même mécanique sur la semaine de
-   cotation (dimanche 17:00 → vendredi 17:00 New York), à inclure ou non ;
-7. **seuil de 6 %** : les protocoles S2, S3 et DAY_01 l'ont traité comme un seuil de revue, la
-   trajectoire continuant (ADR-015). La phrase du cahier sur le franchissement « d'un seuil » peut
-   se lire comme s'appliquant aussi à lui ; à confirmer pour DAY_02 ;
-8. comparabilité : S1 à DAY_01 ont été mesurées **sans** ces limites. Si DAY_02 les applique, une
-   comparaison sans limite serait une variante distincte, préenregistrée, sur autorisation.
-
-Avec une position à la fois et 0,25 % de risque par opération, atteindre 1 % dans une journée
-demande environ quatre pertes au stop, coûts compris, ou un écart au-delà d'un stop : la limite ne
-peut jouer que les jours à plusieurs configurations, possibles puisque les tentatives ne sont pas
-plafonnées (§5.7). Le nombre de blocages et de configurations écartées sera rapporté.
+**Franchissements décrits (facultatif)** : si le protocole de performance les décrit, il fixera
+avant le passage leur formule et leurs fenêtres (par exemple : fenêtre journalière et semaine de
+cotation de New York ; perte = fonds propres au début de la fenêtre moins fonds propres au tick,
+réalisé et latent, coûts déjà comptés). Ces comptes **décriront la trajectoire sans blocage** ; ils
+ne donneront pas le résultat qu'aurait produit une trajectoire bloquée, puisque les entrées
+postérieures à un franchissement sont conservées.
 
 ## 8. Conditions IG : informations manquantes et hypothèses concernées
 
@@ -597,19 +574,17 @@ ambigu. Ces cas sont comptés par cause, à la première cause dans cet ordre.
 3. repli trop profond (prioritaire sur une extension ou une sortie de la même bougie) ;
 4. consolidation trop longue (expiration à `fin(p) + 90 min`) ;
 5. fin de fenêtre (drapeau non formé à 14:45 ou expiration à 15:00) ;
-6. à `D` : limite de perte journalière atteinte (si retenue) ; marché fermé ; absence de cotation ;
+6. à `D` : marché fermé ; absence de cotation ;
    stop non admissible ; cible déjà dépassée ; taille minimale supérieure au budget ;
 7. entrée décidée.
 
 **Entrée décidée**, une seule issue : exécutée ; exécutée puis liquidée
 (`STOP_DÉPASSÉ_À_L'EXÉCUTION`) ; exécutée puis sortie à la cible sur le même tick
-(`CIBLE_ATTEINTE_À_L'EXÉCUTION`) ; `ENTRÉE_EXPIRÉE` ; `ENTRÉE_ANNULÉE_INTERRUPTION` ;
-`ENTRÉE_ANNULÉE_LIMITE` (si la limite est retenue).
+(`CIBLE_ATTEINTE_À_L'EXÉCUTION`) ; `ENTRÉE_EXPIRÉE` ; `ENTRÉE_ANNULÉE_INTERRUPTION`.
 
 **Entrée exécutée**, une seule issue : sortie liée au stop ; cible ; `SORTIE_TEMPORELLE` ;
 `LIQUIDATION_17H` ; encore ouverte à la fin de l'étude. Les annotations (indéterminée,
-`NUIT_NON_PRÉVUE`, clôture après interruption, coïncidence des échéances, position ouverte pendant
-un blocage journalier) recoupent ces issues et ne sont jamais additionnées.
+`NUIT_NON_PRÉVUE`, clôture après interruption, coïncidence des échéances) recoupent ces issues et ne sont jamais additionnées.
 
 Chaque entrée décidée doit être attestée par une transaction ou un événement de non-exécution
 (contrôle de S3 et DAY_01).
@@ -618,7 +593,7 @@ Chaque entrée décidée doit être attestée par une transaction ou un événem
 
 Aucune de ces étapes n'est autorisée par cette fiche.
 
-1. **Validation de la fiche** : arbitrages du §12 tranchés, ASSUMP-029 approuvée ou corrigée.
+1. **Gel de la fiche** : décisions du §12 retenues ; ASSUMP-029 approuvée ou corrigée.
 2. **Choix de réutilisation du code** : examiné avant l'implémentation (moteur DAY_01, moteur S1 ou
    moteur propre). La fiche décrit le comportement attendu ; elle ne fige pas d'héritage
    technique.
@@ -630,8 +605,7 @@ Aucune de ces étapes n'est autorisée par cette fiche.
    d'impulsion ; bougie non `OK` dont les prix ne sont pas lus ; cible déjà dépassée à `D` ; sortie
    temporelle ; liquidation de 17:00 avec et sans cotation ; échéances simultanées ; position
    subsistant après 17:00 ; `NUIT_NON_PRÉVUE` ; position ouverte à la fin de l'étude ; configurations
-   successives sans bougie partagée ; limite journalière (franchissement par le latent, entrée
-   refusée, position conservée, remise à zéro), si elle est retenue.
+   successives sans bougie partagée ; aucun blocage journalier ou hebdomadaire.
 4. **Non-régression** : rejeu S1 si un moteur partagé est modifié.
 5. **Disponibilité** 2015-2021, sans tick ni position, selon la convention du §10.1.
 6. **Performance** 2015-2021 : référence H1 → M15 → M5 en scénario A, comparaison H1 → M15, puis B,
@@ -658,9 +632,15 @@ comme après un refus à `D` dans le passage de performance.
   deux passages, sauf si une position d'une séance précédente subsiste (`NUIT_NON_PRÉVUE`) ; ces
   séances sont listées ;
 - **contrôle proposé pour le passage de performance** : chaque configuration y est recalculée par
-  la même fonction, sur les seules bougies, depuis son instant de reprise réel, et doit concorder
-  champ par champ (contrôle bloquant, comme le rapprochement de DAY_01, mais configuration par
-  configuration) ;
+  la même fonction, sur les seules bougies, **depuis l'état de reprise fourni** (instant de reprise,
+  aucune configuration ni position), et doit concorder champ par champ (contrôle bloquant, comme le
+  rapprochement de DAY_01, mais configuration par configuration). **Ce contrôle ne vérifie pas, à
+  lui seul, que l'instant de reprise est correct** : chaque instant de reprise est aussi rapproché
+  de l'événement qui l'autorise, selon le §5.7 — fin de configuration sans entrée (abandon,
+  invalidation, expiration à `Δ`, abstention à `D`), issue d'une entrée non exécutée (expiration ou
+  annulation), ou clôture de la position (instant du tick de sortie) — et la première reprise de
+  chaque séance est rapprochée du début de la fenêtre (M15 de 07:00) ou de la clôture d'une
+  position de la veille ;
 - les comptes de la première configuration de séance (causes de fin, sorties confirmées).
 
 **Ce qui pourra différer**, sans qu'aucune égalité ni inclusion ne soit promise :
@@ -681,7 +661,7 @@ présenter comme un rapprochement exact.
 | niveaux `S` (bid à l'achat, `ask_high` à la vente) et `T`, échéance `Δ`, instant `D` | `P_D − S`, `T − P_D`, rapport des distances estimé à `D`, rapport net estimé |
 | distances structurelles `E − S`, `T − E`, en pips et en multiples de `A` | « cible déjà dépassée » au sens du §5.6 |
 | **indicateurs approchés**, étiquetés comme tels : distances depuis la clôture de la bougie de sortie (`bid_close − S`, `T − bid_close`), et « clôture au-delà de `T` » | taille, refus de taille, part des coûts fixes dans le risque |
-| — | rapport obtenu à l'exécution, issues, résultats, limite journalière |
+| — | rapport obtenu à l'exécution, issues, résultats |
 
 La clôture d'une bougie est la cotation de son dernier tick valide ; elle devrait correspondre à la
 cotation retenue à `D` (dernier tick strictement antérieur à `D`, dans la bougie de sortie). Cette
@@ -696,8 +676,10 @@ seuil (§4.1).
 
 En plus des mesures du cahier (§9) :
 - parcours des impulsions aux entrées, avec les dénominateurs à chaque étape ;
-- configurations, entrées et pertes par séance ; blocages par la limite journalière, si elle est
-  retenue, et configurations écartées ;
+- configurations, entrées et pertes par séance ;
+- premier franchissement de 6 % de drawdown relatif au tick (seuil de revue, trajectoire continue) ;
+  franchissements journaliers de 1 % et hebdomadaires de 2 %, seulement si le protocole en fixe la
+  formule et les fenêtres, comme description de la trajectoire **sans blocage** (§7.1) ;
 - résultats par jour, par heure de décision, en heure d'hiver ou d'été et pendant les semaines de
   décalage, par sens ;
 - distances du stop (pips et multiples de `A`), part des coûts fixes dans le risque, rapports
@@ -745,54 +727,54 @@ Si aucune M5 ne clôturait au-delà de 1,13150 jusqu'à celle qui se termine à 
 (`Δ = fin(p) + 90 min`), la configuration expirerait à 11:00 ; une M5 [11:00, 11:05) clôturant à
 1,13160 serait sans effet.
 
-## 12. Arbitrages
+## 12. Décisions (2026-11-07) et points de gel
 
-**Base de rédaction retenue par l'opérateur le 2026-11-07** (hypothèses de recherche, pas des
-paramètres démontrés optimaux ; ASSUMP-029 reste `PROPOSED`) : H1 pour l'ATR, configuration M15,
-déclenchement M5 et comparaison M15, cible par projection, sortie temporelle de deux heures,
-horaires proposés, configurations successives, absence de filtre d'annonces. **Principe retenu** :
-extension à DAY_02 de la convention de qualité à 5 minutes, avec contrôle de couverture sur sa
-fenêtre propre, sans changer les H1 ni leur convention (§4.1).
+Ce sont des **hypothèses de recherche**, pas des paramètres démontrés optimaux. ASSUMP-029 reste
+`PROPOSED` jusqu'au gel de la fiche.
 
-### 12.1 Points corrigés le 2026-11-07 (à valider)
+**Base de rédaction** (ADR-026) : H1 pour l'ATR, configuration M15, déclenchement M5 et comparaison
+M15, cible par projection, sortie temporelle de deux heures, horaires proposés, configurations
+successives, absence de filtre d'annonces ; extension de la convention de qualité à cinq minutes,
+sans modification des H1, avec contrôle de couverture sur la fenêtre propre de DAY_02.
 
-| # | Point | Règle proposée |
+**Chronologie retenue** (ADR-027) :
+
+| # | Point | Règle retenue |
 |---|---|---|
-| R1 | Ordre des extrêmes | `E` et `O` sur toute la fenêtre ; `o` première bougie de `O`, `p` dernière bougie de `E` ; **`o < p = j`** ; aucun ordre supposé à l'intérieur d'une bougie ; impulsion de 2 à 4 M15 à la reconnaissance (§5.1) |
-| R2 | Extension et profondeur sur la même M15 | profondeur comparée à l'**ancien** `E` / `I` ; **invalidation prioritaire** sur l'extension ; la bougie d'extension n'est pas une bougie de pause ; les deux bougies de pause suivent le **dernier** sommet (§5.3) |
-| R3 | Sortie et profondeur sur la même bougie de déclenchement | invalidation prioritaire, en M5 comme en M15 (§5.4) |
-| R4 | Échéances | `Δ = min(fin(p) + 90 min, 15:00)`, **borne incluse** : une clôture exactement à `Δ` confirme ; expiration à `Δ`, aucune clôture postérieure ne sauve la configuration ; mêmes règles en M5 et en M15 (§5.5) |
-| R5 | Étude de disponibilité | « parcours sans position », sans position fictive ; première configuration de séance identique, suite pouvant différer ; contrôle par configuration dans le passage de performance ; mesures structurelles distinguées des mesures à `D` (§10.1) |
-| R6 | Limite de perte journalière | traduction opérationnelle au §7.1 |
-| R7 | Horaires | entrée après 15:00 : moins de 2 h avant 17:00 ; position pouvant subsister après 17:00 faute de cotation ; échéances simultanées : motif `LIQUIDATION_17H` (§5.2, §6.3) |
+| C1 | Extrêmes | `O` et `E` sur toute la fenêtre de 4 M15 ; `o` première bougie de `O`, `p` dernière bougie de `E` ; `o < p` strict ; aucun ordre supposé dans une bougie (§5.1) |
+| C2 | `p = j` | restriction supplémentaire choisie pour la référence, distincte de `o < p` (§5.1) |
+| C3 | Extension et profondeur | profondeur comparée à l'ancien `E` et à l'ancien `I` ; invalidation prioritaire sur l'extension ; bougie d'extension exclue du décompte de pause ; bougies de pause comptées après le dernier sommet (§5.3) |
+| C4 | Sortie et profondeur | invalidation prioritaire sur une sortie dans la même bougie, en M5 comme en M15 (§5.4) |
+| C5 | Échéances | `Δ = min(fin(p) + 90 min, 15:00)`, incluse ; expiration à `Δ`, sans lecture salvatrice d'une bougie postérieure (§5.5) |
+| C6 | Échéances simultanées | une seule clôture, motif `LIQUIDATION_17H` (§6.3) |
 
-### 12.2 Arbitrages résiduels
+**Limites de risque** (ADR-027) : blocages journalier de 1 % et hebdomadaire de 2 % non appliqués
+dans cette référence isolée, simulation reportée au compte partagé ; dérogation limitée à cette
+étude ; 6 % reste un seuil de revue rapporté ; aucune variante avec ou sans limites (§7.1).
 
-| # | Point | Proposition | Alternatives |
-|---|---|---|---|
-| 1 | Limite journalière dans la référence | appliquée (§7.1) | reportée à la simulation d'un compte commun |
-| 2 | Fenêtre journalière | journée de cotation New York | journée civile de Londres |
-| 3 | Latent dans la perte du jour | valorisé côté sortie, coûts futurs non déduits | coûts de sortie estimés déduits |
-| 4 | Franchissement | `L ≥ 1 %` de `R_d` | `L > 1 %` |
-| 5 | Remise à zéro | à la fenêtre suivante, convention qui remplace la revue | semaine suivante ; arrêt de la trajectoire |
-| 6 | Seuil hebdomadaire de 2 % | même mécanique sur la semaine de cotation | non appliqué dans la référence |
-| 7 | Seuil de 6 % | revue, trajectoire continue (comme S2 à DAY_01) | blocage des entrées |
-| 8 | Comparaison sans limite | aucune dans la référence ; variante préenregistrée sur autorisation | — |
-| 9 | Priorité invalidation / extension (R2, R3) | invalidation | extension prioritaire ; bougie ambiguë abandonnée sans cause de profondeur |
-| 10 | Échéance incluse (R4) | incluse | exclue |
-| 11 | Motif des échéances simultanées (R7) | `LIQUIDATION_17H` | `SORTIE_TEMPORELLE` |
-| 12 | Fenêtre d'impulsion | 4 M15 glissantes (1 h) | 2 ou 6 M15 |
-| 13 | Amplitude minimale | `bid_close_j − O ≥ 1,5 × A` | 1 × `A` ; 2 × `A` |
-| 14 | Clôture forte | `bid_close_j ≥ E − 0,25 × I` | sans condition ; tiers supérieur |
-| 15 | Extension | jusqu'à 6 M15 d'impulsion, sans condition de clôture | sans extension ; clôture forte exigée |
-| 16 | Profondeur | au plus 50 % de `I`, sur les plus bas | 38,2 % ; sur les clôtures |
-| 17 | Durée du drapeau | au moins 2 bougies de pause, sortie au plus tard 6 M15 après le sommet | 1 à 4 M15 ; 3 à 8 M15 |
-| 18 | Figure et pente | boîte sous `E`, pente non contrainte, journalisée | pente opposée exigée ; fanion en variante |
-| 19 | Sortie du drapeau | clôture au-delà de `E + 0,1 × A` | sans marge ; `0,2 × A` |
-| 20 | Stop | `FL − 0,25 × A`, garanti simulé, sans minimum IG | marge `0,1 × A` ; stop normal si le minimum IG exclut les stops courts (§8) |
-| 21 | Variantes de sortie | protocoles distincts : multiple du risque, obstacle, suiveuse, rapport net minimal | — |
-| 22 | Tentatives | sans plafond, une configuration et une position à la fois | une ou deux par séance |
-| 23 | Validité de l'entrée | 5 min, référence et comparaison | 1 min ; 15 min en comparaison M15 |
-| 24 | Conditions IG | étude sous les hypothèses actuelles ; décision avant les passages de performance (§8) | confirmation préalable |
-| 25 | Instrument | EUR/USD seulement | GBP/USD (cahier §2), après données et décision |
-| 26 | Réutilisation du code | non figée ; examinée avant l'implémentation (§10) | — |
+**Autres décisions** (ADR-027) :
+- étude de disponibilité « parcours sans position », avec ses limites de comparabilité ; contrôle
+  par configuration complété par le rapprochement des instants de reprise (§10.1) ;
+- valeurs de référence retenues, **sans variantes supplémentaires** :
+
+  | Point | Valeur de référence |
+  |---|---|
+  | Fenêtre d'impulsion | 4 M15 glissantes (1 h) |
+  | Amplitude minimale | `bid_close_j − O ≥ 1,5 × A` |
+  | Clôture forte | `bid_close_j ≥ E − 0,25 × I` |
+  | Extension | jusqu'à 6 M15 d'impulsion, sans condition de clôture |
+  | Profondeur | au plus 50 % de `I`, sur les plus bas |
+  | Durée du drapeau | au moins 2 bougies de pause ; sortie au plus tard 6 M15 après le sommet |
+  | Figure et pente | boîte sous `E`, pente non contrainte, journalisée |
+  | Sortie du drapeau | clôture au-delà de `E + 0,1 × A` |
+  | Stop | `FL − 0,25 × A`, garanti simulé, sans minimum IG |
+  | Sorties | projection `E + I`, sortie temporelle 2 h, liquidation 17:00 ; autres sorties (multiple du risque, obstacle, suiveuse, rapport net minimal) non prévues |
+  | Tentatives | sans plafond, une configuration et une position à la fois |
+  | Validité de l'entrée | 5 min, référence et comparaison |
+
+- **EUR/USD seulement** ;
+- conditions IG : **décision séparée avant les passages de performance** (§8) ;
+- réutilisation du code : choix technique **examiné avant l'implémentation** (§10).
+
+**Aucun arbitrage ouvert** dans cette fiche. Le gel reste soumis à la validation de l'opérateur ; il
+n'autorise ni moteur, ni analyse historique, ni backtest.
