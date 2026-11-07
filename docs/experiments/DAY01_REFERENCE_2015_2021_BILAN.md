@@ -1,6 +1,6 @@
 # DAY_01 — passage de performance 2015-2021 : bilan agrégé
 
-**Statut** : bilan des passages autorisés le 2026-11-07, soumis à revue. Protocole figé :
+**Statut** : bilan des passages autorisés le 2026-11-07, revu et validé le 2026-11-07 ; décision au §13 (ADR-024). Protocole figé :
 `docs/experiments/DAY01_REFERENCE_2015_2021.md` (commit `3d38ad5`).
 
 **Portée** : recherche hors ligne sur la période de développement 2015-2021. Ni validation de
@@ -246,14 +246,26 @@ Trajectoires indépendantes, chacune avec son capital : **pas un portefeuille pa
 additionnés ne constitueraient pas l'évaluation d'un portefeuille commun, qui demanderait de
 simuler conjointement décisions, capital et risque global.
 
-| Référence (commit, transactions) | Trajectoire | Transactions DAY_01 chevauchantes | Pertes DAY_01 simultanées à une perte de la référence | Heures même sens / sens opposé |
+Chaque ligne rapproche DAY_01 d'**une seule** référence. Dénominateurs : 831 transactions DAY_01
+en M5, dont 527 perdantes ; 736 en M15, dont 440 perdantes.
+
+| Référence (commit, transactions) | Trajectoire | Transactions DAY_01 chevauchantes | Pertes DAY_01 simultanées à une perte de cette référence | Heures même sens / sens opposé |
 |---|---|---:|---:|---|
-| S1 (`d52f24f`, 53) | M5 | 78 / 831 | 29 / 527 | 45,5 / 44,7 |
-| | M15 | 71 / 736 | 25 / 440 | 55,3 / 53,2 |
+| S1 (`d52f24f`, 53) | M5 | 78 | 29 | 45,5 / 44,7 |
+| | M15 | 71 | 25 | 55,3 / 53,2 |
 | S2 (`c35d565`, 7) | M5 | 1 | 1 | 4,9 / 0,0 |
 | | M15 | 1 | 1 | 4,8 / 0,0 |
 | S3 (`15d2c83`, 5) | M5 | 4 | 1 | 1,8 / 4,2 |
 | | M15 | 3 | 0 | 2,2 / 3,9 |
+
+**Avec au moins une autre stratégie** (union des transactions DAY_01 concernées, sans doublon,
+calculée depuis les rapports existants avec la règle de chevauchement de l'outil ; les comptes par
+référence ci-dessus sont retrouvés à l'identique) :
+
+| Trajectoire | Transactions DAY_01 chevauchant au moins une référence | Pertes DAY_01 simultanées à une perte d'au moins une référence |
+|---|---:|---:|
+| M5 | 82 / 831 | 30 / 527 (une perte est simultanée à S1 et à S3) |
+| M15 | 75 / 736 | 26 / 440 (aucune perte comptée deux fois) |
 
 Nets annuels côte à côte (€, 0 une année sans clôture) :
 
@@ -267,9 +279,8 @@ Nets annuels côte à côte (€, 0 une année sans clôture) :
 | 2020 | −58,33 | −30,68 | +12,72 | 0,00 | 0,00 |
 | 2021 | −52,88 | −33,76 | −7,58 | 0,00 | −3,06 |
 
-Les pertes DAY_01 ne sont pas surtout simultanées à des pertes S1, S2 ou S3 (29 sur 527 en M5) :
-c'est la conséquence de leur nombre et de la rareté des positions des références, pas un résultat
-de diversification, puisque DAY_01 est déficitaire seul.
+Ces chevauchements sont descriptifs : ils ne mesurent pas une diversification et aucune conclusion
+n'en est tirée.
 
 ## 10. Lecture (§9 du protocole)
 
@@ -283,8 +294,9 @@ de diversification, puisque DAY_01 est déficitaire seul.
    drawdown relatif maximal atteint 31,1 % en M5 et 16,1 % en M15, sans récupération à la fin.
 4. Avec 831 et 736 transactions, l'échantillon n'est pas petit ; ce bilan ne fait toutefois aucun
    test statistique et n'en tire aucune conclusion statistique.
-5. Aucun scénario B ou C n'était requis : le résultat ne dépend pas des trous de cotation au sens
-   du §4 (aucune transaction indéterminée).
+5. Aucune position du passage A n'a été classée indéterminée ; les conditions préenregistrées ne
+   demandaient donc ni B ni C. Cela ne mesure pas l'effet des données manquantes sur les séances
+   écartées en amont.
 6. Les stops courts (médiane 9,3 pips en M5) sont simulés comme garantis sans minimum IG confirmé
    (ASSUMP-008) ; un stop garanti plus large ou indisponible changerait la taille et la prime, sans
    que ce bilan puisse le mesurer.
@@ -335,3 +347,16 @@ for name, days in groups.items():
         net = sum((Decimal(S[t][d]["trade"]["net_eur"]) for d in days if S[t][d]["trade"]), Decimal(0))
         print(name, t, len(days), round(net, 2))
 ```
+
+## 13. Décision (2026-11-07)
+
+DAY_01 est **étudiée** : résultats défavorables sur 2015-2021 dans les conditions testées (règles
+de la fiche, capital et coûts de recherche figés, scénario A). M5 reste la référence et M15 la
+comparaison. **Aucune des deux trajectoires n'est retenue** pour poursuivre vers le paper trading.
+
+- aucune sélection de M15 après coup ;
+- aucun changement de paramètre ;
+- aucun filtre tiré des sous-groupes positifs (jours, heures, sens, saisons).
+
+Aucun nouveau passage n'est prévu. La suite de la bibliothèque de stratégies fera l'objet d'une
+décision séparée.

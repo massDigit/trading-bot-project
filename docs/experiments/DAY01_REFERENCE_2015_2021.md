@@ -2,7 +2,10 @@
 
 **Statut** : principe **approuvé** par l'opérateur le 2026-11-07 (commit `03c6643`), avec trois
 précisions intégrées (§5, §6) ; outil `forex-day01-backtest` et tests synthétiques écrits ; **figé
-au commit de l'outil**, **avant tout lancement** (aucun passage historique). Étape 5 de la fiche `docs/strategies/DAY_01_LONDON_RANGE.md`
+au commit de l'outil** (`3d38ad5`), avant tout lancement. Passages A M5 et M15 faits le 2026-11-07
+sur `3d38ad5`, contrôles conformes, aucun passage conditionnel requis ; bilan
+`DAY01_REFERENCE_2015_2021_BILAN.md` validé, étape **close** (résultats défavorables, aucune
+trajectoire retenue). Les règles ci-dessous restent celles figées avant les passages. Étape 5 de la fiche `docs/strategies/DAY_01_LONDON_RANGE.md`
 (§9), après la clôture de l'étude de disponibilité (étape 4, PR #20, bilan
 `DAY01_AVAILABILITY_2015_2021_BILAN.md`). Ni validation de performance, ni autorisation de
 trading. Aucun paramètre ne sera modifié après lecture des résultats ; un résultat défavorable est
@@ -263,7 +266,7 @@ conjointement les décisions, le capital et le risque global, ce qui n'est pas f
 6. Aucun filtre d'annonces : la part des séances touchées par une annonce n'est pas mesurable sans
    calendrier historique (fiche §3.4) ; c'est une limite, pas une mesure.
 
-## 10. Commandes (aucune lancée ; options à confirmer avec l'outil)
+## 10. Commandes (figées ; exécutées le 2026-11-07, voir le bilan §1)
 
 Préfixe des sorties : `data/reports/backtests/day01_ref_2015_2021_<déclenchement>_<passage>` (hors
 Git), avec `<déclenchement>` = `m5` ou `m15` et `<passage>` = `a`, `b`, `c` ou `a_reject`.
@@ -296,16 +299,16 @@ Ordre prévu :
 Chaque commande part d'un arbre propre au commit qui fige ce protocole et l'outil ; un passage dont
 un contrôle échoue (code 2) arrête la suite et est présenté avant toute correction.
 
-Bilan agrégé `DAY01_REFERENCE_2015_2021_BILAN.md` dans ce dossier après les passages et leur revue ;
-journaux et détails par séance hors Git.
+Bilan agrégé : `DAY01_REFERENCE_2015_2021_BILAN.md` dans ce dossier (passages A M5 et M15 seuls,
+B, C et rejet non requis) ; journaux et détails par séance hors Git.
 
 ## 11. Ordre de travail
 
 1. Protocole soumis à l'opérateur ; principe approuvé le 2026-11-07 (`03c6643`).
 2. Outil `forex-day01-backtest` et tests synthétiques, sans passage historique : fait ; protocole
    figé au commit de l'outil.
-3. Passages 2015-2021, **sur autorisation explicite**, dans l'ordre du §10 ; bilan agrégé soumis à
-   revue.
+3. Passages 2015-2021, **sur autorisation explicite** (2026-11-07), dans l'ordre du §10 : fait ;
+   bilan agrégé revu et validé, décision consignée au §13 du bilan.
 
 ## 12. Interdits
 
