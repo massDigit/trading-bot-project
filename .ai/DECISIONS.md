@@ -255,3 +255,11 @@
   3. *Étude de disponibilité* : « parcours sans position », avec ses limites de comparabilité. Le contrôle par configuration vérifie le parcours depuis l'état de reprise fourni ; il ne vérifie pas à lui seul l'instant de reprise, qui est rapproché de la fin de configuration, de l'issue d'entrée non exécutée ou de la clôture de position qui l'autorise.
   4. *Valeurs* : valeurs de référence des lignes 12 à 23 du §12.2 de `de4379d` retenues, sans variantes supplémentaires ; EUR/USD seulement ; convention de qualité à cinq minutes étendue sans modification des H1 (ADR-026) ; décision séparée sur les conditions IG avant les passages de performance ; choix technique de réutilisation examiné avant l'implémentation.
 - **Portée** : documentation seulement. Aucun moteur, aucune analyse historique, aucun backtest, aucune lecture de 2022-2025, aucun ordre. Le gel de la fiche reste soumis à validation.
+
+### ADR-028 : Fiche DAY_02 figée (ASSUMP-029) pour la recherche hors ligne
+- **Date** : 2026-11-07
+- **Statut** : `ACCEPTED` (décision de l'opérateur)
+- **Source** : message de l'opérateur du 2026-11-07 validant le gel de la fiche `docs/strategies/DAY_02_FLAG_CONTINUATION.md` sur la base du commit `a6ac8ef` (PR #23).
+- **Décision** : ASSUMP-029 est **approuvée pour la recherche hors ligne seulement** ; la fiche DAY_02 est figée, avec une correction rédactionnelle du §3.1 (durée de l'impulsion alignée sur le §5.1 : 2 à 4 M15 à la reconnaissance, jusqu'à 6 après extension), sans changement de règle. Restent valables ADR-026 et ADR-027.
+- **Portée** : la validation porte sur les règles de recherche, **ni sur leur rentabilité ni sur leur exécutabilité chez IG**. La décision sur les conditions IG reste prévue avant les passages de performance. Aucun moteur, aucune analyse historique, aucun backtest, aucun entraînement, aucune lecture de 2022-2025, aucun ordre.
+- **Suite autorisée** : après fusion de la PR #23, proposition technique de réutilisation du code en lecture seule, présentée avant toute implémentation.

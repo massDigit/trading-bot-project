@@ -26,7 +26,7 @@ de développement 2015-2021, avec paramètres et coûts de recherche figés :
 
 Suite de la bibliothèque (ADR-025) : ordre **D2 avant D3** confirmé ; fiche **DAY_02**
 (continuation après impulsion et drapeau, `docs/strategies/DAY_02_FLAG_CONTINUATION.md`,
-ASSUMP-029 `PROPOSED`) rédigée en PR brouillon (#23) ; base de rédaction et extension de la convention de qualité à 5 min retenues (ADR-026), corrections intégrées (ordre des extrêmes, extension / profondeur / échéances, étude de disponibilité sans position, limite de perte journalière, horaires), chronologie, valeurs de référence et dérogation sur les limites journalière et hebdomadaire retenues (ADR-027) ; fiche **proposée pour le gel** ; documentation seulement.
+ASSUMP-029) rédigée en PR #23 ; base de rédaction et extension de la convention de qualité à 5 min retenues (ADR-026), corrections intégrées (ordre des extrêmes, extension / profondeur / échéances, étude de disponibilité sans position, limite de perte journalière, horaires), chronologie, valeurs de référence et dérogation sur les limites journalière et hebdomadaire retenues (ADR-027) ; **fiche figée le 2026-11-07, ASSUMP-029 `APPROVED` pour la recherche hors ligne seulement (ADR-028)** ; prochaine étape : proposition technique de réutilisation du code, en lecture seule, avant toute implémentation.
 **Aucune expérience n'est autorisée** : ni moteur, ni analyse historique, ni backtest, ni
 entraînement, ni ordre ; 2022-2025 reste en réserve. Conditions IG : point ouvert distinct (fiche
 §8), à trancher avant tout passage de performance.

@@ -1,13 +1,14 @@
 # Fiche DAY_02 — Continuation après impulsion et drapeau (day trading)
 
 > Identifiant code : `DAY_02` (candidate « D2 » du cahier des charges). Statut : **proposition**
-> (ASSUMP-029 `PROPOSED`), rédigée le 2026-11-07 sur autorisation de l'opérateur (ADR-025),
+> (ASSUMP-029), rédigée le 2026-11-07 sur autorisation de l'opérateur (ADR-025),
 > documentation seulement ; base de rédaction retenue et corrections demandées le 2026-11-07
 > (ADR-026) ; chronologie, limites de risque et valeurs de référence retenues le 2026-11-07
-> (ADR-027, §12). **Proposée pour le gel**, en attente de validation. Portée **recherche hors
-> ligne**. Aucun moteur, aucune analyse historique, aucun backtest. Toutes les valeurs nouvelles de
-> cette fiche ont été choisies a priori, sans lecture de données ni de résultats ; ce sont des
-> hypothèses de recherche, `PROPOSED` jusqu'au gel (§12). Instrument :
+> (ADR-027, §12). **Fiche figée le 2026-11-07** (ADR-028, ASSUMP-029 `APPROVED` pour la recherche
+> hors ligne seulement). Le gel porte sur les règles de recherche, ni sur leur rentabilité ni sur
+> leur exécutabilité chez IG. Aucun moteur, aucune analyse historique, aucun backtest autorisés par
+> ce gel. Toutes les valeurs nouvelles de cette fiche ont été choisies a priori, sans lecture de
+> données ni de résultats ; ce sont des hypothèses de recherche. Instrument :
 > **EUR/USD seulement**. Aucune donnée 2022-2025. Ni validation de performance ni autorisation de
 > trading.
 
@@ -67,8 +68,8 @@ Les heures sont données **en heure locale de Londres** (`Europe/London`), sauf 
 
 | Unité | Rôle dans la référence | Justification par la logique de la stratégie |
 |---|---|---|
-| **H1** | **contexte de volatilité seulement** : ATR Wilder 14 H1 `A`, échelle de mesure de l'impulsion, de la profondeur et des marges (§5.1). Aucun filtre de direction | L'impulsion dure de 15 min à 1 h (§5.1) : la volatilité de référence doit couvrir quelques heures, pas plusieurs jours. Une H1 sur 14 couvre environ une demi-journée ; une H4 sur 14 couvrirait plus de deux jours de cotation, une échelle plus lente que la figure. La direction est donnée par l'impulsion elle-même : un filtre de tendance H1 ajouterait une condition non exigée par la recette ; il relèverait d'une variante distincte, non prévue dans cette étude (§12) |
-| **M15** | **configuration** : impulsion, puis formation du drapeau | Une impulsion intrajournalière de 1 à 4 M15 et une pause de 2 à 6 M15 sont lisibles en M15 sans réduire la figure à une ou deux bougies |
+| **H1** | **contexte de volatilité seulement** : ATR Wilder 14 H1 `A`, échelle de mesure de l'impulsion, de la profondeur et des marges (§5.1). Aucun filtre de direction | L'impulsion dure de 2 à 4 M15 à la reconnaissance, jusqu'à 6 M15 après extension (§5.1) : la volatilité de référence doit couvrir quelques heures, pas plusieurs jours. Une H1 sur 14 couvre environ une demi-journée ; une H4 sur 14 couvrirait plus de deux jours de cotation, une échelle plus lente que la figure. La direction est donnée par l'impulsion elle-même : un filtre de tendance H1 ajouterait une condition non exigée par la recette ; il relèverait d'une variante distincte, non prévue dans cette étude (§12) |
+| **M15** | **configuration** : impulsion, puis formation du drapeau | Une impulsion intrajournalière de 2 à 4 M15 à la reconnaissance (jusqu'à 6 après extension) et une pause de 2 à 6 M15 sont lisibles en M15 sans réduire la figure à une ou deux bougies |
 | **M5** | **déclenchement** : sortie du drapeau, surveillance de la profondeur après la formation, extrême du drapeau pour le stop | Lire la sortie du drapeau sur l'unité plus fine permet d'entrer plus près de la borne ; c'est l'apport que le cahier demande de mesurer (§6.5) |
 | H4 | non utilisée dans la référence | — |
 
@@ -134,8 +135,8 @@ Les conventions de DAY_01 ne sont **pas transposées automatiquement**. Le table
   ce qu'il faut trader ;
 - les **choix de stratégie**, propres à DAY_02, justifiés par sa logique au §5 et au §6.
 
-Toutes les lignes sont `PROPOSED` pour DAY_02, y compris celles qui reprennent une convention déjà
-approuvée pour une autre stratégie.
+Toutes les lignes ont été proposées pour DAY_02, y compris celles qui reprennent une convention déjà
+approuvée pour une autre stratégie, et sont retenues au gel (ADR-028).
 
 | Domaine | Nature | Proposition pour DAY_02 | Origine |
 |---|---|---|---|
@@ -729,8 +730,8 @@ Si aucune M5 ne clôturait au-delà de 1,13150 jusqu'à celle qui se termine à 
 
 ## 12. Décisions (2026-11-07) et points de gel
 
-Ce sont des **hypothèses de recherche**, pas des paramètres démontrés optimaux. ASSUMP-029 reste
-`PROPOSED` jusqu'au gel de la fiche.
+Ce sont des **hypothèses de recherche**, pas des paramètres démontrés optimaux. **Gel validé le
+2026-11-07** (ADR-028) : ASSUMP-029 `APPROVED` pour la recherche hors ligne seulement.
 
 **Base de rédaction** (ADR-026) : H1 pour l'ATR, configuration M15, déclenchement M5 et comparaison
 M15, cible par projection, sortie temporelle de deux heures, horaires proposés, configurations
@@ -776,5 +777,5 @@ dans cette référence isolée, simulation reportée au compte partagé ; dérog
 - conditions IG : **décision séparée avant les passages de performance** (§8) ;
 - réutilisation du code : choix technique **examiné avant l'implémentation** (§10).
 
-**Aucun arbitrage ouvert** dans cette fiche. Le gel reste soumis à la validation de l'opérateur ; il
-n'autorise ni moteur, ni analyse historique, ni backtest.
+**Aucun arbitrage ouvert** dans cette fiche. Le gel n'autorise ni moteur, ni analyse historique,
+ni backtest ; la décision sur les conditions IG reste prévue avant les passages de performance.
