@@ -225,3 +225,41 @@
   2. M5 reste la référence et M15 la comparaison. **Aucune des deux trajectoires n'est retenue** pour poursuivre vers le paper trading.
   3. Aucune sélection de M15 après coup, aucun changement de paramètre, aucun filtre tiré des sous-groupes positifs (jours, heures, sens, saisons).
 - **Conséquence** : étape close, PR #21 fusionnée. Aucun nouveau passage DAY_01. La suite de la bibliothèque de stratégies fera l'objet d'une décision séparée ; aucune lecture de 2022-2025, aucun entraînement, aucun ordre.
+
+### ADR-025 : D2 avant D3 ; rédaction de la fiche DAY_02 autorisée
+- **Date** : 2026-11-07
+- **Statut** : `ACCEPTED` (décision de l'opérateur)
+- **Source** : message de l'opérateur du 2026-11-07, après la proposition de suite de la bibliothèque (cahier v1.2 §6.6, §15 lot 3B, §16 point 2).
+- **Décision** :
+  1. L'ordre du lot 3B est confirmé : **D2 avant D3** (S3 déjà étudiée, ADR-020).
+  2. Rédaction de la fiche DAY_02 (continuation après impulsion et drapeau) autorisée, **documentation seulement**, en PR brouillon : définitions exécutables et objectives de l'impulsion, du drapeau et de la continuation ; chronologie et informations disponibles à chaque décision ; référence et comparaison plus simple justifiées par la logique de la stratégie ; conventions de DAY_01 non transposées automatiquement (techniques distinguées des choix de stratégie ; extension d'ADR-021 explicite et soumise à validation) ; conditions IG listées comme point ouvert distinct ; mesures descriptives de chevauchement avec les stratégies étudiées, notamment S2 ; héritage technique non figé. Toutes les nouvelles valeurs restent `PROPOSED` (ASSUMP-029).
+- **Portée** : aucun moteur, aucune analyse historique, aucun backtest, aucun entraînement, aucune lecture de 2022-2025, aucun contact avec IG, aucun ordre. Pas de système de sélection, pas de nouvelle variante de S1, S2, S3 ou DAY_01.
+
+### ADR-026 : Base de rédaction de DAY_02 et convention de qualité à 5 minutes étendue à DAY_02
+- **Date** : 2026-11-07
+- **Statut** : `ACCEPTED` (décision de l'opérateur), **ASSUMP-029 reste `PROPOSED`**
+- **Source** : message de l'opérateur du 2026-11-07, après lecture de la fiche DAY_02 au commit `14b3283` (PR #23).
+- **Décision** :
+  1. Base de rédaction retenue (propositions de référence du §12 de la fiche) : H1 pour l'ATR, configuration M15, déclenchement M5 et comparaison M15, cible par projection, sortie temporelle de deux heures, horaires proposés, configurations successives, absence de filtre d'annonces. Ce sont des hypothèses de recherche, pas des paramètres démontrés optimaux.
+  2. Principe retenu : la convention de qualité M5/M15 à 5 minutes (ADR-021) est étendue à DAY_02, avec contrôle de couverture sur sa fenêtre propre, sans changer les H1 ni leur convention.
+  3. Corrections demandées avant validation : ordre des extrêmes (`o < p` strict, aucun ordre supposé dans une bougie) ; règle déterministe extension / profondeur / expiration, identique en M5 et en M15 ; convention explicite de l'étude de disponibilité sans ticks ni positions, sans égalité promise ni position fictive, mesures structurelles distinguées des mesures à `D` ; traduction opérationnelle de la limite de perte journalière du cahier (§8), dont l'omission n'est pas acquise ; précisions horaires (entrées après 15:00, position après 17:00, échéances simultanées).
+- **Portée** : documentation seulement. Aucun moteur, aucune analyse historique, aucun backtest, aucune lecture de 2022-2025, aucun ordre.
+
+### ADR-027 : DAY_02, chronologie et valeurs de référence retenues ; limites journalière et hebdomadaire non appliquées dans la référence isolée
+- **Date** : 2026-11-07
+- **Statut** : `ACCEPTED` (décision de l'opérateur), **ASSUMP-029 reste `PROPOSED`** jusqu'au gel de la fiche
+- **Source** : message de l'opérateur du 2026-11-07, après lecture de la fiche DAY_02 au commit `de4379d` (PR #23).
+- **Décision** :
+  1. *Chronologie* : extrêmes sur toute la fenêtre, `o < p` strict ; `p = j` consigné comme **restriction supplémentaire choisie pour la référence**, non comme une conséquence de `o < p` ; invalidation prioritaire sur l'extension, avec l'ancien `E` et l'ancien `I` ; bougie d'extension exclue du décompte de pause ; invalidation prioritaire sur une sortie dans la même bougie ; échéance incluse, puis expiration sans lecture salvatrice d'une bougie postérieure ; `LIQUIDATION_17H` en cas d'égalité des échéances, sans double clôture.
+  2. *Limites de risque* : la référence de recherche isolée DAY_02 **n'applique pas** les blocages journalier de 1 % et hebdomadaire de 2 % du cahier (§8). Leur simulation opérationnelle est reportée au compte partagé, où décisions, capital, exposition et protections seront évalués ensemble. **Dérogation explicite et limitée à cette étude hors ligne** : elle ne modifie pas les exigences du futur compte et n'autorise aucun trading. Aucune remise à zéro automatique n'est introduite ni présentée comme une revue humaine. Risque de 0,25 % par opération, dimensionnement, protections et sorties inchangés ; 6 % reste un seuil de revue rapporté, avec poursuite de la trajectoire. Aucune variante avec ou sans limites. Des franchissements décrits, s'il y en a, auront leur formule et leurs fenêtres fixées dans le protocole de performance et décriront la trajectoire sans blocage, pas celle d'une trajectoire bloquée.
+  3. *Étude de disponibilité* : « parcours sans position », avec ses limites de comparabilité. Le contrôle par configuration vérifie le parcours depuis l'état de reprise fourni ; il ne vérifie pas à lui seul l'instant de reprise, qui est rapproché de la fin de configuration, de l'issue d'entrée non exécutée ou de la clôture de position qui l'autorise.
+  4. *Valeurs* : valeurs de référence des lignes 12 à 23 du §12.2 de `de4379d` retenues, sans variantes supplémentaires ; EUR/USD seulement ; convention de qualité à cinq minutes étendue sans modification des H1 (ADR-026) ; décision séparée sur les conditions IG avant les passages de performance ; choix technique de réutilisation examiné avant l'implémentation.
+- **Portée** : documentation seulement. Aucun moteur, aucune analyse historique, aucun backtest, aucune lecture de 2022-2025, aucun ordre. Le gel de la fiche reste soumis à validation.
+
+### ADR-028 : Fiche DAY_02 figée (ASSUMP-029) pour la recherche hors ligne
+- **Date** : 2026-11-07
+- **Statut** : `ACCEPTED` (décision de l'opérateur)
+- **Source** : message de l'opérateur du 2026-11-07 validant le gel de la fiche `docs/strategies/DAY_02_FLAG_CONTINUATION.md` sur la base du commit `a6ac8ef` (PR #23).
+- **Décision** : ASSUMP-029 est **approuvée pour la recherche hors ligne seulement** ; la fiche DAY_02 est figée, avec une correction rédactionnelle du §3.1 (durée de l'impulsion alignée sur le §5.1 : 2 à 4 M15 à la reconnaissance, jusqu'à 6 après extension), sans changement de règle. Restent valables ADR-026 et ADR-027.
+- **Portée** : la validation porte sur les règles de recherche, **ni sur leur rentabilité ni sur leur exécutabilité chez IG**. La décision sur les conditions IG reste prévue avant les passages de performance. Aucun moteur, aucune analyse historique, aucun backtest, aucun entraînement, aucune lecture de 2022-2025, aucun ordre.
+- **Suite autorisée** : après fusion de la PR #23, proposition technique de réutilisation du code en lecture seule, présentée avant toute implémentation.
