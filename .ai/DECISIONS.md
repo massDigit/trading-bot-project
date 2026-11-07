@@ -305,3 +305,15 @@
   2. Script de reproduction renforcé (exactement une ligne M5 et une ligne M15 par date, doublons, totaux, partition, matrice 150 / 27 / 0 / 411, décalages de `D`) et exécuté sur le détail local existant, sans lecture de cotation : chiffres publiés retrouvés.
   3. Étude close, PR #25 fusionnée. Rédaction du protocole de performance DAY_02 autorisée en documentation seulement, à présenter avant l'outil ; aucune égalité globale avec les 307 et 272 sorties confirmées ne doit y être imposée.
 - **Portée** : aucun backtest de performance, aucun entraînement, aucun ordre, aucune lecture de 2022-2025.
+
+### ADR-034 : Protocole de performance DAY_02 approuvé dans sa base ; outil et tests synthétiques autorisés
+- **Date** : 2026-11-07
+- **Statut** : `ACCEPTED` (décision de l'opérateur)
+- **Source** : revue de l'opérateur du protocole `docs/experiments/DAY02_REFERENCE_2015_2021.md` (PR #26).
+- **Décision** :
+  1. *Reprises (§5.2)* : une recherche terminée sans configuration n'a ni `ended_utc` ni `ended_by` ; c'est une fin normale, ni position ouverte ni anomalie. L'égalité entre la fin d'une tentative et la reprise suivante vaut dans une même séance ; après une clôture la veille, la recherche repart à 07:00 ; une position tenue à 07:00 retarde la reprise à sa clôture effective, et une séance sans recherche doit être justifiée. `ENTRÉE_REJETÉE` autorise une reprise à l'instant enregistré du rejet. Ces situations et une reprise mal datée sont testées ; moteur inchangé.
+  2. *Entonnoir (§6)* : la fin pour données inutilisables après la formation du drapeau est une issue des drapeaux formés, conservée dans les comptes même si l'étude de disponibilité n'en compte aucune.
+  3. *Comparaisons entre scénarios (§8)* : B, C et le rejet sont déclenchés séparément pour M5 et M15 ; une comparaison n'est produite que si les deux passages existent ; un scénario requis d'un seul côté est rapporté sans lancer l'autre côté.
+  4. Retenus : franchissements journaliers et hebdomadaires non décrits dans ce premier passage (premier franchissement de 6 % rapporté) ; recalcul distinct C6 sur toutes les tentatives, portée explicite et ATR H1 partagé.
+  5. Outils `forex-day02-backtest` et `forex-day02-compare` et tests synthétiques autorisés ; moteurs et paramètres inchangés ; protocole figé au commit de l'outil, présenté pour revue.
+- **Portée** : la décision sur les conditions IG reste ouverte (aucune option retenue, aucun contact). Aucun passage historique, aucun entraînement, aucun ordre, aucune lecture de 2022-2025. PR en brouillon.

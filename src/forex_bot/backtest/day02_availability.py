@@ -441,11 +441,19 @@ def reuse_errors(paths: list[SessionPath], params: Mapping[Trigger, Day02Params]
 
 
 def independent_first(
-    day: date, m15: Mapping[datetime, Mapping[str, Any]], atr: Callable[[datetime, datetime], Decimal | None]
+    day: date,
+    m15: Mapping[datetime, Mapping[str, Any]],
+    atr: Callable[[datetime, datetime], Decimal | None],
+    resume: datetime | None = None,
 ) -> dict[str, Any] | None:
     """First configuration of a session, recomputed from the sheet §5.1 and §5.3 without
-    `configuration_from`: recognition (t_j, side, O, o, p) and formation (F, final E and p, or its end)."""
-    window, t, last = 4, london(day, time(7)) + 4 * M15, london(day, time(14, 15))
+    `configuration_from`: recognition (t_j, side, O, o, p) and formation (F, final E and p, or its end).
+    From 07:00 by default, or from `resume`: only M15 starting at or after it enter a window."""
+    window, first, last = 4, london(day, time(7)), london(day, time(14, 15))
+    if resume is not None and resume > first:
+        late = (resume - first) % M15  # 07:00 London lies on the UTC quarter-hour grid
+        first = resume + (M15 - late if late else timedelta(0))
+    t = first + window * M15
     while t <= last:
         rows = [m15.get(t - (window - k) * M15) for k in range(window)]
         bars = [r for r in rows if r is not None and r["complete_at_close"]]

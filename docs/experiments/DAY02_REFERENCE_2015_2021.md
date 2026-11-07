@@ -1,7 +1,10 @@
 # Protocole — DAY_02, premier passage de performance 2015-2021 (référence M5, comparaison M15)
 
-**Statut** : **proposé** le 2026-11-07, soumis à l'opérateur. Documentation seulement : aucun outil,
-aucun passage. Étape 6 de la fiche figée `docs/strategies/DAY_02_FLAG_CONTINUATION.md` (§10,
+**Statut** : base **approuvée** par l'opérateur le 2026-11-07, trois précisions intégrées (reprises
+§5.2, entonnoir §6, comparaisons entre scénarios §8) et deux choix retenus (franchissements
+journaliers et hebdomadaires non décrits, §7 ; recalcul distinct C6 sur toutes les tentatives, §5.1)
+(ADR-034). Outil `forex-day02-backtest` et `forex-day02-compare` et tests synthétiques écrits ;
+**figé au commit de l'outil**, soumis à revue. Aucun passage historique. Étape 6 de la fiche figée `docs/strategies/DAY_02_FLAG_CONTINUATION.md` (§10,
 ADR-028), après la clôture de l'étude de disponibilité (étape 5, PR #25, bilan
 `DAY02_AVAILABILITY_2015_2021_BILAN.md`, ADR-033). Ni validation de performance, ni autorisation de
 trading. **Les passages restent subordonnés à la décision de l'opérateur sur les conditions IG
@@ -13,12 +16,14 @@ rapporté tel quel.
 - **Moteur** : `Day02Backtest` (`backtest/day02_engine.py`, règles `backtest/day02.py`), fusionné
   (PR #24), **inchangé**. Il est construit sur le moteur S1 sans le modifier : le rejeu de
   non-régression S1 n'est refait que si un moteur partagé est modifié.
-- **Outil de passage proposé** : `forex-day02-backtest` (`backtest/day02_explore.py`) et
-  `forex-day02-compare` (§8), sur le modèle de `forex-day01-backtest`. Il n'ajoute que de
-  l'observation : il lit les tentatives (`Attempt`), clôtures (`Closing`), transactions et
-  annotations enregistrées par le moteur, sans réévaluer de règle, sauf le recalcul de contrôle du
-  §5 sur les seules bougies. Un test vérifie que transactions, solde, journal et courbe sont ceux
-  du moteur seul. Provenance au lancement (commit, état de l'arbre, commande) et changements
+- **Outil de passage** : `forex-day02-backtest` (`backtest/day02_explore.py`) et
+  `forex-day02-compare` (§8), sur le modèle de `forex-day01-backtest`, tests synthétiques
+  `tests/test_day02_explore.py`. Il n'ajoute que de l'observation : il lit les tentatives
+  (`Attempt`), clôtures (`Closing`), transactions et annotations enregistrées par le moteur, sans
+  réévaluer de règle, sauf le recalcul de contrôle du §5 sur les seules bougies. Un test vérifie que
+  transactions, solde, journal, courbe, tentatives et clôtures sont ceux du moteur seul. Le recalcul
+  distinct C6 de l'étude (`independent_first`) reçoit un instant de reprise facultatif, qui vaut
+  07:00 par défaut : le comportement de l'étude est inchangé (ses tests passent sans modification). Provenance au lancement (commit, état de l'arbre, commande) et changements
   pendant le passage contrôlés à la fin (règle C10 de l'étude de disponibilité). Les passages
   partent d'un arbre propre au commit qui fige ce protocole et l'outil.
 - **Données**, locales, sans téléchargement, fenêtre bornée ; 2022-2025 jamais lus (refus du
@@ -121,23 +126,40 @@ vécu. Tout écart est une anomalie : résultats masqués, code 2, présentation
 
 **5.2 Événement qui autorise chaque reprise.** Ce recalcul ne prouve pas que l'instant de reprise
 est le bon ; chaque `resume_utc` est donc rapproché de l'événement qui l'autorise (fiche §5.7),
-lu dans les enregistrements du moteur :
+lu dans les enregistrements du moteur (précisions du 2026-11-07, ADR-034) :
 
 | Reprise (`resume_after`) | Instant attendu |
 |---|---|
-| `début de séance` | M15 de 07:00 de la séance, aucune position ni entrée en attente héritée |
+| `début de séance` (première tentative d'une séance) | 07:00 de la séance, aucune position ni entrée en attente à 07:00 ; **y compris après une clôture la veille** : la recherche du lendemain repart à 07:00, pas à l'heure de cette clôture |
+| `clôture de la position` (première tentative d'une séance) | position héritée encore ouverte à 07:00 : `max(07:00, tick de sortie)` de cette position ; égal à la fin enregistrée de sa tentative |
 | fin de configuration sans entrée (abandon, invalidation, expiration) | fin enregistrée de la configuration précédente |
-| abstention à `D` (six causes) | `D` de la configuration précédente |
-| `ENTRÉE_EXPIRÉE`, `ENTRÉE_ANNULÉE_INTERRUPTION` | instant d'issue de l'entrée (`entry_outcome_utc`) |
-| `clôture de la position` | instant du **tick de sortie** de la transaction de la tentative précédente, y compris le lendemain (`NUIT_NON_PRÉVUE`) ; égal à `ended_utc` de cette tentative |
+| abstention à `D` (cinq causes possibles) | `D` de la configuration précédente |
+| `ENTRÉE_EXPIRÉE`, `ENTRÉE_ANNULÉE_INTERRUPTION`, `ENTRÉE_REJETÉE` (passage de rejet) | instant enregistré de l'issue de l'entrée (`entry_outcome_utc`) |
+| `clôture de la position` (dans la séance) | instant du **tick de sortie** de la transaction de la tentative précédente ; égal à `ended_utc` de cette tentative |
 
-Contrôles associés : chaque tentative a une fin (`ended_utc`, `ended_by`), sauf une position
-ouverte à la fin de l'étude ; la tentative suivante reprend exactement à cette fin, dans la même
-séance ou à la séance suivante ; aucune recherche n'est en cours pendant une entrée en attente ou
-une position (intervalles disjoints) ; une séance dont la première reprise n'est pas à 07:00 est
-**listée** avec la position qui l'a retardée ou empêchée ; une séance sans tentative est attestée
-(`skipped_days` ou position subsistante) ; aucune abstention « position déjà ouverte » à `D`
-(impossible par construction : 0 attendu).
+Contrôles associés :
+- **fin de chaque tentative** : `ended_utc` et `ended_by` égaux à l'événement du tableau, lu
+  séparément (fin de configuration, `D` et refus, issue de l'entrée, tick de sortie de sa
+  transaction). **Une recherche qui se termine sans reconnaître de configuration n'a ni `ended_utc`
+  ni `ended_by`** : c'est une fin normale de recherche, ni une position ouverte, ni une anomalie ;
+  elle est comptée (`sans configuration jusqu'à la fin de fenêtre`) et ne peut être que la dernière
+  de sa séance. Seule une position encore ouverte à la fin de l'étude laisse aussi une tentative
+  sans fin ;
+- **enchaînement dans une séance** : chaque tentative reprend exactement à la fin de la précédente.
+  La dernière tentative d'une séance est une recherche sans configuration, ou une position fermée
+  au plus tôt à 14:15 (dernière reconnaissance), ou encore ouverte à la fin de l'étude ;
+- **première tentative d'une séance** : `début de séance` à 07:00 si rien n'est tenu à 07:00 ;
+  `clôture de la position` à la clôture effective d'une position tenue à 07:00 (séance **listée**
+  comme retardée) ; toute autre cause est une anomalie ;
+- **séance sans recherche** : justifiée seulement par une position encore ouverte à 14:15 (ou à la
+  fin de l'étude) et marquée par le moteur (`skipped_days`) ; séance **listée** ;
+- aucune reprise pendant une position (de `D` au tick de sortie) ; aucune abstention « position
+  déjà ouverte » à `D` (impossible par construction : 0 attendu).
+
+Tests synthétiques de ces situations : recherche terminée sans configuration ; clôture la veille
+suivie d'une reprise à 07:00 ; position tenue à 07:00 retardant la reprise ; position tenue au-delà
+de 14:15 empêchant toute recherche ; rejet à l'exécution ; reprise volontairement mal datée
+(bloquante).
 
 **5.3 Rapprochement partiel avec l'étude de disponibilité.** Seulement là où l'état de reprise est
 le même, configuration par configuration :
@@ -149,8 +171,9 @@ le même, configuration par configuration :
 - **toute autre tentative** dont l'instant de reprise coïncide avec celui d'une recherche de
   l'étude pour la même séance (par exemple une reprise à `D` après une abstention) : même égalité.
   Les autres tentatives ne sont rapprochées que par le §5.1 ;
-- rapporté côte à côte, sans égalité exigée : comptes de l'étude et du passage (configurations,
-  issues, sorties confirmées, par séance et par année) et part des séances dont la suite diffère.
+- rapporté côte à côte, sans égalité exigée : configurations et sorties confirmées de l'étude et du
+  passage, au total et par année, et nombre de séances dont la suite des instants de reprise
+  diffère de celle de l'étude.
 
 ## 6. Parcours : des confirmations aux transactions
 
@@ -162,10 +185,15 @@ fois**, d'après les enregistrements du moteur (`at_d`, `entry_outcome`, transac
 |---|---|
 | Recherches (tentatives) | sans configuration jusqu'à la fin de fenêtre ; configuration |
 | Configurations | données inutilisables ; impulsion prolongée ; repli trop profond avant `F` ; fin de fenêtre avant `F` ; **drapeau formé** |
-| Drapeaux formés | repli trop profond après `F` ; consolidation trop longue ; fin de fenêtre ; **sortie confirmée** |
+| Drapeaux formés | **données inutilisables pendant la recherche de sortie** ; repli trop profond après `F` ; consolidation trop longue ; fin de fenêtre ; **sortie confirmée** |
 | Sorties confirmées | refus à `D` : marché fermé ; absence de cotation ; stop non admissible ; cible déjà dépassée ; taille minimale supérieure au budget ; **ou** entrée décidée |
 | Entrées décidées | `EXÉCUTÉE` ; `STOP_DÉPASSÉ_À_L'EXÉCUTION` ; `CIBLE_ATTEINTE_À_L'EXÉCUTION` ; `ENTRÉE_REJETÉE` (passage de rejet seulement) ; `ENTRÉE_EXPIRÉE` ; `ENTRÉE_ANNULÉE_INTERRUPTION` |
 | Entrées exécutées | sortie liée au stop ; clôturée à la cible ; `SORTIE_TEMPORELLE` ; `LIQUIDATION_17H` ; encore ouverte à la fin de l'étude |
+
+La fin pour données inutilisables **après la formation du drapeau** (bougie de déclenchement
+absente ou non `OK` pendant la recherche de sortie) est une issue des drapeaux formés, distincte de
+la même cause avant `F`. Elle reste dans le classement même si l'étude de disponibilité n'en compte
+aucune ; sa conservation dans les comptes est testée.
 
 **Issues exclusives et annotations** (règles validées pour DAY_01, reprises) :
 - une entrée **décidée** n'est pas **exécutée** : rejet, expiration et annulation sont décidés sans
@@ -206,28 +234,37 @@ fois**, d'après les enregistrements du moteur (`at_d`, `entry_outcome`, transac
 - **Sorties temporelles et liquidations de 17:00** : nombre ; délai après l'échéance ; silence clos ;
   motif de clôture ; coïncidences ; positions subsistant après 17:00 ; nuits non prévues ; clôture
   non exécutée à la fin.
-- **Entrées non exécutées** : expirées, annulées pour interruption (durée du silence), rejetées.
+- **Entrées non exécutées** : expirées, annulées pour interruption (silence décrit par l'événement
+  du moteur, conservé dans le détail local), rejetées.
 - **Mesures par entrée** (détail local hors Git, distributions dans l'agrégé ; aucune ne sert de
   filtre ; une mesure non définissable est absente avec son motif) : distance du stop `P_D − S` en
   pips et en multiples de `A` ; rapports des distances estimé à `D`, net estimé à `D` et obtenu à
   l'exécution, côte à côte ; part des coûts fixes dans le risque (définition de DAY_01) ; **écart
   entre les indicateurs approchés de l'étude** (depuis la clôture de la bougie de sortie) **et les
-  valeurs à `D`**, sur les configurations rapprochées au §5.3 ; pente du drapeau et nombre de
-  pauses (descriptif).
+  valeurs à `D`**, sur les sorties confirmées rapprochées au §5.3 (valeur à `D` moins indicateur
+  approché, distance au stop, en pips) ; pente du drapeau des entrées décidées (descriptif ; le
+  nombre de pauses vaut 2 par construction).
 - **Répartitions** : par jour de la semaine ; par heure de décision (Londres) ; GMT, BST et semaines
   de décalage ; par sens.
 - Drawdown au tick en euros, global continu et par année ; drawdown relatif maximal ; premier
   franchissement de 6 % (seuil de revue, la trajectoire continue) ; durée de récupération.
-- Net sans la meilleure transaction ; transactions indéterminées (trou, cotations qui l'encadrent,
-  distances au stop et à la cible) ; dépassements du budget.
+- Net sans la meilleure transaction ; transactions indéterminées (trous enregistrés par le moteur,
+  position ouverte à la fin) ; dépassements du budget.
 - Mesures du cahier (§9) : espérance nette en multiples du risque, profit factor, gain et perte
   moyens, durée d'exposition, mois sans opération et mois déficitaires.
 - **Limites de perte journalière et hebdomadaire** : **non décrites** dans ce premier passage
-  (proposition ; la fiche §7.1 les rend facultatives). Si l'opérateur les veut, leur formule et
-  leurs fenêtres seront fixées ici avant l'outil, comme description d'une trajectoire sans
-  blocage.
+  (choix retenu par l'opérateur le 2026-11-07, la fiche §7.1 les rendant facultatives) ; le premier
+  franchissement de 6 % reste rapporté.
 
 ## 8. Comparaisons
+
+**Existence des deux passages** (précision du 2026-11-07). B, C et le rejet sont déclenchés
+séparément pour M5 et M15 (§4). Une comparaison entre les deux trajectoires d'un même scénario n'est
+produite **que si les deux passages existent** et ont passé leurs contrôles : `forex-day02-compare`
+exige les deux rapports (même scénario, même règle d'exécution, déclenchements M5 et M15) et refuse
+sinon (code 2, aucune sortie). Le plan des comparaisons est établi depuis les deux passages A
+(`--plan`) : un scénario requis d'un seul côté est **rapporté comme tel**, sans comparaison, et
+l'autre côté **n'est pas lancé** pour compléter le tableau.
 
 **M5 / M15**, par date de séance de Londres (`forex-day02-compare`, depuis les deux détails
 locaux d'un même scénario ; exactement une ligne par date et par trajectoire, doublons refusés,
@@ -278,11 +315,11 @@ dans une ADR :
   aucune distance minimale), comme S1 à DAY_01, avec les limites du §9 points 5 et 6 rappelées
   dans le bilan.
 
-Aucune variante de sensibilité aux conditions IG n'est prévue par ce protocole. L'outil peut être
-écrit et testé sur données synthétiques avant cette décision, si l'opérateur l'autorise ; aucun
-passage historique ne l'est.
+Aucune variante de sensibilité aux conditions IG n'est prévue par ce protocole. L'outil a été
+écrit et testé sur données synthétiques avant cette décision (autorisation du 2026-11-07) ; la
+décision reste **ouverte** et aucun passage historique n'est autorisé.
 
-## 11. Commandes (proposées, à figer avec l'outil)
+## 11. Commandes (figées avec l'outil)
 
 Préfixe des sorties : `data/reports/backtests/day02_ref_2015_2021_<déclenchement>_<passage>` (hors
 Git), avec `<déclenchement>` = `m5` ou `m15` et `<passage>` = `a`, `b`, `c` ou `a_reject`.
@@ -299,20 +336,31 @@ uv run forex-day02-backtest --init-start 2015-01-01 --start 2015-01-01 --end 202
   --sessions-out data/reports/backtests/day02_ref_2015_2021_m5_a_sessions.jsonl
 ```
 
-Ordre prévu : `m5_a` ; `m15_a` ; pour chaque déclenchement, selon son `scenario_triggers`, B puis C,
-puis rejet ; comparaison M5 / M15 de chaque scénario publié. Chaque commande part d'un arbre propre
+La fenêtre officielle (valeur par défaut) active les ancrages : empreinte complète du JSONL de
+l'étude, 3 632 lignes et 1 816 dates, 383 trous. Le rapport JSON a un résumé Markdown (même nom,
+`.md`) ; le détail par séance n'est écrit que si les contrôles passent.
+
+Ordre prévu :
+1. `m5_a` (ci-dessus) ; `m15_a` : même commande avec `--trigger M15`, sorties `*_m15_a*` ;
+2. plan des comparaisons depuis les deux passages A :
+   `uv run forex-day02-compare --plan --m5-report <..._m5_a.json> --m15-report <..._m15_a.json> --out <...>` ;
+3. pour chaque déclenchement, selon `scenario_triggers` de **son** passage A : `--scenario B` puis
+   `--scenario C` si `scenario_b_required` ; puis `--stop-at-execution REJECT` si `reject_required` ;
+4. comparaison M5 / M15 de chaque scénario dont les deux passages existent :
+   `uv run forex-day02-compare --m5-report <...> --m15-report <...> --m5 <..._sessions.jsonl> --m15 <..._sessions.jsonl> --out <...>`.
+
+ Chaque commande part d'un arbre propre
 au commit qui fige ce protocole et l'outil ; un contrôle en échec (code 2) arrête la suite et est
 présenté avant toute correction. Bilan agrégé : `DAY02_REFERENCE_2015_2021_BILAN.md` ; journaux et
 détails hors Git.
 
 ## 12. Ordre de travail
 
-1. Protocole soumis à l'opérateur (ce document).
-2. Décision sur les conditions IG (§10) et, le cas échéant, sur les limites journalière et
-   hebdomadaire décrites (§7).
-3. Outil `forex-day02-backtest`, `forex-day02-compare` et tests synthétiques (dont des tentatives
-   faussées pour chaque contrôle des §5 et §6), sans passage historique, sur autorisation ;
-   protocole figé au commit de l'outil.
+1. Protocole soumis à l'opérateur ; base approuvée le 2026-11-07, précisions intégrées (ADR-034).
+2. Outil `forex-day02-backtest`, `forex-day02-compare` et tests synthétiques (dont des tentatives
+   faussées pour les contrôles des §5 et §6), sans passage historique : fait ; protocole figé au
+   commit de l'outil, soumis à revue.
+3. Décision de l'opérateur sur les conditions IG (§10) : **ouverte**.
 4. Passages 2015-2021, **sur autorisation explicite**, dans l'ordre du §11.
 
 ## 13. Interdits
