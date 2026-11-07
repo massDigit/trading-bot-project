@@ -102,6 +102,8 @@ CANCELLED_INTERRUPTION = "ENTRÉE_ANNULÉE_INTERRUPTION"
 # Closing orders (sheet §6.3): the first deadline reached; equality gives LIQUIDATION_17H.
 TIME_EXIT = "SORTIE_TEMPORELLE"
 LIQUIDATION = "LIQUIDATION_17H"
+# Annotation: the position closed on a later trading day than its entry, whatever the closing reason.
+UNPLANNED_NIGHT = "NUIT_NON_PRÉVUE"
 
 # What authorises a resume of the search (sheet §5.7, §10.1).
 SESSION_START = "début de séance"

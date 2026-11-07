@@ -62,6 +62,7 @@ from forex_bot.backtest.day02 import (
     TARGET_AT_EXECUTION,
     TARGET_PASSED,
     TIME_EXIT,
+    UNPLANNED_NIGHT,
     Attempt,
     Closing,
     Configuration,
@@ -85,7 +86,7 @@ from forex_bot.backtest.feed import Silence, Tick, classify_silence
 from forex_bot.backtest.s1 import EntrySignal, S1Params
 from forex_bot.backtest.s2 import ContinuousWilderAtr, GapScenario
 from forex_bot.history.bars import Gap
-from forex_bot.history.calendar import MarketState, market_state
+from forex_bot.history.calendar import MarketState, market_state, trading_day
 from forex_bot.market import Quote
 from forex_bot.risk import Holding, LossEstimate, Side, estimate_loss_per_contract, usd_to_eur_from_eurusd_bid
 
@@ -100,6 +101,7 @@ class Day02Result(BacktestResult):
     # Position still open at an explicit end of the study: silence since its last quote, still in progress.
     silence_at_end: dict[str, Any] | None = None
     unexecuted_closing: tuple[datetime, str] | None = None  # closing order due, not executed by the end
+    unplanned_nights: list[datetime] = field(default_factory=list)  # NUIT_NON_PRÉVUE, by decision instant
 
 
 @dataclass(frozen=True)
@@ -150,6 +152,8 @@ class Day02Backtest(S1Backtest):
         self._due: _Due | None = None  # closing order of the open position
         self._pending_target: Decimal | None = None
         self._pending_attempt: Attempt | None = None
+        self._position_attempt: Attempt | None = None  # attempt of the open position, ended by its close
+        self.unplanned_nights: list[datetime] = []  # decision instants of trades closed on a later trading day
 
     # ------------------------------------------------------------------ public
 
@@ -191,6 +195,7 @@ class Day02Backtest(S1Backtest):
             skipped_days=self.skipped_days,
             silence_at_end=self.silence_at_end,
             unexecuted_closing=self.unexecuted_closing,
+            unplanned_nights=self.unplanned_nights,
         )
 
     def atr_at(self, cutoff: datetime, known_at: datetime) -> Decimal | None:
@@ -341,9 +346,8 @@ class Day02Backtest(S1Backtest):
         if attempt.entry_outcome in (EXPIRED, CANCELLED_INTERRUPTION, REJECTED_AT_EXECUTION):
             attempt.ended_utc, attempt.ended_by = attempt.entry_outcome_utc, attempt.entry_outcome
             return
-        closed = self._wait_flat(deadline, attempt.day)
-        if closed is not None:
-            attempt.ended_utc, attempt.ended_by = closed, POSITION_CLOSED
+        # The close of the position ends the attempt (`_close`), even after the search has stopped.
+        self._wait_flat(deadline, attempt.day)
 
     def _interrupted(self, start: datetime, end: datetime) -> bool:
         """Silence strictly longer than the DAY_02 threshold of expected-open time (a known closure is not)."""
@@ -463,7 +467,10 @@ class Day02Backtest(S1Backtest):
     def _open(self, tick: Tick) -> None:
         pending, target, attempt = self.pending_entry, self._pending_target, self._pending_attempt
         self._pending_target, self._pending_attempt = None, None
+        self._position_attempt = attempt  # a fill then liquidation closes inside the S1 call below
         super()._open(tick)
+        if self.position is None:
+            self._position_attempt = None  # rejected, or already closed on this tick
         if pending is None:
             return
         position = self.position
@@ -499,13 +506,23 @@ class Day02Backtest(S1Backtest):
     def _close(
         self, tick: Tick, price: Decimal, reason: str, stop_triggered: bool, hypotheses: list[str] | None = None
     ) -> None:
-        pending, due = self.pending_exit, self._due
+        pending, due, attempt = self.pending_exit, self._due, self._position_attempt
         previous = self._last_tick  # still the tick before `tick`: it is updated after the events
+        entered = self._open_position().entry_utc
         self.pending_exit = None  # the S1 engine would log a channel exit: DAY_02 has only its closing order
         super()._close(tick, price, reason, stop_triggered, hypotheses)
-        self.target, self._due = None, None
+        self.target, self._due, self._position_attempt = None, None, None
         if pending is not None:
             self._record_closing(tick, pending, previous, reason, due)
+        if trading_day(tick.ts_utc) != trading_day(entered):
+            # Annotation, apart from the closing reason and from any interruption: counted once per trade.
+            trade = self.trades[-1]
+            self.unplanned_nights.append(trade.decided_utc)
+            self._log(tick.ts_utc, UNPLANNED_NIGHT, f"clôture {reason} sur une journée de cotation postérieure")
+            if attempt is not None:
+                attempt.events.append(f"{UNPLANNED_NIGHT} : clôture {reason}")
+        if attempt is not None and attempt.ended_utc is None:
+            attempt.ended_utc, attempt.ended_by = tick.ts_utc, POSITION_CLOSED  # true instant of the exit tick
 
     def _record_closing(
         self, tick: Tick, pending: _PendingExit, previous: Tick | None, reason: str, due: _Due | None

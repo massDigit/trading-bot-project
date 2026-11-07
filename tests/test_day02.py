@@ -35,11 +35,14 @@ from forex_bot.backtest.day02 import (
     PEAK_BEFORE_END,
     POSITION_CLOSED,
     PROLONGED,
+    REJECTED_AT_EXECUTION,
     SESSION_START,
     SIZE_REFUSED,
+    STOP_AT_EXECUTION,
     TIME_EXIT,
     TOO_DEEP,
     TOO_LONG,
+    UNPLANNED_NIGHT,
     WEAK_CLOSE,
     WINDOW_DATA,
     WINDOW_END,
@@ -50,7 +53,7 @@ from forex_bot.backtest.day02 import (
     configuration_from,
 )
 from forex_bot.backtest.day02_engine import Day02Backtest, Day02Result
-from forex_bot.backtest.engine import ResearchConfig
+from forex_bot.backtest.engine import ResearchConfig, StopAtExecution
 from forex_bot.backtest.explore import RESEARCH_COSTS
 from forex_bot.backtest.feed import Silence, Tick
 from forex_bot.backtest.s2 import GapScenario
@@ -761,9 +764,16 @@ def test_equal_deadlines_give_one_liquidation_and_a_night_without_quote(tmp_path
     (closing,) = result.closings
     assert (closing.decided_utc, closing.order, closing.coincident) == (at(WINTER, 17, 0), LIQUIDATION, True)
     assert closing.silence_kind is Silence.UNEXPLAINED
-    # The next session waited for the close, then resumed from it.
+    # The attempt is ended by the real close, replayed after its search had stopped (14:15).
+    assert (first.ended_utc, first.ended_by) == (at(nxt, 7, 0), POSITION_CLOSED)
+    # Unplanned night: one annotation, apart from the closing reason and from the interruption.
+    assert result.unplanned_nights == [at(WINTER, 14, 55)]
+    assert [j.utc for j in result.journal if j.kind == UNPLANNED_NIGHT] == [at(nxt, 7, 0)]
+    assert sum(e.startswith(UNPLANNED_NIGHT) for e in first.events) == 1
+    assert "financement overnight" in trade.costs_quote  # costs unchanged: one night financed
+    # The next session waited for the close, then resumed from the event that authorises it.
     resumed = next(a for a in result.attempts if a.day == nxt)
-    assert (resumed.resume_utc, resumed.resume_after) == (at(nxt, 7, 0), POSITION_CLOSED)
+    assert (resumed.resume_utc, resumed.resume_after) == (first.ended_utc, first.ended_by)
 
 
 @pytest.mark.parametrize(
@@ -801,6 +811,10 @@ def test_open_position_at_the_end_of_the_study_is_valued_without_exit(tmp_path: 
     assert trade.exit_utc is None and result.trades == []
     assert result.unexecuted_closing == (at(WINTER, 12, 10, 0, 230), TIME_EXIT)
     assert got(result.silence_at_end)["kind"] is Silence.UNEXPLAINED and trade.indeterminate
+    # Really still open: its attempt is not ended, and no later attempt claims a resume after it.
+    first = result.attempts[0]
+    assert (first.entry_outcome, first.ended_utc, first.ended_by) == (EXECUTED, None, None)
+    assert result.attempts == [first] and result.unplanned_nights == []
 
 
 # ---------------------------------------------------------------- causality of the engine
@@ -825,3 +839,61 @@ def test_ticks_and_candles_after_an_instant_change_nothing_known_at_it(tmp_path:
             assert entry == reference.trades[0].entry_utc
         before = [j for j in reference.journal if j.utc < x]
         assert before == [j for j in other.journal if j.utc < x]
+
+
+def test_stop_reached_overnight_is_an_unplanned_night_with_its_stop_reason(tmp_path: Path) -> None:
+    after = [tick(at(WINTER, 14, 55), "1.13156"), tick(at(WINTER, 15, 0), "1.13156")]
+    after += fill(at(WINTER, 15, 0, 30), at(WINTER, 17, 0, 1), "1.13200")
+    nxt = WINTER + timedelta(days=1)
+    after += fill(at(nxt, 7, 0), at(nxt, 17, 30), "1.13000")  # below the stop 1.13050
+    result = run(tmp_path, late_example(WINTER, after), days=2)
+    (trade,) = [t for t in result.trades if t.decided_utc == at(WINTER, 14, 55)]
+    assert (trade.exit_utc, trade.exit_reason, trade.exit_price) == (
+        at(nxt, 7, 0),
+        "STOP_APRÈS_INTERRUPTION",
+        D("1.13050"),
+    )
+    assert trade.indeterminate and result.unplanned_nights == [at(WINTER, 14, 55)]
+    assert [j.kind for j in result.journal].count(UNPLANNED_NIGHT) == 1
+    (closing,) = result.closings  # the 17:00 order was due; the stop took precedence on the same tick
+    assert (closing.order, closing.close_reason) == (LIQUIDATION, "STOP_APRÈS_INTERRUPTION")
+    first = result.attempts[0]
+    assert (first.ended_utc, first.ended_by) == (at(nxt, 7, 0), POSITION_CLOSED)
+
+
+def test_close_after_the_last_recognition_ends_the_attempt_the_same_day(tmp_path: Path) -> None:
+    after = [tick(at(WINTER, 14, 55), "1.13156"), tick(at(WINTER, 15, 0), "1.13156")]
+    after += fill(at(WINTER, 15, 0, 30), at(WINTER, 17, 30), "1.13200")
+    result = run(tmp_path, late_example(WINTER, after))
+    (trade,) = result.trades
+    assert (trade.exit_utc, trade.exit_reason) == (at(WINTER, 17, 0, 30), LIQUIDATION)
+    first = result.attempts[0]
+    assert (first.ended_utc, first.ended_by) == (trade.exit_utc, POSITION_CLOSED)
+    assert result.attempts == [first]  # no recognition is possible after 14:15: nothing resumes
+    assert result.unplanned_nights == [] and UNPLANNED_NIGHT not in [j.kind for j in result.journal]
+
+
+@pytest.mark.parametrize("rule", list(StopAtExecution), ids=[r.name for r in StopAtExecution])
+def test_stop_already_beyond_at_execution(tmp_path: Path, rule: StopAtExecution) -> None:
+    after = [tick(at(WINTER, 10, 10, 0, 230), "1.13040"), *fill(at(WINTER, 10, 10, 30), at(WINTER, 17, 30), "1.13200")]
+    config = ResearchConfig(costs=RESEARCH_COSTS, stop_at_execution=rule)
+    result = run(tmp_path, sheet_ticks(WINTER, after), config=config)
+    first, second = result.attempts[:2]
+    execution = at(WINTER, 10, 10, 0, 230)
+    assert result.open_trade is None and result.closings == []
+    decided = [t for t in result.trades if t.decided_utc == at(WINTER, 10, 10)]
+    if rule is StopAtExecution.FILL_THEN_LIQUIDATE:
+        (trade,) = decided  # one trade only, filled then liquidated on the same tick
+        assert (trade.entry_utc, trade.exit_utc, trade.exit_reason) == (
+            execution,
+            execution,
+            "STOP_FRANCHI_À_L'EXÉCUTION",
+        )
+        assert "prime de stop garanti" not in trade.costs_quote
+        assert (first.entry_outcome, first.ended_utc, first.ended_by) == (STOP_AT_EXECUTION, execution, POSITION_CLOSED)
+    else:
+        assert decided == []
+        expected = (REJECTED_AT_EXECUTION, execution, REJECTED_AT_EXECUTION)
+        assert (first.entry_outcome, first.ended_utc, first.ended_by) == expected
+    assert (second.resume_utc, second.resume_after) == (first.ended_utc, first.ended_by)
+    assert second.search.examined[0].t_utc == at(WINTER, 11, 15)
