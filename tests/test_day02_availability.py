@@ -314,7 +314,8 @@ def test_coverage_separates_needed_and_full_windows_with_causes(tmp_path: Path) 
     assert needed["5m"]["créneaux"] == 96 and full["5m"]["créneaux"] == 120
     assert needed["15m"]["créneaux"] == 32 and full["15m"]["créneaux"] == 40
     assert needed["5m"]["causes"] == {"sans tick": 1} and full["5m"]["causes"] == {"sans tick": 3}
-    assert needed["silences_plus_de_5_min"]["nombre"] == 1 and full["silences_plus_de_5_min"]["nombre"] == 2
+    assert needed["silences_plus_de_5_min"]["silences_distincts"] == 1
+    assert full["silences_plus_de_5_min"]["silences_distincts"] == 2
     assert bar_cause(None) == "absente"
 
 
@@ -346,7 +347,7 @@ def week(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, list[st
     hashes = {g: sha256_file(directory / tool.LOT / f"{g.value}.parquet") for g in Grid}
     clean: dict[str, Any] = {"commit": "abc", "uncommitted_diff_sha256": None, "uncommitted_files": []}
     monkeypatch.setattr(tool, "CANDLES_SHA256", hashes)
-    monkeypatch.setattr(tool, "H1_SHA256_PREFIX", sha256_file(directory / "1h.parquet")[:8])
+    monkeypatch.setattr(tool, "H1_SHA256", sha256_file(directory / "1h.parquet"))
     monkeypatch.setattr(tool, "provenance", lambda argv, name: {**clean, "command": [name]})
     monkeypatch.setattr(tool, "tree_state", lambda: dict(clean))
     return data, ["--data-dir", str(data), "--start", "2019-02-11", "--end", "2019-02-16"]
@@ -360,10 +361,15 @@ def test_command_end_to_end(tmp_path: Path, week: tuple[Path, list[str]]) -> Non
     assert report["failed_checks"] == [] and not report["window"]["officielle"]
     assert report["checks"]["C9"]["inputs_sha256"]["unchanged"] and report["checks"]["C10"]["ok"]
     assert report["checks"]["C9"]["ticks_lus"] == 0
+    hashes = report["checks"]["C9"]["inputs_sha256"]
+    assert any(path.endswith("quality_dukascopy_EURUSD.json") for path in hashes["before"])
+    assert "aucune référence historique" in hashes["références"]["quality_dukascopy_EURUSD.json"]
     assert report["comptes"]["M5"]["total"]["comptes"]["sorties_confirmées"] == 1
     # Monday: the H1 history starts on the study start; the ATR bootstrap is counted, never filled.
     causes = report["comptes"]["M5"]["2019"]["m15_non_reconnues_par_cause"]
     assert causes.get(ATR_UNAVAILABLE, 0) > 0
+    atr = report["comptes"]["M5"]["2019"]["atr_h1_indisponible_par_cause"]
+    assert set(atr) == {tool.ATR_INITIAL} and sum(atr.values()) == causes[ATR_UNAVAILABLE]
     assert len(details.read_text().splitlines()) == 10  # 5 sessions x 2 triggers
     assert out.with_suffix(".md").read_text().startswith("# DAY_02")
 
@@ -373,10 +379,10 @@ def test_command_refuses_unknown_hashes_and_withholds_results_on_a_failed_check(
 ) -> None:
     _, argv = week
     out, details = tmp_path / "r.json", tmp_path / "d.jsonl"
-    prefix = tool.H1_SHA256_PREFIX
-    monkeypatch.setattr(tool, "H1_SHA256_PREFIX", "00000000")
+    full = tool.H1_SHA256
+    monkeypatch.setattr(tool, "H1_SHA256", full[:8] + "0" * 56)  # same published prefix, other hash
     assert main([*argv, "--out", str(out), "--details-out", str(details)]) == 2 and not out.exists()
-    monkeypatch.setattr(tool, "H1_SHA256_PREFIX", prefix)
+    monkeypatch.setattr(tool, "H1_SHA256", full)
     monkeypatch.setattr(tool, "resume_errors", lambda paths: ["reprise falsifiée"])
     assert main([*argv, "--out", str(out), "--details-out", str(details)]) == 2
     report = json.loads(out.read_text())
@@ -391,3 +397,60 @@ def test_no_bar_after_the_end_is_read(tmp_path: Path, week: tuple[Path, list[str
     report = json.loads(out.read_text())
     assert report["checks"]["C9"]["ok"] and report["inputs"]["m15"] > 0
     assert report["checks"]["C1"]["calendrier"]["sessions"] == 2
+
+
+# ---------------------------------------------------------------- review of 1e6ad36
+
+
+def test_prolonged_after_a_pause_is_accepted_by_c4(tmp_path: Path) -> None:
+    # Origin 08:45, recognition 09:30, extensions 09:30, 09:45, 10:00 (6 M15), a pause at 10:15, then
+    # an extension at 10:30: 8 M15, the first extension beyond 6, abandoned at its close 10:45.
+    rows = dict(SHEET_M15) | {
+        (9, 30): ("1.13130", "1.13150", "1.13120", "1.13140"),
+        (9, 45): ("1.13140", "1.13160", "1.13120", "1.13140"),
+        (10, 0): ("1.13140", "1.13170", "1.13120", "1.13140"),
+        (10, 15): ("1.13140", "1.13150", "1.13120", "1.13140"),
+        (10, 30): ("1.13140", "1.13180", "1.13120", "1.13140"),
+    }
+    (report, details), _ = study(tmp_path, session_ticks(WINTER, rows))
+    assert all(c["ok"] for c in report["checks"].values()), {k: c["errors"] for k, c in report["checks"].items()}
+    config = details[0]["searches"][0]["configuration"]
+    assert (config["outcome"], config["ended_utc"]) == (PROLONGED, at(WINTER, 10, 45))
+    assert config["extensions"] == [at(WINTER, 9, 30), at(WINTER, 9, 45), at(WINTER, 10, 0), at(WINTER, 10, 30)]
+    paths, engine = paths_of(tmp_path / "again", session_ticks(WINTER, rows))
+    bad = copy.deepcopy(paths)
+    got(bad[0].searches[0].configuration).ended_utc = at(WINTER, 10, 30)  # not the close of the extension
+    assert bound_errors(bad, engine.m15)
+
+
+def atr_engine(h1: list[dict[str, Any]]) -> Any:
+    from forex_bot.backtest.day02 import Day02Params
+    from forex_bot.backtest.day02_engine import Day02Backtest
+
+    return Day02Backtest([], [], h1, [], [], Day02Params(), CONFIG)
+
+
+def test_atr_causes_are_read_from_the_h1_known_at_the_instant() -> None:
+    cutoff, known = at(WINTER, 8, 0), at(WINTER, 9, 0)
+    short = h1_bars(cutoff, days=1)[-10:]
+    assert tool.atr_cause(atr_engine(short), cutoff, known)[0] == tool.ATR_INITIAL
+    hole = at(WINTER, 0, 0)
+    assert tool.atr_cause(atr_engine(h1_bars(cutoff, skip={hole})), cutoff, known)[0] == tool.ATR_ABSENT_H1
+    cause, detail = tool.atr_cause(atr_engine(h1_bars(cutoff, bad={hole})), cutoff, known)
+    assert cause == tool.ATR_UNUSABLE_H1 and hole.isoformat() in got(detail)
+    # The last H1 known is itself unusable: same diagnosis with a truncated history and with later H1 loaded.
+    last = at(WINTER, 7, 0)
+    for until in (cutoff, at(WINTER, 17, 0)):
+        cause, detail = tool.atr_cause(atr_engine(h1_bars(until, bad={last})), cutoff, known)
+        assert cause == tool.ATR_UNUSABLE_H1 and "0 H1 utilisable" in got(detail), until
+    flat_h1 = [dict(b, bid_high=b["bid_close"], bid_low=b["bid_close"]) for b in h1_bars(cutoff)]
+    assert tool.atr_cause(atr_engine(flat_h1), cutoff, known) == (tool.ATR_UNDETERMINED, "ATR 0.00000 non positif")
+
+
+def test_a_silence_crossing_two_windows_is_one_silence_and_two_intersections(tmp_path: Path) -> None:
+    nxt = WINTER + timedelta(days=1)
+    ticks = [t for t in session_ticks(WINTER, {}) if t.ts_utc < at(WINTER, 16, 30)]
+    ticks += [t for t in session_ticks(nxt, {}) if t.ts_utc >= at(nxt, 7, 30)]
+    m5, m15 = candles(tmp_path, ticks)
+    full = coverage([WINTER, nxt], m5, m15)["complète_07_17"]["silences_plus_de_5_min"]
+    assert (full["silences_distincts"], full["intersections_silence_séance"], full["séances_touchées"]) == (1, 2, 2)

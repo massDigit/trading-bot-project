@@ -28,9 +28,20 @@ drapeau, la profondeur après `F` et l'extrême du drapeau diffèrent.
   convention à 5 minutes étendue à DAY_02 (ADR-026 : silence > 5 min, M5 sans tick et M15 à
   sous-créneau vide non `OK`). Empreintes vérifiées **avant lecture** : `5m` `94387741…fb82`,
   `15m` `64b30520…9db2` (bilan des données §8.1). Toute différence arrête l'étude.
-- **H1 et trous** : `data/bars/dukascopy/EURUSD/1h.parquet`, empreinte vérifiée avant lecture sur
-  son préfixe publié (`a7c7f8b8`, bilan des données ; la valeur complète n'est pas dans le dépôt :
-  elle est enregistrée au lancement), et trous du rapport de qualité (`load_gaps`). Les états H1
+- **H1 et trous** : `data/bars/dukascopy/EURUSD/1h.parquet` et trous du rapport de qualité
+  `data/reports/quality_dukascopy_EURUSD.json` (`load_gaps`), qui influencent les états H1 et l'ATR.
+- **Empreintes des entrées** (corrections du 2026-11-07, ADR-032), comparées **en entier** avant
+  toute lecture, puis enregistrées avant et après le passage :
+
+  | Entrée | Référence | Provenance de la référence |
+  |---|---|---|
+  | `5m.parquet` du lot à 5 min | `9438774154972aafa2cc924cf6042e6ae2b3c97de23328644b7d54f3af50fb82` | sortie de l'audit à 5 min (`intraday_dukascopy_EURUSD_2015_2021_day01_5min.json`, `outputs_sha256`) |
+  | `15m.parquet` du lot à 5 min | `64b305201c2f8e48afd257048e07800cea1778e17228673b4c4af7c6a86a9db2` | idem |
+  | `1h.parquet` | `a7c7f8b82ac55828bbbc25b8fd87c64cac99efb5a977187c47b381480802c585` | `existing_bars_sha256`, avant et après, des deux audits intraday : `intraday_dukascopy_EURUSD_2015_2021.json` (commit `36daea1`, arbre propre) et sa reprise à 5 min (commit `c0272cc`, arbre avec modifications non commitées) ; préfixe publié dans le bilan des données |
+  | `quality_dukascopy_EURUSD.json` | **aucune référence historique** : aucun audit n'a enregistré son empreinte | empreinte enregistrée avant et après le passage seulement ; contenu ancré par le nombre de trous chargés jusqu'au 2022-01-01, **383**, celui des passages DAY_01 (bilan de performance DAY_01), sur la fenêtre officielle seulement |
+
+  Une empreinte calculée le 2026-11-07 pour le rapport de qualité (`0cdcebee…6b9`) n'est **pas** une
+  référence d'audit ; elle n'est pas utilisée comme telle. Les états H1
   gardent la convention H1 du projet (seuil `ResearchConfig.gap_threshold`, 10 min), **inchangée** ;
   ATR Wilder 14 H1 avec continuité des H1 prévues.
 - **Aucun tick lu.** Les contrôles à `D` (marché, cotation, stop admissible, cible encore devant,
@@ -157,8 +168,17 @@ mesurera l'écart entre les indicateurs approchés et les valeurs à `D`.
     d'ouverture prévue ; la fermeture hebdomadaire n'en est pas un). Le rapport historique à 10 min
     ne suffirait pas (silences de 5 à 10 min absents) ; il n'est pas utilisé pour cette mesure.
     Aucune nouvelle lecture n'est nécessaire ;
-  - H1 non utilisables et ATR indisponibles : comptés comme causes de non-reconnaissance (`ATR H1
-    non calculable`), sans détail de cause dans cette version.
+  - **ATR H1 indisponible** (rétabli le 2026-11-07) : chaque M15 examinée dont l'ATR est
+    indisponible reçoit une cause, lue dans l'historique H1 et les états connaissables à `t_j`
+    seulement, par un diagnostic qui ne modifie pas le calcul de l'ATR : **amorçage initial**
+    (historique trop court depuis le début des données), **H1 prévue absente**, **H1 inutilisable**
+    (y compris la dernière H1 connue elle-même inutilisable), ou **non déterminée**, explicite. Aucune
+    H1 postérieure à la dernière H1 terminée avant la fenêtre n'est lue.
+  - **Compteurs de silences** : `silences distincts` compte chaque silence une seule fois, quel que
+    soit le nombre de fenêtres qu'il traverse ; `intersections silence–séance` compte les couples
+    (silence, fenêtre de séance) ; s'y ajoutent les minutes d'ouverture prévue dans les fenêtres et
+    les séances touchées. Un silence traversant deux fenêtres est **un** silence et **deux**
+    intersections.
 
 ## 5. Contrôles bloquants
 
@@ -171,12 +191,12 @@ correction ou relance.
 | C1 | Séances | jours ouvrés = `pas de séance` + séances ; **1 816** séances, les mêmes jours fériés probables que le bilan DAY_01 (11 jours ouvrés) |
 | C2 | Conservation | à chaque étape du §4.2 : entrées = issues terminales + passages, par année et au total ; chaque M15 examinée a une seule cause ; chaque configuration une seule fin ; chaque recherche ouvre au plus une configuration, et seule la dernière d'une séance n'en ouvre pas |
 | C3 | **Événements autorisant chaque reprise** | première recherche d'une séance : reprise à 07:00 Londres, motif `début de séance` ; chaque recherche suivante : instant de reprise = instant de fin de la configuration précédente (`D` pour une sortie confirmée) et motif = sa cause de fin ; aucune autre reprise |
-| C4 | **Bornes temporelles** (précision 3) | sur les configurations **valides**, distinguées des événements qui les terminent : `t_j` sur la grille M15, dans [08:00, 14:15] Londres, `t_j ≥` reprise arrondie à la M15 supérieure + 60 min ; `o < p = j` à la reconnaissance, relu sur les M15 de la fenêtre ; origine dans la fenêtre ; impulsion d'au plus 6 M15, **sauf** fin « impulsion prolongée sans pause », qui est une issue (7 M15, fin à la clôture de la 7e), jamais un échec ; fin au plus tard à 15:00 ; fin de fenêtre avant `F` à 14:45. **Seulement si `F` existe** : pauses = les deux M15 suivant le dernier sommet, `F` ≤ 14:45, `Δ = min(fin(p) + 90 min, 15:00)`, aucune bougie lue se terminant après `Δ`, expiration exactement à `Δ`. **Seulement si `D` existe** : `F < D ≤ Δ`, `D` sur la grille de l'unité, stop et cible présents |
+| C4 | **Bornes temporelles** (précision 3) | sur les configurations **valides**, distinguées des événements qui les terminent : `t_j` sur la grille M15, dans [08:00, 14:15] Londres, `t_j ≥` reprise arrondie à la M15 supérieure + 60 min ; `o < p = j` à la reconnaissance, relu sur les M15 de la fenêtre ; origine dans la fenêtre ; impulsion d'au plus 6 M15, **sauf** fin « impulsion prolongée sans pause », qui est une issue, jamais un échec : l'abandon a lieu à la **clôture de la première extension** qui porte l'impulsion au-delà de 6 M15, qui peut alors en compter plus de 7 si des pauses ont précédé cette extension ; fin au plus tard à 15:00 ; fin de fenêtre avant `F` à 14:45. **Seulement si `F` existe** : pauses = les deux M15 suivant le dernier sommet, `F` ≤ 14:45, `Δ = min(fin(p) + 90 min, 15:00)`, aucune bougie lue se terminant après `Δ`, expiration exactement à `Δ`. **Seulement si `D` existe** : `F < D ≤ Δ`, `D` sur la grille de l'unité, stop et cible présents |
 | C5 | **Aucune bougie réutilisée** | dans une séance et une trajectoire, les M15 de deux configurations (fenêtre d'impulsion, extensions, pauses, et M15 de sortie en comparaison) sont disjointes ; toute M15 d'une fenêtre commence à l'instant de reprise ou après |
-| C6 | **Recalcul distinct** | pour la **première configuration de chaque séance**, **séances sans configuration comprises** (les deux doivent n'en trouver aucune) : reconnaissance (`t_j`, sens, `O`, `o`) et formation (`F` avec `E` et `p` finaux, ou cause et instant de la fin avant `F`, impulsion prolongée comprise) recalculées par une implémentation distincte de `configuration_from`, écrite pour ce contrôle sur les M15 lues : 0 différence. Aucun champ postérieur à `F` n'est comparé. Ce recalcul est distinct du code, pas de la lecture de la fiche par son auteur, et réutilise l'ATR H1 du moteur ; il complète les tests synthétiques sans les remplacer |
+| C6 | **Recalcul distinct** | pour la **première configuration de chaque séance**, **séances sans configuration comprises** (les deux doivent n'en trouver aucune) : reconnaissance (`t_j`, sens, `O`, `o`) et formation (`F` avec `E` et `p` finaux, ou cause et instant de la fin avant `F`, impulsion prolongée comprise) recalculées par une implémentation distincte de `configuration_from`, écrite pour ce contrôle sur les M15 lues : 0 différence. Aucun champ postérieur à `F` n'est comparé. Portée : recalcul distinct **de la reconnaissance et de la formation**, avec **ATR H1 partagé** (celui du moteur) ; ce n'est pas une vérification indépendante de l'ATR. Il est distinct du code, pas de la lecture de la fiche par son auteur, et complète les tests synthétiques sans les remplacer |
 | C7 | Étapes communes M5 / M15 | pour chaque séance, **sans configuration comprise** : M15 examinées de la première recherche, puis reconnaissance et formation de la première configuration (mêmes champs que C6), identiques entre les deux trajectoires. Les champs fixés après `F` (sortie, `D`, `FL`, stop, cible) sont **exclus** de l'égalité |
 | C8 | ATR H1 | `A` lu sur la dernière H1 terminée au plus tard au début de la fenêtre d'impulsion, états connaissables à `t_j` ; aucune H1 de la fenêtre lue |
-| C9 | Anti-fuite, entrées et paramètres | 0 tick lu ; aucune bougie lue après le 2022-01-01 ; empreintes M5, M15 et H1 égales à celles de l'audit **avant toute lecture**, identiques avant et après ; paramètres enregistrés dans chaque rapport : `Day02Params()` et `Day02Params(trigger=Trigger.M15)`, seul `trigger` diffère |
+| C9 | Anti-fuite, entrées et paramètres | 0 tick lu ; aucune bougie lue après le 2022-01-01 ; empreintes **complètes** de M5, M15 et H1 égales aux références du §2 **avant toute lecture** ; empreintes de M5, M15, H1 et du rapport de qualité identiques avant et après ; sur la fenêtre officielle, 383 trous chargés ; paramètres enregistrés dans chaque rapport : `Day02Params()` et `Day02Params(trigger=Trigger.M15)`, seul `trigger` diffère |
 | C10 | Provenance | commit et état de l'arbre capturés **au lancement**, arbre propre exigé ; commande enregistrée ; changements pendant le passage contrôlés à part, à la fin : bloquants s'ils touchent le code (`src/`, `pyproject.toml`, `uv.lock`) ou le commit, rapportés sinon |
 
 Aucun nombre de configurations ni de sorties confirmées n'est fixé à l'avance : il n'existe pas de

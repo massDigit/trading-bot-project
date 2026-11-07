@@ -32,10 +32,12 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
+from forex_bot.backtest.bar_state import BarState, bar_state
 from forex_bot.backtest.data import load_bars, load_gaps, require_development_window
 from forex_bot.backtest.day01 import LONDON, M5, M15, bar_ok, london
 from forex_bot.backtest.day01_availability import CANDLES_SHA256, clocks, jsonable, read_candles
 from forex_bot.backtest.day02 import (
+    ATR_UNAVAILABLE,
     EXIT,
     FLAG_DATA,
     PROLONGED,
@@ -55,6 +57,7 @@ from forex_bot.backtest.day02_engine import Day02Backtest
 from forex_bot.backtest.engine import ResearchConfig
 from forex_bot.backtest.explore import RESEARCH_COSTS
 from forex_bot.backtest.feed import Silence, classify_silence
+from forex_bot.backtest.s2 import ContinuousWilderAtr
 from forex_bot.history.bars import Gap
 from forex_bot.history.calendar import Timeframe, expected_open_minutes
 from forex_bot.history.intraday import NO_TICK, NO_VALID_TICK, SUBSLOTS_FLAG, Content, Grid
@@ -64,8 +67,14 @@ from forex_bot.risk import Side
 SOURCE, INSTRUMENT = "dukascopy", "EURUSD"
 TOOL = "forex-day02-availability"
 LOT = "intraday_2015_2021_day01_5min"  # audited 5 min lot, convention extended to DAY_02 (ADR-026)
-# Only the first 8 hex digits of the H1 hash are published (data bilan): the full value is recorded.
-H1_SHA256_PREFIX = "a7c7f8b8"
+# Full H1 hash recorded before and after both intraday audits (data/reports/intraday_dukascopy_EURUSD_
+# 2015_2021.json, commit 36daea1, clean tree; and its 5 min run, commit c0272cc): existing_bars_sha256.
+H1_SHA256 = "a7c7f8b82ac55828bbbc25b8fd87c64cac99efb5a977187c47b381480802c585"
+QUALITY_REPORT = "quality_dukascopy_EURUSD.json"
+# No audit recorded the hash of the quality report: it is recorded before and after the run, without a
+# historical reference. Its content is anchored by the gap count loaded up to 2022-01-01 in the DAY_01
+# performance runs (bilan DAY_01, 383 gaps), on the official window only.
+GAPS_ANCHOR = 383
 OFFICIAL_WINDOW = (datetime(2015, 1, 1, tzinfo=UTC), datetime(2022, 1, 1, tzinfo=UTC))
 # Independent count of the calendar (operator, 2026-11-07); applies to the full official window only.
 CALENDAR_ANCHOR = {"weekdays": 1827, "excluded": 11, "sessions": 1816}
@@ -78,6 +87,11 @@ FULL = (time(7), time(17))  # whole DAY_02 window, descriptive (sheet §4.1)
 FORMATION_ENDS = (FLAG_DATA, TOO_DEEP, PROLONGED, WINDOW_END)  # before F
 EXIT_ENDS = (FLAG_DATA, TOO_DEEP, TOO_LONG, WINDOW_END, EXIT)  # after F
 NOT_FORMED = "configuration terminée avant la formation du drapeau"
+# Why the H1 ATR is unavailable at an examined close (protocol §4.4), from the H1 known then only.
+ATR_INITIAL = "amorçage : historique H1 initial insuffisant"
+ATR_ABSENT_H1 = "interruption : H1 prévue absente"
+ATR_UNUSABLE_H1 = "interruption : H1 inutilisable"
+ATR_UNDETERMINED = "non déterminée"
 NO_EXIT = "pas de sortie confirmée"
 
 
@@ -116,6 +130,7 @@ class SearchLine:
     resume_after: str
     search: Search
     atr_reads: dict[datetime, tuple[datetime, datetime | None, Decimal | None]] = field(default_factory=dict)
+    atr_causes: dict[datetime, tuple[str, str | None]] = field(default_factory=dict)  # unavailable ATR only
 
     @property
     def configuration(self) -> Configuration | None:
@@ -138,9 +153,51 @@ def _atr_recorder(engine: Day02Backtest, line: SearchLine) -> Callable[[datetime
         i = bisect.bisect_right(engine.h1_end, cutoff) - 1
         value = engine.atr_at(cutoff, known)
         line.atr_reads[known] = (cutoff, engine.h1_end[i] if i >= 0 else None, value)
+        if value is None or value <= 0:
+            line.atr_causes[known] = atr_cause(engine, cutoff, known)
         return value
 
     return atr
+
+
+def atr_cause(engine: Day02Backtest, cutoff: datetime, known: datetime) -> tuple[str, str | None]:
+    """Why the H1 ATR on the last H1 ended by `cutoff` is unavailable, with states known at `known`.
+
+    Diagnosis only, the ATR itself is unchanged: a fresh `ContinuousWilderAtr` (same rules, no cache)
+    on the H1 up to that last one, never a later H1. The usable run ending there starts at its anchor:
+    anchor 0, the run starts with the history (initial bootstrap); after an absent expected H1 or an
+    unusable one, an interruption; an anchor beyond the last H1 means that H1 is itself unusable.
+    Anything else stays explicitly undetermined."""
+    i = bisect.bisect_right(engine.h1_end, cutoff) - 1
+    if i < 0:
+        return ATR_INITIAL, "aucune H1 terminée avant la fenêtre"
+    cache: dict[int, BarState] = {}
+
+    def state(j: int) -> BarState:
+        if j not in cache:
+            cache[j] = bar_state(
+                engine.h1[j], known, engine.gaps, engine.config.gap_threshold, engine.config.documented_closures
+            )
+        return cache[j]
+
+    probe = ContinuousWilderAtr(engine.h1, engine.day02.atr_period)
+    value = probe.at(i, state)
+    if value is not None:
+        return ATR_UNDETERMINED, f"ATR {value} non positif"
+    anchor = probe._anchor
+    if anchor is None:
+        return ATR_UNDETERMINED, None
+    start = engine.h1[i]["start_utc"].isoformat()
+    if anchor > i:
+        return ATR_UNUSABLE_H1, f"H1 {start} inutilisable ; 0 H1 utilisable depuis la rupture"
+    known_run = f"{i - anchor + 1} H1 utilisables depuis {engine.h1[anchor]['start_utc'].isoformat()}"
+    if anchor == 0:
+        return ATR_INITIAL, known_run
+    if anchor in probe._holes:
+        return ATR_ABSENT_H1, f"H1 prévue absente avant {engine.h1[anchor]['start_utc'].isoformat()} ; {known_run}"
+    if not state(anchor - 1).usable:
+        return ATR_UNUSABLE_H1, f"H1 {engine.h1[anchor - 1]['start_utc'].isoformat()} inutilisable ; {known_run}"
+    return ATR_UNDETERMINED, known_run
 
 
 def no_position_path(day: date, engine: Day02Backtest, params: Day02Params) -> SessionPath:
@@ -186,6 +243,7 @@ def counts(paths: list[SessionPath]) -> dict[str, Any]:
     formation: dict[str, Counter[str]] = defaultdict(Counter)
     exit_stage: dict[str, Counter[str]] = defaultdict(Counter)
     per_session: dict[str, Counter[int]] = defaultdict(Counter)
+    atr: dict[str, Counter[str]] = defaultdict(Counter)
     for path in paths:
         for key in ("total", year_of(path.day)):
             c = by[key]
@@ -196,6 +254,8 @@ def counts(paths: list[SessionPath]) -> dict[str, Any]:
                 c["m15_examinées"] += len(line.search.examined) + (line.configuration is not None)
                 for e in line.search.examined:
                     causes[key][e.cause] += 1
+                    if e.cause == ATR_UNAVAILABLE:
+                        atr[key][line.atr_causes.get(e.t_utc, (ATR_UNDETERMINED, None))[0]] += 1
                 config = line.configuration
                 if config is None:
                     continue
@@ -212,6 +272,7 @@ def counts(paths: list[SessionPath]) -> dict[str, Any]:
         key: {
             "comptes": dict(by[key]),
             "m15_non_reconnues_par_cause": dict(causes[key]),
+            "atr_h1_indisponible_par_cause": dict(atr[key]),
             "fins_avant_formation": dict(formation[key]),
             "fins_après_formation": dict(exit_stage[key]),
             "configurations_par_séance": {str(k): v for k, v in sorted(per_session[key].items())},
@@ -304,8 +365,13 @@ def bound_errors(
                 err("dernier sommet différent de la dernière extension")
             length = (c.peak_start - c.origin_start) / M15 + 1
             if c.outcome == PROLONGED:
-                if length != p.max_impulse + 1 or c.ended_utc != c.peak_start + M15:
-                    err("impulsion prolongée mal datée")
+                # The first extension that takes the impulse beyond 6 M15 ends it, at its close; the
+                # impulse may then exceed 7 M15 (pauses between extensions count in its length).
+                before = c.extensions[-2] if len(c.extensions) > 1 else t - M15
+                if not c.extensions or (before - c.origin_start) / M15 + 1 > p.max_impulse:
+                    err("abandon après une impulsion déjà au-delà de 6 M15")
+                if length <= p.max_impulse or c.ended_utc != c.peak_start + M15:
+                    err("impulsion prolongée sans dépassement, ou abandon hors de la clôture de l'extension")
             elif length > p.max_impulse:
                 err("impulsion de plus de 6 M15 sans fin « prolongée »")
             if got(c.ended_utc) > london(day, p.last_decision):
@@ -719,16 +785,19 @@ def coverage(days: list[date], m5: Sequence[Mapping[str, Any]], m15: Sequence[Ma
                         causes[bar_cause(bar)] += 1
                     cursor += step
             part[grid.value] = {"créneaux": expected, "non_ok": sum(causes.values()), "causes": dict(causes)}
-        count, minutes, sessions = 0, 0.0, 0
+        distinct: set[tuple[datetime, datetime]] = set()
+        crossings, minutes, sessions = 0, 0.0, 0
         for day in days:
             a, b = london(day, lo), london(day, hi)
             hits = [(s, e) for s, e, _ in found[: bisect.bisect_left(starts, b)] if e > a]
             sessions += bool(hits)
-            count += len(hits)
+            crossings += len(hits)
+            distinct.update(hits)
             minutes += sum(expected_open_minutes(max(s, a), min(e, b)) for s, e in hits)
         part["silences_plus_de_5_min"] = {
-            "nombre": count,
-            "minutes_dans_la_fenêtre": round(minutes, 3),
+            "silences_distincts": len(distinct),  # each silence once, however many windows it crosses
+            "intersections_silence_séance": crossings,  # one per (silence, session window) pair
+            "minutes_dans_les_fenêtres": round(minutes, 3),
             "séances_touchées": sessions,
         }
         out[name] = part
@@ -860,21 +929,23 @@ def main(argv: list[str] | None = None) -> int:
     directory = args.data_dir / "bars" / SOURCE / INSTRUMENT
     candles = {g: directory / LOT / f"{g.value}.parquet" for g in Grid}
     h1_path = directory / f"{Timeframe.H1.value}.parquet"
-    before = {path.as_posix(): sha256_file(path) for path in (*candles.values(), h1_path)}
+    quality = args.data_dir / "reports" / QUALITY_REPORT
+    inputs = (*candles.values(), h1_path, quality)
+    before = {path.as_posix(): sha256_file(path) for path in inputs}
     wrong = [g.value for g, path in candles.items() if before[path.as_posix()] != CANDLES_SHA256[g]]
-    if not before[h1_path.as_posix()].startswith(H1_SHA256_PREFIX):
+    if before[h1_path.as_posix()] != H1_SHA256:
         wrong.append("1h")
     if wrong:
         print(f"empreintes {wrong} différentes de l'audit : aucune lecture", file=sys.stderr)
         return 2
     bars: dict[Grid, list[dict[str, Any]]] = {g: read_candles(path, args.end)[0] for g, path in candles.items()}
     h1 = load_bars(args.data_dir, SOURCE, INSTRUMENT, Timeframe.H1, args.start, args.end)
-    gaps = load_gaps(args.data_dir / "reports" / f"quality_{SOURCE}_{INSTRUMENT}.json", args.end)
+    gaps = load_gaps(quality, args.end)
     official = (args.start, args.end) == OFFICIAL_WINDOW
     report, details = availability(
         bars, h1, gaps, ResearchConfig(costs=RESEARCH_COSTS), args.start, args.end, official=official
     )
-    after = {path.as_posix(): sha256_file(path) for path in (*candles.values(), h1_path)}
+    after = {path.as_posix(): sha256_file(path) for path in inputs}
     late = [b["end_utc"] for g in Grid for b in bars[g] if b["end_utc"] > args.end]
     late += [b["end_utc"] for b in h1 if b["end_utc"] > args.end]
     c9 = report["checks"]["C9"]
@@ -882,11 +953,18 @@ def main(argv: list[str] | None = None) -> int:
         "before": before,
         "after": after,
         "unchanged": before == after,
-        "h1_prefixe_publié": H1_SHA256_PREFIX,
+        "références": {
+            "5m": CANDLES_SHA256[Grid.M5],
+            "15m": CANDLES_SHA256[Grid.M15],
+            "1h": H1_SHA256,
+            QUALITY_REPORT: "aucune référence historique : empreinte enregistrée au passage",
+        },
     }
     extra = (["empreintes des entrées modifiées pendant le passage"] if before != after else []) + (
         [f"{len(late)} bougie(s) lue(s) après la fin"] if late else []
     )
+    if official and len(gaps) != GAPS_ANCHOR:
+        extra.append(f"{len(gaps)} trous chargés ≠ {GAPS_ANCHOR} (passages DAY_01)")
     if extra:
         c9["ok"], c9["error_count"], c9["errors"] = False, c9["error_count"] + len(extra), [*c9["errors"], *extra]
     finish = end_check(launch, tree_state())
