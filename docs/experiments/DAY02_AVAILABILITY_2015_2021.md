@@ -3,8 +3,9 @@
 **Statut** : protocole **approuvé dans son principe** le 2026-11-07 (commit `3345afd`), avec quatre
 précisions intégrées (calendrier, couverture, portée des contrôles, mesures ; ADR-031). Fiche figée
 `docs/strategies/DAY_02_FLAG_CONTINUATION.md` (ADR-028), §10.1. Outil `forex-day02-availability`
-(`backtest/day02_availability.py`) et tests synthétiques écrits, **sans passage historique** ni
-lecture des données de recherche ; le passage sera lancé sur autorisation explicite. Cette étude ne lit aucun tick et ne produit ni entrée, ni transaction, ni gain ou perte.
+(`backtest/day02_availability.py`) et tests synthétiques écrits. Passage 2015-2021 autorisé et
+lancé le 2026-11-07 depuis `eb48d6c`, C1 à C10 conformes ; bilan agrégé
+`DAY02_AVAILABILITY_2015_2021_BILAN.md`, soumis à revue. Cette étude ne lit aucun tick et ne produit ni entrée, ni transaction, ni gain ou perte.
 Ce n'est ni une validation de performance, ni une autorisation de trading.
 
 ## 1. Objet
