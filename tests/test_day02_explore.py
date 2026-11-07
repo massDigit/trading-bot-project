@@ -12,6 +12,7 @@ import copy
 import dataclasses
 import json
 from datetime import date, time, timedelta
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -48,13 +49,14 @@ from forex_bot.backtest.day02 import (
     Attempt,
     Trigger,
 )
-from forex_bot.backtest.day02_availability import PARAMS, availability, study_days
+from forex_bot.backtest.day02_availability import PARAMS, PIP, availability, run_trajectory, study_days
 from forex_bot.backtest.day02_engine import Day02Backtest, Day02Result
 from forex_bot.backtest.day02_explore import (
     CLOSED_TARGET,
     NO_CONFIGURATION,
     Day02Run,
     all_trades,
+    approximation_gap,
     closings,
     compare_main,
     comparison_plan,
@@ -64,6 +66,7 @@ from forex_bot.backtest.day02_explore import (
     main,
     resumes,
     scenario_triggers,
+    session_lines,
     study_lines,
 )
 from forex_bot.backtest.engine import ResearchConfig, StopAtExecution
@@ -299,6 +302,61 @@ def test_unusable_data_after_the_flag_is_an_outcome_of_the_formed_flags() -> Non
     assert not funnel([attempt], [])["checks"]["formed_flags_conserved"]
 
 
+# ---------------------------------------------------------------- approximate indicator against the value at D
+
+
+def _gap_of(tmp_path: Path, ticks: list[Tick]) -> tuple[Run, dict[str, Any], dict[str, Any]]:
+    """The executed attempt of the session file, and the study's measures on the same candles."""
+    run = Run(tmp_path, ticks)
+    lines, errors = study_lines(run.study(), official=False)
+    checks, matched = controls(run.result, run.engine, run.days, lines, errors, PASSED, PASSED)
+    assert failed(checks) == []
+    (executed,) = [
+        a
+        for line in session_lines(run.result, run.engine, run.days, matched, "A")
+        for a in line["attempts"]
+        if a["trade"] is not None
+    ]
+    paths, engine = run_trajectory(Trigger.M5, run.m5, run.m15, run.h1, [], CONFIG, run.days)
+    return run, executed, day02_availability.measures(paths, engine)
+
+
+def test_the_approximation_gap_of_a_purchase_is_the_ask_at_d_minus_the_bid_close(tmp_path: Path) -> None:
+    _, executed, study = _gap_of(tmp_path, sheet_ticks(WINTER))
+    # By hand: last tick before D = 10:09:59.820, bid 1.13155 (the exit candle's bid close), ask
+    # 1.13157 = P_D; S = 1.13050. Value at D 1.13157 - 1.13050 = 10.7 pips; approximate indicator
+    # 1.13155 - 1.13050 = 10.5 pips; gap (1.13157 - 1.13155) / pip = +0.2 pip.
+    assert executed["decision"]["p_d"] == Decimal("1.13157") and executed["decision"]["stop"] == Decimal("1.13050")
+    assert executed["measures"]["stop_distance"]["pips"] == Decimal("10.7")
+    assert study["approché_clôture_moins_S_pips"]["valeurs"]["médiane"] == Decimal("10.5")
+    assert executed["approximation_gap_pips"] == Decimal("0.2")
+    assert executed["approximation_gap_pips"] == executed["measures"]["stop_distance"]["pips"] - Decimal("10.5")
+
+
+def test_the_approximation_gap_of_a_sale_is_the_bid_close_minus_the_bid_at_d(tmp_path: Path) -> None:
+    mirrored = [Tick(t.ts_utc, Decimal("2.26") - t.bid, Decimal("2.26") - t.bid + Decimal("0.00002")) for t in
+                sheet_ticks(WINTER)]  # fmt: skip
+    run, executed, study = _gap_of(tmp_path, mirrored)
+    # By hand: last tick before D, bid 2.26 - 1.13155 = 1.12845 (the exit candle's bid close) = P_D;
+    # S = ask_high of the flag 1.12927 + 0.25 A = 1.12952. Value at D 1.12952 - 1.12845 = 10.7 pips;
+    # approximate indicator 1.12952 - 1.12845 = 10.7 pips; gap (1.12845 - 1.12845) / pip = 0, where
+    # the former sides (close - ask at D) gave -0.2.
+    assert executed["decision"]["side"] == "SHORT"
+    assert executed["decision"]["p_d"] == Decimal("1.12845") and executed["decision"]["stop"] == Decimal("1.12952")
+    assert executed["measures"]["stop_distance"]["pips"] == Decimal("10.7")
+    assert study["approché_clôture_moins_S_pips"]["valeurs"]["médiane"] == Decimal("10.7")
+    assert executed["approximation_gap_pips"] == 0
+    # A bid at D away from the exit candle's close (1 pip lower): S - P_D grows by 1 pip, so does the gap.
+    attempt = next(a for a in run.result.attempts if a.decision is not None)
+    record = next(r for r in run.result.decisions if r.decision_utc == executed["d_utc"])
+    quote = record.known["quote"]
+    moved = dataclasses.replace(record, known={**record.known, "quote": {**quote, "bid": quote["bid"] - PIP}})
+    assert approximation_gap(attempt, moved, run.engine) == Decimal("1.0")
+    lower = {**quote, "ask": quote["ask"] - PIP}  # the ask does not enter a sale's gap
+    assert approximation_gap(attempt, dataclasses.replace(record, known={**record.known, "quote": lower}),
+                             run.engine) == 0  # fmt: skip
+
+
 # ---------------------------------------------------------------- closings, scenarios
 
 
@@ -326,7 +384,8 @@ def test_a_silence_during_a_position_requires_b_and_c(tmp_path: Path) -> None:
 def test_comparisons_are_planned_only_when_both_passes_exist() -> None:
     def report(trigger: str, b: bool, reject: bool) -> dict[str, Any]:
         triggers = {"scenario_b_required": b, "scenario_c_required": b, "reject_required": reject}
-        return {"config": {"trigger": trigger, "scenario": "A"}, "result": {}, "scenario_triggers": triggers}
+        config = {"trigger": trigger, "scenario": "A", "passage": "A"}
+        return {"config": config, "result": {}, "scenario_triggers": triggers}
 
     plan = comparison_plan(report("M5", True, False), report("M15", False, True))
     assert plan["A"].startswith("les deux passages existent")
@@ -335,7 +394,11 @@ def test_comparisons_are_planned_only_when_both_passes_exist() -> None:
     both = comparison_plan(report("M5", True, False), report("M15", True, False))
     assert both["B"].startswith("requis des deux côtés") and both["A_rejet"] == "non requis"
     with pytest.raises(ValueError, match="passage A"):
-        comparison_plan({"config": {"trigger": "M5", "scenario": "A"}}, report("M15", False, False))
+        comparison_plan({"config": {"trigger": "M5", "scenario": "A", "passage": "A"}}, report("M15", False, False))
+    rejection = report("M5", False, False)
+    rejection["config"]["passage"] = "A_rejet"  # the rejection pass is not the A pass
+    with pytest.raises(ValueError, match="passage A"):
+        comparison_plan(rejection, report("M15", False, False))
 
 
 # ---------------------------------------------------------------- end to end on a synthetic directory
@@ -410,6 +473,69 @@ def test_command_end_to_end_writes_the_reports_the_session_files_and_the_compari
     wrong = ["--m5-report", str(reports[Trigger.M5]), "--m15-report", str(reports[Trigger.M5])]
     assert compare_main([*wrong, *files, "--out", str(tmp_path / "no.json")]) == 2
     assert not (tmp_path / "no.json").exists()
+    # Each report records the hash of the session file it wrote.
+    recorded = json.loads(reports[Trigger.M5].read_text(encoding="utf-8"))["sessions_file"]
+    assert recorded["sha256"] == sha256_file(sessions[Trigger.M5]) and recorded["lines"] == 2
+
+
+def _pass(
+    window: list[str], study: Path, tmp_path: Path, trigger: Trigger, scenario: str, *rule: str
+) -> tuple[Path, Path]:
+    name = f"{trigger.value}_{scenario}{'_rejet' if rule else ''}"
+    out, sessions = tmp_path / f"{name}.json", tmp_path / f"{name}_sessions.jsonl"
+    argv = [*window, "--init-start", "2019-02-11", "--trigger", trigger.value, "--scenario", scenario, *rule]
+    assert main([*argv, "--availability", str(study), "--out", str(out), "--sessions-out", str(sessions)]) == 0
+    return out, sessions
+
+
+def test_compare_refuses_session_files_that_are_not_those_of_the_reports(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    data = _directory(tmp_path, monkeypatch, sheet_ticks(WINTER))
+    study = tmp_path / "study.jsonl"
+    window = ["--data-dir", str(data), *WINDOW]
+    assert day02_availability.main([*window, "--out", str(tmp_path / "s.json"), "--details-out", str(study)]) == 0
+    a = {t: _pass(window, study, tmp_path, t, "A") for t in Trigger}
+    b = {t: _pass(window, study, tmp_path, t, "B") for t in Trigger}
+    rejection = {t: _pass(window, study, tmp_path, t, "A", "--stop-at-execution", "REJECT") for t in Trigger}
+    reports = ["--m5-report", str(a[Trigger.M5][0]), "--m15-report", str(a[Trigger.M15][0])]
+    out = tmp_path / "compare.json"
+
+    def refused(m5: Path, m15: Path, reports: list[str] = reports) -> str:
+        capsys.readouterr()
+        assert compare_main([*reports, "--m5", str(m5), "--m15", str(m15), "--out", str(out)]) == 2
+        assert not out.exists()
+        return capsys.readouterr().err
+
+    # The A reports with the B session files: refused, nothing written.
+    assert "empreinte différente" in refused(b[Trigger.M5][1], b[Trigger.M15][1])
+    # One file substituted between A and A with rejection, on one side then on the other.
+    assert "M5 :" in refused(rejection[Trigger.M5][1], a[Trigger.M15][1])
+    assert "M15 :" in refused(a[Trigger.M5][1], rejection[Trigger.M15][1])
+    # The rejection reports with the A files, and A against A with rejection: refused as well.
+    swapped = ["--m5-report", str(rejection[Trigger.M5][0]), "--m15-report", str(rejection[Trigger.M15][0])]
+    assert "empreinte différente" in refused(a[Trigger.M5][1], a[Trigger.M15][1], swapped)
+    mixed = ["--m5-report", str(a[Trigger.M5][0]), "--m15-report", str(rejection[Trigger.M15][0])]
+    assert "règle d'exécution" in refused(a[Trigger.M5][1], rejection[Trigger.M15][1], mixed)
+    # Even a report whose recorded hash was rewritten to a B file: its lines name another pass.
+    report = json.loads(a[Trigger.M5][0].read_text(encoding="utf-8"))
+    report["sessions_file"]["sha256"] = sha256_file(b[Trigger.M5][1])
+    errors = day02_explore.sessions_file_errors(report, b[Trigger.M5][1])
+    assert errors == ["lignes d'un autre scenario que le rapport (A)", "lignes d'un autre passage que le rapport (A)"]
+    report = json.loads(a[Trigger.M5][0].read_text(encoding="utf-8"))
+    report["sessions_file"]["sha256"] = sha256_file(rejection[Trigger.M5][1])
+    errors = day02_explore.sessions_file_errors(report, rejection[Trigger.M5][1])
+    assert errors == [
+        f"lignes d'un autre stop_at_execution que le rapport ({StopAtExecution.FILL_THEN_LIQUIDATE.value})",
+        "lignes d'un autre passage que le rapport (A)",
+    ]
+    # The matching files: the comparison is written, for A and for A with rejection.
+    assert (
+        compare_main([*reports, "--m5", str(a[Trigger.M5][1]), "--m15", str(a[Trigger.M15][1]), "--out", str(out)]) == 0
+    )
+    assert json.loads(out.read_text(encoding="utf-8"))["first_configuration_same_state"]["sessions"] == 2
+    files = ["--m5", str(rejection[Trigger.M5][1]), "--m15", str(rejection[Trigger.M15][1])]
+    assert compare_main([*swapped, *files, "--out", str(tmp_path / "rejet.json")]) == 0
 
 
 def test_command_end_to_end_withholds_results_when_the_study_disagrees(

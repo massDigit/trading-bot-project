@@ -4,7 +4,9 @@
 §5.2, entonnoir §6, comparaisons entre scénarios §8) et deux choix retenus (franchissements
 journaliers et hebdomadaires non décrits, §7 ; recalcul distinct C6 sur toutes les tentatives, §5.1)
 (ADR-034). Outil `forex-day02-backtest` et `forex-day02-compare` et tests synthétiques écrits ;
-**figé au commit de l'outil**, soumis à revue. Aucun passage historique. Étape 6 de la fiche figée `docs/strategies/DAY_02_FLAG_CONTINUATION.md` (§10,
+revue de f705858 : deux corrections intégrées (écart entre indicateur approché et valeur à `D`,
+§7 ; rattachement des détails par séance à leur rapport, §8) ; **figé au commit de ces
+corrections**, soumis à revue. Aucun passage historique. Étape 6 de la fiche figée `docs/strategies/DAY_02_FLAG_CONTINUATION.md` (§10,
 ADR-028), après la clôture de l'étude de disponibilité (étape 5, PR #25, bilan
 `DAY02_AVAILABILITY_2015_2021_BILAN.md`, ADR-033). Ni validation de performance, ni autorisation de
 trading. **Les passages restent subordonnés à la décision de l'opérateur sur les conditions IG
@@ -236,13 +238,20 @@ aucune ; sa conservation dans les comptes est testée.
   non exécutée à la fin.
 - **Entrées non exécutées** : expirées, annulées pour interruption (silence décrit par l'événement
   du moteur, conservé dans le détail local), rejetées.
+- **Portée de deux descriptions** (retenue après la revue de f705858) : une annulation pour
+  interruption est décrite **par l'événement enregistré par le moteur**, sans durée de silence
+  recalculée ; une transaction indéterminée l'est **par les trous enregistrés par le moteur**, sans
+  nouvelle lecture des ticks. Ni l'une ni l'autre ne mesure davantage que ce que le moteur a
+  enregistré.
 - **Mesures par entrée** (détail local hors Git, distributions dans l'agrégé ; aucune ne sert de
   filtre ; une mesure non définissable est absente avec son motif) : distance du stop `P_D − S` en
   pips et en multiples de `A` ; rapports des distances estimé à `D`, net estimé à `D` et obtenu à
   l'exécution, côte à côte ; part des coûts fixes dans le risque (définition de DAY_01) ; **écart
   entre les indicateurs approchés de l'étude** (depuis la clôture de la bougie de sortie) **et les
-  valeurs à `D`**, sur les sorties confirmées rapprochées au §5.3 (valeur à `D` moins indicateur
-  approché, distance au stop, en pips) ; pente du drapeau des entrées décidées (descriptif ; le
+  valeurs à `D`**, sur les sorties confirmées rapprochées au §5.3 : distance au stop à `D`
+  `|P_D − S|` moins l'indicateur approché `|clôture bid − S|`, en pips. `P_D` étant l'ask à `D` à
+  l'achat et le bid à `D` à la vente, l'écart vaut `(ask à D − clôture bid) / pip` à l'achat et
+  `(clôture bid − bid à D) / pip` à la vente ; le stop s'élimine ; pente du drapeau des entrées décidées (descriptif ; le
   nombre de pauses vaut 2 par construction).
 - **Répartitions** : par jour de la semaine ; par heure de décision (Londres) ; GMT, BST et semaines
   de décalage ; par sens.
@@ -261,8 +270,19 @@ aucune ; sa conservation dans les comptes est testée.
 **Existence des deux passages** (précision du 2026-11-07). B, C et le rejet sont déclenchés
 séparément pour M5 et M15 (§4). Une comparaison entre les deux trajectoires d'un même scénario n'est
 produite **que si les deux passages existent** et ont passé leurs contrôles : `forex-day02-compare`
-exige les deux rapports (même scénario, même règle d'exécution, déclenchements M5 et M15) et refuse
-sinon (code 2, aucune sortie). Le plan des comparaisons est établi depuis les deux passages A
+exige les deux rapports (même scénario, même règle d'exécution, même fenêtre, déclenchements M5 et
+M15) et refuse sinon (code 2, aucune sortie).
+
+**Rattachement des détails à leur rapport** (correction du 2026-11-07). Chaque rapport enregistre
+l'empreinte SHA-256 et le nombre de lignes du détail par séance qu'il a écrit (`sessions_file`) ;
+chaque ligne du détail nomme le passage qui l'a produite : déclenchement, scénario, règle
+d'exécution, passage (`A`, `B`, `C` ou `A_rejet`, ce dernier pour la règle de rejet) et fenêtre.
+Avant toute comparaison, `forex-day02-compare` vérifie pour chaque côté que l'empreinte du détail
+fourni est celle enregistrée par son rapport, puis que chaque ligne porte le déclenchement, le
+scénario, la règle d'exécution, le passage et la fenêtre de ce rapport. Un détail d'un autre
+passage (par exemple les détails B fournis avec les rapports A, ou un détail substitué entre A et
+A avec rejet) est refusé : code 2, aucune comparaison écrite. Le plan (`--plan`) n'accepte que les
+deux rapports du passage `A`, pas ceux du passage `A_rejet`. Le plan des comparaisons est établi depuis les deux passages A
 (`--plan`) : un scénario requis d'un seul côté est **rapporté comme tel**, sans comparaison, et
 l'autre côté **n'est pas lancé** pour compléter le tableau.
 
@@ -338,7 +358,8 @@ uv run forex-day02-backtest --init-start 2015-01-01 --start 2015-01-01 --end 202
 
 La fenêtre officielle (valeur par défaut) active les ancrages : empreinte complète du JSONL de
 l'étude, 3 632 lignes et 1 816 dates, 383 trous. Le rapport JSON a un résumé Markdown (même nom,
-`.md`) ; le détail par séance n'est écrit que si les contrôles passent.
+`.md`) ; le détail par séance n'est écrit que si les contrôles passent, et son empreinte est alors
+enregistrée dans le rapport (§8).
 
 Ordre prévu :
 1. `m5_a` (ci-dessus) ; `m15_a` : même commande avec `--trigger M15`, sorties `*_m15_a*` ;
@@ -358,8 +379,8 @@ détails hors Git.
 
 1. Protocole soumis à l'opérateur ; base approuvée le 2026-11-07, précisions intégrées (ADR-034).
 2. Outil `forex-day02-backtest`, `forex-day02-compare` et tests synthétiques (dont des tentatives
-   faussées pour les contrôles des §5 et §6), sans passage historique : fait ; protocole figé au
-   commit de l'outil, soumis à revue.
+   faussées pour les contrôles des §5 et §6), sans passage historique : fait ; revue de f705858,
+   deux corrections (§7, §8) ; protocole figé au commit de ces corrections, soumis à revue.
 3. Décision de l'opérateur sur les conditions IG (§10) : **ouverte**.
 4. Passages 2015-2021, **sur autorisation explicite**, dans l'ordre du §11.
 

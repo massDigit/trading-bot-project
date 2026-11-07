@@ -145,6 +145,11 @@ COINCIDENT = "échéances simultanées"
 PENDING_CLOSING = "clôture en attente à la fin"
 ANNOTATIONS = (INDETERMINATE, UNPLANNED_NIGHT, CLOSE_AFTER_INTERRUPTION, COINCIDENT, PENDING_CLOSING)
 STOP_DISTANCE = "P_D − S : prix d'entrée estimé à D jusqu'au stop, en pips et en multiples de A (ATR H1 figé)"
+APPROXIMATION_GAP = (
+    "|P_D − S| moins |clôture bid de la bougie de sortie − S|, en pips, sorties confirmées des tentatives "
+    "rapprochées de l'étude : (ask à D − clôture bid) à l'achat, (clôture bid − bid à D) à la vente ; "
+    "P_D est l'ask à D à l'achat, le bid à D à la vente"
+)
 
 
 # ---------------------------------------------------------------------- run
@@ -745,8 +750,10 @@ def trade_line(trade: Trade, marks: list[str]) -> dict[str, Any]:
 
 
 def approximation_gap(attempt: Attempt, record: DecisionRecord | None, engine: Day02Backtest) -> Decimal | None:
-    """Value at D minus the study's approximate indicator, on the distance to the stop, in pips: bid at
-    D minus the exit candle's bid close for a purchase, that close minus the ask at D for a sale."""
+    """Value at D minus the study's approximate indicator, on the distance to the stop, in pips. The
+    value at D is |P_D − S| with P_D the ask at D for a purchase and the bid at D for a sale; the study
+    measures |bid close of the exit candle − S|. Hence (ask at D − bid close) for a purchase and
+    (bid close − bid at D) for a sale: the stop cancels out."""
     c, quote = attempt.search.configuration, None if record is None else record.known.get("quote")
     if c is None or c.ended_utc is None or quote is None:
         return None
@@ -754,15 +761,26 @@ def approximation_gap(attempt: Attempt, record: DecisionRecord | None, engine: D
     if bar is None:
         return None
     long = c.side is Side.LONG
-    gap: Decimal = quote["bid"] - bar["bid_close"] if long else bar["bid_close"] - quote["ask"]
+    gap: Decimal = quote["ask"] - bar["bid_close"] if long else bar["bid_close"] - quote["bid"]
     return gap / PIP
 
 
+def passage_of(scenario: str, rule: StopAtExecution) -> str:
+    """Name of the pre-registered pass (protocol §4): the scenario, with the rejection rule apart."""
+    return f"{scenario}_rejet" if rule is StopAtExecution.REJECT else scenario
+
+
 def session_lines(
-    result: Day02Result, engine: Day02Backtest, days: Sequence[date], matched: set[int], scenario: str
+    result: Day02Result,
+    engine: Day02Backtest,
+    days: Sequence[date],
+    matched: set[int],
+    scenario: str,
+    window: tuple[datetime, datetime] | None = None,
 ) -> list[dict[str, Any]]:
     """One line per session of the study: its attempts as the engine lived them, with their trade and
-    measures; a session without search carries its justification."""
+    measures; a session without search carries its justification. Each line names the pass that
+    produced it (trigger, scenario, execution rule, window), checked again before any comparison."""
     config, sessions = result.config, by_session(result.attempts)
     by_decision = {t.decided_utc: t for t in all_trades(result)}
     records = {r.decision_utc: r for r in result.decisions}
@@ -800,6 +818,9 @@ def session_lines(
             {
                 "trigger": result.day02_params.trigger.value,
                 "scenario": scenario,
+                "stop_at_execution": config.stop_at_execution.value,
+                "passage": passage_of(scenario, config.stop_at_execution),
+                "window": None if window is None else {"start": window[0], "end": window[1]},
                 "day": day,
                 "without_search": skipped.get(day) if day not in sessions else None,
                 "attempts": attempts,
@@ -988,8 +1009,7 @@ def performance(
             "per_session": per_session(lines),
             "ratios": entry_ratios(lines),
             "approximation_gap_pips": {
-                "definition": "valeur à D moins indicateur approché de l'étude, distance au stop, attentes "
-                              "rapprochées de l'étude seulement",
+                "definition": APPROXIMATION_GAP,
                 "values": _stats([g for g in gaps if g is not None]),
             },
             "flag_slope_atr_multiple": {
@@ -1035,7 +1055,7 @@ def comparison_plan(m5: dict[str, Any], m15: dict[str, Any]) -> dict[str, Any]:
     to fill the table."""
     for name, report, trigger in (("M5", m5, Trigger.M5), ("M15", m15, Trigger.M15)):
         config = report.get("config", {})
-        if "result" not in report or config.get("trigger") != trigger.value or config.get("scenario") != "A":
+        if "result" not in report or config.get("trigger") != trigger.value or config.get("passage") != "A":
             raise ValueError(f"{name} : rapport d'un passage A {trigger.value} conforme attendu")
     a, b = m5["scenario_triggers"], m15["scenario_triggers"]
     plan = {"A": "les deux passages existent : comparaison à produire"}
@@ -1271,11 +1291,18 @@ def main(argv: list[str] | None = None) -> int:
         path = getattr(args, f"{name}_reference")
         if path is not None:
             references[name] = json.loads(path.read_text(encoding="utf-8"))
-    lines = session_lines(result, engine, days, matched, args.scenario)
+    lines = session_lines(result, engine, days, matched, args.scenario, (args.start, args.end))
     body = gated_report(
         checks, jsonable(scenario_triggers(result)), lambda: performance(result, engine, lines, args.start, references)
     )
     passed = "result" in body
+    sessions_file = None
+    if passed:  # written only for a pass that passed its controls; its hash ties it to this report
+        args.sessions_out.parent.mkdir(parents=True, exist_ok=True)
+        args.sessions_out.write_text(
+            "".join(json.dumps(jsonable(line), ensure_ascii=False) + "\n" for line in lines), encoding="utf-8"
+        )
+        sessions_file = {"path": str(args.sessions_out), "sha256": sha256_file(args.sessions_out), "lines": len(lines)}
     report: dict[str, Any] = jsonable(
         {
             "generated_at_utc": datetime.now(UTC).isoformat(),
@@ -1285,6 +1312,7 @@ def main(argv: list[str] | None = None) -> int:
             "config": {
                 "trigger": trigger.value,
                 "scenario": args.scenario,
+                "passage": passage_of(args.scenario, config.stop_at_execution),
                 "gap_scenario": SCENARIOS[args.scenario].value,
                 "stop_type": config.stop_type.value,
                 "stop_at_execution": config.stop_at_execution.value,
@@ -1300,6 +1328,7 @@ def main(argv: list[str] | None = None) -> int:
                        "tick_files": len(files), "ticks": seen[0], "sessions": len(days),
                        "availability": str(args.availability)},
             **body,
+            "sessions_file": sessions_file,
             "seconds": round(time.perf_counter() - began, 1),
             "peak_rss_mib": round(_peak_rss_mib(), 1),
         }
@@ -1310,12 +1339,32 @@ def main(argv: list[str] | None = None) -> int:
     if not passed:
         print(f"ANOMALIE : {body['anomaly']} ({args.out})")
         return 2
-    args.sessions_out.parent.mkdir(parents=True, exist_ok=True)
-    args.sessions_out.write_text(
-        "".join(json.dumps(jsonable(line), ensure_ascii=False) + "\n" for line in lines), encoding="utf-8"
-    )
     print(f"rapport écrit : {args.out} ({report['seconds']} s, {report['peak_rss_mib']} Mio)")
     return 0
+
+
+def sessions_file_errors(report: dict[str, Any], path: Path) -> list[str]:
+    """The session file must be the one the report wrote (hash recorded at the run) and every line must
+    name the report's pass: trigger, scenario, execution rule (A apart from A with rejection), window."""
+    recorded = report.get("sessions_file") or {}
+    if not recorded.get("sha256"):
+        return ["aucun fichier par séance enregistré dans le rapport"]
+    if sha256_file(path) != recorded["sha256"]:
+        return [f"{path} n'est pas le fichier par séance écrit par ce rapport (empreinte différente)"]
+    config, window = report["config"], report["window"]
+    expected = {
+        "trigger": config["trigger"],
+        "scenario": config["scenario"],
+        "stop_at_execution": config["stop_at_execution"],
+        "passage": config["passage"],
+        "window": {"start": window["start"], "end": window["end"]},
+    }
+    lines = [json.loads(r) for r in path.read_text(encoding="utf-8").splitlines()]
+    errors = [] if len(lines) == recorded.get("lines") else [f"{len(lines)} lignes ≠ {recorded.get('lines')}"]
+    for key, value in expected.items():
+        if any(line.get(key) != value for line in lines):
+            errors.append(f"lignes d'un autre {key} que le rapport ({value})")
+    return errors
 
 
 def compare_main(argv: list[str] | None = None) -> int:
@@ -1344,16 +1393,30 @@ def compare_main(argv: list[str] | None = None) -> int:
     for name, report in (("M5", m5_report), ("M15", m15_report)):
         if "result" not in report or report.get("config", {}).get("trigger") != name:
             reasons.append(f"{name} : passage absent, non conforme ou d'un autre déclenchement")
-    keys = ("scenario", "stop_at_execution")
+    keys = ("scenario", "stop_at_execution", "passage")
     if [m5_report.get("config", {}).get(k) for k in keys] != [m15_report.get("config", {}).get(k) for k in keys]:
-        reasons.append("les deux passages ne sont pas du même scénario")
+        reasons.append("les deux passages ne sont pas du même scénario ni de la même règle d'exécution")
+    if m5_report.get("window") != m15_report.get("window"):
+        reasons.append("les deux passages ne portent pas sur la même fenêtre")
     if args.m5 is None or args.m15 is None:
         reasons.append("détails --m5 et --m15 attendus")
     if reasons:
         print(f"comparaison non produite : {' ; '.join(reasons)}", file=sys.stderr)
         return 2
-    with args.m5.open(encoding="utf-8") as a, args.m15.open(encoding="utf-8") as b:
-        report = compare_triggers((json.loads(r) for r in a), (json.loads(r) for r in b))
+    sides = {}
+    for name, report, path in (("M5", m5_report, args.m5), ("M15", m15_report, args.m15)):
+        errors = sessions_file_errors(report, path)
+        reasons += [f"{name} : {e}" for e in errors]
+        if not errors:
+            sides[name] = [json.loads(r) for r in path.read_text(encoding="utf-8").splitlines()]
+    if reasons:
+        print(f"comparaison non produite : {' ; '.join(reasons)}", file=sys.stderr)
+        return 2
+    try:
+        report = compare_triggers(sides["M5"], sides["M15"])
+    except ValueError as error:
+        print(f"comparaison non produite : {error}", file=sys.stderr)
+        return 2
     args.out.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"comparaison écrite : {args.out}")
     return 0
