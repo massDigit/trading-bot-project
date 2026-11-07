@@ -1,7 +1,7 @@
 # DAY_02 — étude de disponibilité 2015-2021 : bilan agrégé
 
-**Statut** : bilan du passage autorisé le 2026-11-07, soumis à revue. Protocole :
-`docs/experiments/DAY02_AVAILABILITY_2015_2021.md` (ADR-030 à ADR-032).
+**Statut** : bilan du passage autorisé le 2026-11-07, validé après précisions ; étude close (ADR-033). Protocole :
+`docs/experiments/DAY02_AVAILABILITY_2015_2021.md` (ADR-030 à ADR-033).
 
 **Portée** : disponibilité sur les bougies seules, « parcours sans position ». Aucun tick lu,
 aucune entrée simulée, aucun résultat de performance, aucun entraînement, aucune donnée 2022-2025.
@@ -183,11 +183,13 @@ Aucun silence ne traverse ici plus d'une fenêtre.
 
 ## 7. Différences M5 / M15
 
-Rapprochement par date de Londres depuis le détail local (1 816 dates de chaque côté, sans doublon).
+Rapprochement par date de Londres depuis le détail local (1 816 dates, exactement une ligne M5 et
+une ligne M15 par date, sans doublon), sur la **première recherche** de chaque séance.
 
-- **Avant `F`** : identiques pour toutes les séances (contrôle C7) : 197 séances sans configuration,
-  1 031 premières configurations terminées avant `F`, avec la même issue.
-- **Première configuration ayant formé un drapeau** (588 séances) :
+- **Partition des 1 816 séances** selon leur première configuration, identique dans les deux
+  trajectoires (contrôle C7) : 197 séances sans configuration ; 1 031 dont la première configuration
+  se termine avant `F`, avec la même issue ; **588 dont la première configuration atteint `F`**.
+- **Séances dont la première configuration forme un drapeau** (588 séances, sous-ensemble ci-dessus) :
 
   | M5 \ M15 | sortie confirmée | pas de sortie |
   |---|---:|---:|
@@ -195,19 +197,24 @@ Rapprochement par date de Londres depuis le détail local (1 816 dates de chaque
   | pas de sortie | 0 | 411 |
 
   Les 27 sorties M5 sans sortie M15 se terminent en M15 par consolidation trop longue (21), repli
-  trop profond (4) ou fin de fenêtre (2). Aucune sortie M15 sans sortie M5.
-- **Écart d'instant** `D(M15) − D(M5)` sur les 150 sorties communes : 0 min 52, 5 min 34, 10 min 50,
-  20 min 3, 25 min 8, 40 min 1, 50 min 2 ; jamais négatif.
+  trop profond (4) ou fin de fenêtre (2).
+- **Écart d'instant** `D(M15) − D(M5)` sur les 150 sorties communes de ces premières configurations :
+  0 min 52, 5 min 34, 10 min 50, 20 min 3, 25 min 8, 40 min 1, 50 min 2 ; jamais négatif.
+- **Portée** : l'absence de sortie M15 sans sortie M5 et le signe des décalages de `D` ne valent que
+  pour ces **premières configurations appariées** ; ils ne sont pas étendus aux configurations
+  suivantes.
 - **Configurations suivantes** : elles dépendent de l'instant de reprise (`D`), qui diffère entre
-  trajectoires : 1 811 séances ont le même nombre de configurations, 5 en ont une de moins en M15.
-  Les totaux 307 / 272 sorties confirmées ne sont pas un rapprochement exact.
+  trajectoires et rompt l'appariement : 1 811 séances ont le même nombre de configurations, 5 en ont
+  une de moins en M15. Les totaux 307 / 272 sorties confirmées ne sont pas un rapprochement exact.
 
 ## 8. Lecture et limites
 
 - Le parcours sans position **ne simule pas** la suspension de la recherche pendant une position :
   les configurations au-delà de la première de chaque séance, et donc les totaux, **ne sont pas
   attendus égaux** à ceux du passage de performance (protocole §7). Seule la première configuration
-  de chaque séance est comparable à l'identique.
+  de chaque séance est comparable à l'identique, **et seulement si l'état de reprise est le même** :
+  une position héritée de la veille (nuit non prévue) peut retarder ou empêcher la première recherche
+  du passage de performance, qui commence alors après la fermeture de cette position et non à 07:00.
 - 307 sorties confirmées en M5 et 272 en M15 sont des instants `D`, **pas des entrées** : les refus à
   `D` (cotation, stop admissible, cible déjà dépassée, taille) ne sont pas évalués.
 - Couverture élevée dans les deux fenêtres (moins de 0,02 % de bougies non `OK`) ; l'indisponibilité
@@ -220,19 +227,31 @@ Rapprochement par date de Londres depuis le détail local (1 816 dates de chaque
 
 ## 9. Reproduction depuis le détail local (hors Git)
 
+Exécuté le 2026-11-07 sur le JSONL existant (aucune lecture de cotation) : retrouve les totaux du
+§3, la partition 197 / 1 031 / 588, la matrice 150 / 27 / 0 / 411 et les décalages de `D` du §7.
+
 ```python
 import json
 from collections import Counter
+from datetime import datetime
 
 path = "data/reports/backtests/day02_availability_2015_2021_eb48d6c_details.jsonl"
+CONFIRMED = "sortie confirmée"
 lines = {}
+n = 0
 for n, raw in enumerate(open(path, encoding="utf-8"), 1):
     d = json.loads(raw)
     key = (d["day"], d["trigger"])
     if key in lines:
         raise SystemExit(f"doublon {key}")
     lines[key] = d
-assert n == len(lines) == 3632 and len({k[0] for k in lines}) == 1816
+days = sorted({day for day, _ in lines})
+per_day = Counter(day for day, _ in lines)
+assert set(t for _, t in lines) == {"M5", "M15"}
+assert all(per_day[day] == 2 for day in days)  # exactly one M5 and one M15 line per date
+assert all((day, t) in lines for day in days for t in ("M5", "M15"))
+assert n == len(lines) == 3632 and len(days) == 1816
+
 for trigger in ("M5", "M15"):
     ends = Counter(
         s["configuration"]["outcome"]
@@ -240,4 +259,33 @@ for trigger in ("M5", "M15"):
         for s in d["searches"] if s["configuration"]
     )
     print(trigger, sum(ends.values()), dict(ends))
+
+# First search of each session: identical before F in both trajectories (C7).
+def first(day, trigger):
+    return lines[(day, trigger)]["searches"][0]["configuration"]
+
+groups = Counter()
+matrix = Counter()
+shifts = Counter()
+for day in days:
+    m5, m15 = first(day, "M5"), first(day, "M15")
+    if m5 is None or m15 is None:
+        assert m5 is None and m15 is None, day
+        groups["sans configuration"] += 1
+        continue
+    assert m5["flag_utc"] == m15["flag_utc"], day
+    if m5["flag_utc"] is None:
+        assert m5["outcome"] == m15["outcome"], day
+        groups["terminée avant F"] += 1
+        continue
+    groups["atteint F"] += 1
+    a, b = m5["outcome"] == CONFIRMED, m15["outcome"] == CONFIRMED
+    matrix[(a, b)] += 1
+    if a and b:
+        delta = datetime.fromisoformat(m15["ended_utc"]) - datetime.fromisoformat(m5["ended_utc"])
+        shifts[int(delta.total_seconds() // 60)] += 1
+print(dict(groups), sum(groups.values()))
+print("M5 et M15", matrix[(True, True)], "M5 seule", matrix[(True, False)],
+      "M15 seule", matrix[(False, True)], "aucune", matrix[(False, False)])
+print("D(M15) - D(M5) en min", dict(sorted(shifts.items())))
 ```

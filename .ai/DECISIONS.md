@@ -295,3 +295,13 @@
   3. *ATR H1 indisponible* : causes rétablies (amorçage initial, H1 prévue absente, H1 inutilisable, non déterminée explicite), lues sur l'historique et les états connaissables à l'instant, sans modifier le calcul.
   4. *Portée* : C6 présenté comme recalcul distinct de la reconnaissance et de la formation avec ATR partagé ; silences distincts séparés des intersections silence–séance.
 - **Portée** : aucun passage de disponibilité ou de performance, aucun entraînement, aucune lecture de 2022-2025.
+
+### ADR-033 : Étude de disponibilité DAY_02 close ; protocole de performance DAY_02 à rédiger
+- **Date** : 2026-11-07
+- **Statut** : `ACCEPTED` (décision de l'opérateur)
+- **Source** : revue de l'opérateur du bilan au commit `6011ad1` (PR #25).
+- **Décision** :
+  1. Cohérence des totaux et lecture générale du bilan validées. Précisions documentaires intégrées sans rejouer l'étude : comparaison M5 / M15 limitée aux séances dont la première configuration forme un drapeau (588 des 1 816 séances, à côté de 197 sans configuration et 1 031 terminées avant `F`) ; absence de sortie M15 sans sortie M5 et décalages de `D` limités à ces premières configurations appariées ; première configuration comparable à la performance seulement à état de reprise identique (une position héritée de la veille peut retarder ou empêcher la première recherche).
+  2. Script de reproduction renforcé (exactement une ligne M5 et une ligne M15 par date, doublons, totaux, partition, matrice 150 / 27 / 0 / 411, décalages de `D`) et exécuté sur le détail local existant, sans lecture de cotation : chiffres publiés retrouvés.
+  3. Étude close, PR #25 fusionnée. Rédaction du protocole de performance DAY_02 autorisée en documentation seulement, à présenter avant l'outil ; aucune égalité globale avec les 307 et 272 sorties confirmées ne doit y être imposée.
+- **Portée** : aucun backtest de performance, aucun entraînement, aucun ordre, aucune lecture de 2022-2025.

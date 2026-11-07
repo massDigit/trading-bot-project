@@ -5,7 +5,7 @@ précisions intégrées (calendrier, couverture, portée des contrôles, mesures
 `docs/strategies/DAY_02_FLAG_CONTINUATION.md` (ADR-028), §10.1. Outil `forex-day02-availability`
 (`backtest/day02_availability.py`) et tests synthétiques écrits. Passage 2015-2021 autorisé et
 lancé le 2026-11-07 depuis `eb48d6c`, C1 à C10 conformes ; bilan agrégé
-`DAY02_AVAILABILITY_2015_2021_BILAN.md`, soumis à revue. Cette étude ne lit aucun tick et ne produit ni entrée, ni transaction, ni gain ou perte.
+`DAY02_AVAILABILITY_2015_2021_BILAN.md`, validé après précisions ; étude **close** (ADR-033). Cette étude ne lit aucun tick et ne produit ni entrée, ni transaction, ni gain ou perte.
 Ce n'est ni une validation de performance, ni une autorisation de trading.
 
 ## 1. Objet
