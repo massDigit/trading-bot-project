@@ -7,6 +7,8 @@ code on the same candles, so that the reconciliation compares the two tools as t
 
 from __future__ import annotations
 
+import copy
+import dataclasses
 import json
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal as D
@@ -16,6 +18,7 @@ from typing import Any
 import pytest
 from test_day01 import CONFIG, WINTER, _around_16h, at, candles, example_a, example_b, fill, h4_bars, tick
 
+from forex_bot.backtest import day01_availability, day01_explore
 from forex_bot.backtest.day01 import (
     EXECUTED,
     LIQUIDATION,
@@ -34,12 +37,14 @@ from forex_bot.backtest.day01_explore import (
     CLOSED_STOP,
     CLOSED_TARGET,
     DECIDED,
+    FIXED_COST_SHARE,
     INDETERMINATE,
     OPEN_AT_END,
     PENDING_LIQUIDATION,
     STOP_BEYOND_AT_EXECUTION,
     Day01Run,
     compare_triggers,
+    controls,
     execution,
     gated_report,
     liquidations,
@@ -53,6 +58,8 @@ from forex_bot.backtest.engine import ResearchConfig, StopAtExecution
 from forex_bot.backtest.explore import RESEARCH_COSTS
 from forex_bot.backtest.feed import Silence, Tick
 from forex_bot.backtest.s2 import GapScenario
+from forex_bot.history.intraday import Grid, intraday_table
+from forex_bot.history.intraday_audit import sha256_file
 
 
 class Run:
@@ -258,16 +265,47 @@ def test_a_failed_control_withholds_every_result() -> None:
     assert gated_report({"execution": {"ok": True}}, {"b": False}, lambda: {"net": 1})["result"] == {"net": 1}
 
 
-def test_m5_and_m15_runs_are_matched_by_london_date(tmp_path: Path) -> None:
+def test_m5_and_m15_runs_are_matched_by_london_date_session_by_session(tmp_path: Path) -> None:
+    """Example A confirms at the same D in both units (sheet §7): one common execution, with zero
+    differences of entry instant, stop and size, and a result difference computed from the two nets."""
     lines = {
         trigger: [jsonable(line) for line in Run(tmp_path / trigger.value, example_a(WINTER), trigger=trigger).lines]
         for trigger in Trigger
     }
     report = compare_triggers(lines[Trigger.M5], lines[Trigger.M15])
-    assert report["dates"] == 1 and report["executed_in_both"] == 1 and report["path_differences"] == {}
-    assert report["entry_delay_m15_minus_m5_minutes"] == {"0": 1}  # same D on example A (sheet §7)
+    (row,) = report["sessions"]
+    assert row["day"] == WINTER.isoformat() and row["confirmed"] == {"M5": True, "M15": True}
+    diff = row["m15_minus_m5"]
+    assert diff["entry_minutes"] == 0.0 and D(diff["stop"]) == 0 and D(diff["size"]) == 0
+    assert D(diff["net_eur"]) == D(diff["net_eur_m15"]) - D(diff["net_eur_m5"])
+    synthesis = report["synthesis"]
+    assert synthesis["confirmations"] == {"common": 1, "only_m5": 0, "only_m15": 0}
+    assert synthesis["executed"] == {"common": 1, "only_m5": 0, "only_m15": 0}
+    assert (synthesis["same_stop"], synthesis["same_size"], synthesis["common_closed"]) == (1, 1, 1)
+    assert synthesis["net_of_common_closed_eur"]["M5"] == diff["net_eur_m5"]
     with pytest.raises(ValueError, match="plusieurs fois"):
         compare_triggers([*lines[Trigger.M5], lines[Trigger.M5][0]], lines[Trigger.M15])
+
+
+def test_confirmations_own_to_one_trajectory_are_counted_from_the_rows() -> None:
+    def line(day: str, outcome: str, trade: dict[str, Any] | None = None) -> dict[str, Any]:
+        return {"day": day, "outcome": outcome, "trade": trade}
+
+    trade = {"entry_utc": "2019-02-12T08:45:00+00:00", "stop": "1.13189", "size": "0.6", "net_eur": "5"}
+    later = {"entry_utc": "2019-02-12T08:55:00+00:00", "stop": "1.13180", "size": "0.5", "net_eur": "-2"}
+    m5 = [line("2019-02-11", CONFIRMED, trade), line("2019-02-12", CONFIRMED, trade), line("2019-02-13", "X")]
+    m15 = [line("2019-02-11", "INVALIDATION_APRÈS_CONTACT"), line("2019-02-12", CONFIRMED, later),
+           line("2019-02-13", CONFIRMED)]  # fmt: skip
+    report = compare_triggers(m5, m15)
+    synthesis = report["synthesis"]
+    assert synthesis["confirmations"] == {"common": 1, "only_m5": 1, "only_m15": 1}
+    assert synthesis["executed"] == {"common": 1, "only_m5": 1, "only_m15": 0}
+    diff = report["sessions"][1]["m15_minus_m5"]
+    assert (diff["entry_minutes"], D(diff["stop"]), D(diff["size"]), D(diff["net_eur"])) == (
+        10.0, D("-0.00009"), D("-0.1"), D("-7")
+    )  # fmt: skip
+    assert synthesis["path_differences"] == {"CONFIRMATION -> INVALIDATION_APRÈS_CONTACT": 1, "X -> CONFIRMATION": 1}
+    assert synthesis["same_stop"] == 0 and synthesis["net_of_common_closed_eur"]["m15_minus_m5"] == "-7"
 
 
 def test_overlap_with_another_reference_is_descriptive(tmp_path: Path) -> None:
@@ -287,3 +325,160 @@ def test_overlap_with_another_reference_is_descriptive(tmp_path: Path) -> None:
     assert report["day01_trades_overlapping"] == 1 and report["hours_opposite_direction"] == 1.0
     assert report["day01_losses_overlapping_a_loss"] == 0  # the DAY_01 trade wins
     assert report["net_by_year"][2019] == {"day01": trade.net_account, "reference": D("-3")}
+
+
+# ---------------------------------------------------------------- per-transaction measures (§7)
+
+
+def _example_a_measures() -> dict[str, Any]:
+    """Example A by hand (sheet §7): P_D 1.13261 (bid 1.13259), S 1.13189, T 1.13369, executed at the
+    ask 1.13262, A = 0.00200, 0.6 contract of 10 000 EUR; slippage 0.5 pip, premium 1.2 USD, fee 0.5 %."""
+    loss_quote = (D("1.13261") - D("1.13189") + D("0.00005")) * 10000 + D("1.2")  # 8.9 USD per contract
+    gain = (D("1.13369") - D("1.13261") - D("0.00005")) * 10000 / D("1.13261") * D("0.995")
+    loss = loss_quote / D("1.13259") * D("1.005")
+    return {
+        "distances": D("1.5"),
+        "net": gain / loss,
+        "obtained": D("0.00107") / D("0.00073"),
+        "pips": D("7.2"),
+        "atr_multiple": D("0.36"),
+        "share": (D("0.00005") * 10000 + D("1.2")) / loss_quote,
+    }
+
+
+def test_each_transaction_carries_its_three_ratios_stop_distance_and_fixed_cost_share(tmp_path: Path) -> None:
+    run = Run(tmp_path, example_a(WINTER))
+    measured = run.lines[0]["measures"]
+    expected = _example_a_measures()
+    ratios = measured["ratios"]
+    assert ratios["estimated_distances_at_d"] == {"value": expected["distances"], "reason": None}
+    assert abs(ratios["net_estimated_at_d"]["value"] - expected["net"]) < D("1e-20")
+    assert ratios["obtained_at_execution"]["value"] == expected["obtained"]
+    assert (measured["stop_distance"]["pips"], measured["stop_distance"]["atr_multiple"]) == (
+        expected["pips"], expected["atr_multiple"]
+    )  # fmt: skip
+    share = measured["fixed_cost_share_of_risk"]
+    assert share["value"] == expected["share"] and share["definition"] == FIXED_COST_SHARE
+
+
+def test_an_undefinable_measure_is_absent_with_its_reason(tmp_path: Path) -> None:
+    """Stop already beyond at the first tick: no positive risk at the executed price."""
+    run = Run(tmp_path, _beyond(WINTER, "1.13150"))
+    ratios = run.lines[0]["measures"]["ratios"]
+    assert ratios["obtained_at_execution"] == {
+        "value": None, "reason": "stop déjà dépassé au prix exécuté : risque non positif"
+    }  # fmt: skip
+    assert ratios["estimated_distances_at_d"]["value"] == D("1.5")
+    poor = ResearchConfig(costs=RESEARCH_COSTS, initial_equity=D("100"))
+    assert Run(tmp_path / "poor", example_a(WINTER), config=poor).lines[0]["measures"] is None  # not decided
+
+
+# ---------------------------------------------------------------- bounds: falsified results are blocked
+
+
+def _checks(run: Run, lines: list[dict[str, Any]], result: Day01Result) -> dict[str, Any]:
+    study, errors = study_lines(run.study(), official=False)
+    ok: dict[str, Any] = {"ok": True, "errors": []}
+    return controls(study, errors, lines, result, Trigger.M5, False, ok, ok)
+
+
+@pytest.mark.parametrize("fault", ["d-minus-k", "after-12h05", "overlap"])
+def test_falsified_bounds_block_the_results(tmp_path: Path, fault: str) -> None:
+    run = Run(tmp_path, example_a(WINTER))
+    assert all(c["ok"] for c in _checks(run, run.lines, run.result).values())
+    lines, result = copy.deepcopy(run.lines), copy.deepcopy(run.result)
+    if fault == "d-minus-k":  # D more than 60 min after K
+        lines[0]["confirmation_utc"] = lines[0]["breakout"]["k_utc"] + timedelta(minutes=65)
+        expected = "D − K = 1:05:00"
+    elif fault == "after-12h05":
+        lines[0]["trade"]["entry_utc"] = at(WINTER, 12, 5, 0, 1)
+        expected = "après 12:05 Londres"
+    else:  # a second position opened before the first one is closed
+        (trade,) = result.trades
+        result.trades.append(dataclasses.replace(trade, entry_utc=trade.entry_utc + timedelta(minutes=1)))
+        expected = "positions simultanées"
+    checks = _checks(run, lines, result)
+    assert not checks["bounds"]["ok"] and any(expected in e for e in checks["bounds"]["errors"])
+    body = gated_report(checks, {}, lambda: {"net": 1})
+    assert "result" not in body and "bounds" in body["anomaly"]
+
+
+# ---------------------------------------------------------------- end to end on a synthetic directory
+
+
+def _directory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, ticks: list[Tick]) -> Path:
+    """Data directory as on real data (ticks in the store, audited candle files, H4, quality report);
+    the audited hashes and the git provenance are replaced by those of the files and a clean tree."""
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    m5, m15 = candles(tmp_path, ticks)
+    data = tmp_path / "data"
+    directory = data / "bars" / "dukascopy" / "EURUSD"
+    (directory / "intraday_2015_2021_day01_5min").mkdir(parents=True)
+    hashes = {}
+    for grid, rows in ((Grid.M5, m5), (Grid.M15, m15)):
+        path = directory / "intraday_2015_2021_day01_5min" / f"{grid.value}.parquet"
+        pq.write_table(intraday_table("dukascopy", "EURUSD", grid, rows), path)
+        hashes[grid] = sha256_file(path)
+    pq.write_table(pa.Table.from_pylist(h4_bars(london(WINTER + timedelta(days=1), time(0)))), directory / "4h.parquet")
+    (data / "reports").mkdir(exist_ok=True)
+    (data / "reports" / "quality_dukascopy_EURUSD.json").write_text(json.dumps({"gaps": []}))
+    clean: dict[str, Any] = {"commit": "abc", "uncommitted_diff_sha256": None, "uncommitted_files": []}
+    for tool in (day01_availability, day01_explore):
+        monkeypatch.setattr(tool, "CANDLES_SHA256", hashes)
+        monkeypatch.setattr(tool, "provenance", lambda argv, name: {**clean, "command": [name]})
+        monkeypatch.setattr(tool, "tree_state", lambda: dict(clean))
+    return data
+
+
+def test_command_end_to_end_writes_and_rereads_the_report_and_the_session_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    data = _directory(tmp_path, monkeypatch, example_a(WINTER))
+    window = ["--data-dir", str(data), "--init-start", "2019-01-01", "--start", "2019-02-12", "--end", "2019-02-13"]
+    study = tmp_path / "study.jsonl"
+    assert day01_availability.main([*window, "--out", str(tmp_path / "s.json"), "--details-out", str(study)]) == 0
+    sessions = {}
+    for trigger in Trigger:
+        out, sessions[trigger] = tmp_path / f"{trigger.value}.json", tmp_path / f"{trigger.value}_sessions.jsonl"
+        argv = [*window, "--trigger", trigger.value, "--scenario", "A", "--availability", str(study)]
+        assert day01_explore.main([*argv, "--out", str(out), "--sessions-out", str(sessions[trigger])]) == 0
+        report = json.loads(out.read_text(encoding="utf-8"))
+        assert all(c["ok"] for c in report["controls"].values()) and report["inputs"]["ticks"] > 0
+        assert report["controls"]["availability"]["identical"] == 1
+        assert report["controls"]["provenance"]["launch"]["commit"] == "abc"
+        result = report["result"]
+        assert result["execution"]["confirmations"] == 1 and result["execution"]["entries_executed"] == 1
+        assert result["execution"]["executed_outcomes"]["clôturée à la cible"] == 1
+        assert result["ratios"]["estimated_distances_at_d"]["median"] == "1.5"
+        assert out.with_suffix(".md").read_text(encoding="utf-8").startswith("# DAY_01")
+        (line,) = [json.loads(r) for r in sessions[trigger].read_text(encoding="utf-8").splitlines()]
+        assert line["outcome"] == CONFIRMED and line["at_d"]["decision"] == DECIDED
+        measured, expected = line["measures"], _example_a_measures()
+        assert D(measured["stop_distance"]["pips"]) == expected["pips"]
+        assert D(measured["stop_distance"]["atr_multiple"]) == expected["atr_multiple"]
+        assert D(measured["fixed_cost_share_of_risk"]["value"]) == expected["share"]
+        assert D(measured["ratios"]["obtained_at_execution"]["value"]) == expected["obtained"]
+    compared = tmp_path / "compare.json"
+    argv = ["--m5", str(sessions[Trigger.M5]), "--m15", str(sessions[Trigger.M15]), "--out", str(compared)]
+    assert day01_explore.compare_main(argv) == 0
+    synthesis = json.loads(compared.read_text(encoding="utf-8"))["synthesis"]
+    assert synthesis["confirmations"] == {"common": 1, "only_m5": 0, "only_m15": 0}
+
+
+def test_command_end_to_end_withholds_results_when_the_study_disagrees(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    data = _directory(tmp_path, monkeypatch, example_a(WINTER))
+    window = ["--data-dir", str(data), "--init-start", "2019-01-01", "--start", "2019-02-12", "--end", "2019-02-13"]
+    study = tmp_path / "study.jsonl"
+    assert day01_availability.main([*window, "--out", str(tmp_path / "s.json"), "--details-out", str(study)]) == 0
+    rows = [json.loads(r) for r in study.read_text(encoding="utf-8").splitlines()]
+    rows[0]["confirmation_utc"] = None  # a falsified study line
+    study.write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
+    out, sessions = tmp_path / "r.json", tmp_path / "sessions.jsonl"
+    argv = [*window, "--trigger", rows[0]["trigger"], "--scenario", "A", "--availability", str(study)]
+    assert day01_explore.main([*argv, "--out", str(out), "--sessions-out", str(sessions)]) == 2
+    report = json.loads(out.read_text(encoding="utf-8"))
+    assert "result" not in report and not report["controls"]["availability"]["ok"] and not sessions.exists()

@@ -110,7 +110,9 @@ EXECUTED_OUTCOMES = (EXECUTED, STOP_AT_EXECUTION, TARGET_AT_EXECUTION)  # an ent
 NOT_EXECUTED_OUTCOMES = (REJECTED_AT_EXECUTION, EXPIRED, CANCELLED_INTERRUPTION)
 
 # Exclusive outcome of an executed entry, from the engine's closing reason, which is kept as is.
-CLOSED_STOP = "clôturée au stop"
+# Stop family: the exit is tied to the stop. STOP_FRANCHI_À_L'EXÉCUTION is an executed entry liquidated
+# at once at the observed exit-side price, with no guarantee of an exit at the stop level.
+CLOSED_STOP = "sortie liée au stop"
 CLOSED_TARGET = "clôturée à la cible"
 CLOSED_LIQUIDATION = "clôturée par liquidation"
 OPEN_AT_END = "ouverte à la fin de l'étude"
@@ -215,12 +217,16 @@ def session_lines(
     params = result.day01_params
     probe = AvailabilityBacktest([], [], h4, [], gaps, params, config)  # ATR cause only, no replay
     trades = {t.decided_utc: t for t in all_trades(result)}
+    records = {r.decision_utc: r for r in result.decisions}
     lines = []
     for s in result.sessions:
         atr = probe.atr_cause(london(s.day, params.freeze)) if s.abstention == ATR_UNAVAILABLE else None
         outcome, cause = path_to_d(s, m15, None if atr is None else atr[0])
         decision = at_d(s)
         trade = trades.get(s.decision["d_utc"]) if s.decision else None
+        measured = None
+        if s.decision is not None and s.range is not None:
+            measured = entry_measures(s.decision, s.range["atr"], records.get(s.decision["d_utc"]), trade, config)
         lines.append(
             {
                 "trigger": params.trigger.value,
@@ -235,10 +241,73 @@ def session_lines(
                 "previous_position": s.previous_position,
                 "at_d": decision,
                 "trade": None if trade is None else trade_line(trade, result),
+                "measures": measured,
                 "events": s.events,
             }
         )
     return lines
+
+
+STOP_DISTANCE = "|P_D − S| : prix d'entrée estimé à D jusqu'au stop, en pips et en multiples de A (ATR H4 figé)"
+FIXED_COST_SHARE = (
+    "(glissement + commission + prime de stop garanti) par contrat, en USD, divisés par la perte estimée au "
+    "stop par contrat en USD à la cotation de dimensionnement (écart, glissement, commission et prime "
+    "compris ; conversion exclue, proportionnelle)"
+)
+
+
+def _measured(value: Decimal | None, reason: str) -> dict[str, Any]:
+    """A measure, or an absent value with the reason why it is not definable."""
+    return {"value": value, "reason": None if value is not None else reason}
+
+
+def entry_measures(
+    decision: dict[str, Any], atr: Decimal, record: DecisionRecord | None, trade: Trade | None, config: ResearchConfig
+) -> dict[str, Any]:
+    """Per decided entry, never a filter (sheet §5): the three ratios side by side, the stop distance
+    and the share of fixed costs in the risk. Only read from what the engine recorded at D and after."""
+    spec, costs = config.spec, config.costs
+    long = decision["side"] == Side.LONG.value
+    p_d, stop, target = decision["p_d"], decision["stop"], decision["target"]
+    risk_d = p_d - stop if long else stop - p_d
+    reward_d = target - p_d if long else p_d - target
+    slippage = (costs.slippage_pips.value or Decimal(0)) * spec.pip_size
+    net: Decimal | None = None
+    reason = "cotation ou ordre à D absents du journal des décisions"
+    if record is not None and record.order is not None and record.known.get("quote") is not None:
+        quote = record.known["quote"]  # same formula as S2, intraday: no night
+        move = target - quote["ask"] - slippage if long else quote["bid"] - target - slippage
+        gain_quote = move * spec.contract_size - (costs.commission_per_contract.value or Decimal(0))
+        fee = costs.conversion_fee_rate.value or Decimal(0)
+        gain = gain_quote / quote["ask"] * (1 - fee) if gain_quote > 0 else gain_quote / quote["bid"] * (1 + fee)
+        loss = record.order["estimated_stop_loss"] / record.order["size"]
+        net, reason = (gain / loss, "") if loss > 0 else (None, "perte estimée au stop non positive")
+    obtained: Decimal | None = None
+    obtained_reason, share_reason = "entrée non exécutée", "entrée non exécutée"
+    share: Decimal | None = None
+    if trade is not None:
+        risk = trade.entry_price - stop if long else stop - trade.entry_price
+        reward = target - trade.entry_price if long else trade.entry_price - target
+        obtained = reward / risk if risk > 0 else None
+        obtained_reason = "stop déjà dépassé au prix exécuté : risque non positif"
+        premium = costs.guaranteed_stop_premium_per_contract.value if config.stop_type is StopType.GUARANTEED else 0
+        fixed = slippage * spec.contract_size + (costs.commission_per_contract.value or 0) + (premium or 0)
+        loss_quote = trade.estimate.loss_quote_per_contract
+        share = fixed / loss_quote if loss_quote > 0 else None
+        share_reason = "perte estimée au stop non positive"
+    return {
+        "ratios": {
+            "estimated_distances_at_d": _measured(reward_d / risk_d if risk_d > 0 else None, "P_D au-delà du stop"),
+            "net_estimated_at_d": _measured(net, reason),
+            "obtained_at_execution": _measured(obtained, obtained_reason),
+        },
+        "stop_distance": {
+            "definition": STOP_DISTANCE,
+            "pips": risk_d / spec.pip_size,
+            "atr_multiple": risk_d / atr,
+        },
+        "fixed_cost_share_of_risk": {"definition": FIXED_COST_SHARE, **_measured(share, share_reason)},
+    }
 
 
 def trade_line(trade: Trade, result: Day01Result) -> dict[str, Any]:
@@ -495,6 +564,28 @@ def scenario_triggers(result: Day01Result) -> dict[str, Any]:
     }
 
 
+def controls(
+    study: StudyLines,
+    study_errors: list[str],
+    lines: list[dict[str, Any]],
+    result: Day01Result,
+    trigger: Trigger,
+    official: bool,
+    inputs: dict[str, Any],
+    origin: dict[str, Any],
+) -> dict[str, Any]:
+    """Every control that must pass before any result is presented (protocol §5, §6)."""
+    flow = execution(lines, result)
+    return {
+        "availability": reconcile(study, study_errors, lines, trigger, official),
+        "execution": {"ok": flow["ok"], "checks": flow["checks"]},
+        "liquidations": {k: v for k, v in liquidations(result).items() if k in ("ok", "errors", "pending_at_end")},
+        "bounds": bounds(lines, result),
+        "inputs": inputs,
+        "provenance": origin,
+    }
+
+
 def gated_report(
     checks: dict[str, Any], triggers: dict[str, Any], results: Callable[[], dict[str, Any]]
 ) -> dict[str, Any]:
@@ -514,41 +605,29 @@ def _stats(values: list[Decimal]) -> dict[str, Any] | None:
     return {"n": len(values), "min": min(values), "median": statistics.median(values), "max": max(values)}
 
 
-def ratios(result: Day01Result, lines: list[dict[str, Any]]) -> dict[str, Any]:
-    """Three ratios side by side, none of them a filter (sheet §5): distances estimated at D (k), net
-    estimated at D (same formula as S2, intraday: no night) and obtained at the execution."""
-    config, spec = result.config, result.config.spec
-    costs = config.costs
-    records = {r.decision_utc: r for r in result.decisions}
-    distances, nets, obtained = [], [], []
+def ratios(lines: list[dict[str, Any]]) -> dict[str, Any]:
+    """Distributions of the per-entry measures (`entry_measures`); the detail stays in the local
+    session file. Absent values are counted with their reasons, never replaced."""
+    values: dict[str, list[Decimal]] = defaultdict(list)
+    absent: dict[str, Counter[str]] = defaultdict(Counter)
     for line in lines:
-        decision = line["at_d"]
-        if decision is None or decision["decision"] != DECIDED:
+        measured = line.get("measures")
+        if measured is None:
             continue
-        long = decision["side"] == Side.LONG.value
-        p_d, stop, target = decision["p_d"], decision["stop"], decision["target"]
-        distances.append((target - p_d) / (p_d - stop) if long else (p_d - target) / (stop - p_d))
-        record: DecisionRecord | None = records.get(decision["d_utc"])
-        if record is not None and record.order is not None and record.known["quote"] is not None:
-            quote = record.known["quote"]
-            slippage = (costs.slippage_pips.value or Decimal(0)) * spec.pip_size
-            move = target - quote["ask"] - slippage if long else quote["bid"] - target - slippage
-            gain_quote = move * spec.contract_size - (costs.commission_per_contract.value or Decimal(0))
-            fee = costs.conversion_fee_rate.value or Decimal(0)
-            gain = gain_quote / quote["ask"] * (1 - fee) if gain_quote > 0 else gain_quote / quote["bid"] * (1 + fee)
-            loss = record.order["estimated_stop_loss"] / record.order["size"]
-            nets.append(gain / loss)
-        trade = line["trade"]
-        if trade is not None:
-            entry = trade["entry_price"]
-            risk = entry - stop if long else stop - entry
-            if risk > 0:
-                obtained.append(((target - entry) if long else (entry - target)) / risk)
+        entries = {**measured["ratios"], "fixed_cost_share_of_risk": measured["fixed_cost_share_of_risk"]}
+        for name, item in entries.items():
+            if item["value"] is None:
+                absent[name][item["reason"]] += 1
+            else:
+                values[name].append(item["value"])
+        values["stop_distance_pips"].append(measured["stop_distance"]["pips"])
+        values["stop_distance_atr_multiple"].append(measured["stop_distance"]["atr_multiple"])
+    names = ("estimated_distances_at_d", "net_estimated_at_d", "obtained_at_execution", "fixed_cost_share_of_risk")
     return {
-        "estimated_distances_at_d": _stats(distances),
-        "net_estimated_at_d": _stats(nets),
-        "obtained_at_execution": _stats(obtained),
-        "note": "rapports rapportés côte à côte, sans filtre ; obtenu : entrées exécutées avec stop du bon côté",
+        **{name: _stats(values[name]) for name in (*names, "stop_distance_pips", "stop_distance_atr_multiple")},
+        "absent": {name: dict(absent[name]) for name in names if absent[name]},
+        "definitions": {"stop_distance": STOP_DISTANCE, "fixed_cost_share_of_risk": FIXED_COST_SHARE},
+        "note": "rapports côte à côte, sans filtre ; estimés : entrées décidées ; obtenu et coûts fixes : exécutées",
     }
 
 
@@ -690,7 +769,7 @@ def performance(
             "equity_eur": result.equity,
             "closed_trade_totals": _trade_totals(result.trades),
             "concentration": concentration(result.trades),
-            "ratios": ratios(result, lines),
+            "ratios": ratios(lines),
             "breakdowns": breakdowns(lines),
             "measures": measures(result, start, end),
             "tick_drawdown_eur": asdict(result.tick_drawdown) if result.tick_drawdown else None,
@@ -717,47 +796,82 @@ def performance(
 # ---------------------------------------------------------------------- M5 / M15 (protocol §8)
 
 
+def _dec(value: Any) -> Decimal | None:
+    return None if value is None else Decimal(str(value))
+
+
 def compare_triggers(m5: Iterable[dict[str, Any]], m15: Iterable[dict[str, Any]]) -> dict[str, Any]:
-    """The two session files of the same scenario, matched by London date (duplicates refused)."""
+    """The two session files of the same scenario, matched by London date (duplicates refused). One
+    row per date with both outcomes and, for entries executed in both, the M15 − M5 differences of
+    entry instant, stop, size and result; every synthesis is computed from these rows."""
     sides: dict[str, dict[str, dict[str, Any]]] = {}
     for name, rows in (("M5", m5), ("M15", m15)):
         sides[name] = {}
-        for row in rows:
-            if row["day"] in sides[name]:
-                raise ValueError(f"{name} : séance {row['day']} présente plusieurs fois")
-            sides[name][row["day"]] = row
+        for line in rows:
+            if line["day"] in sides[name]:
+                raise ValueError(f"{name} : séance {line['day']} présente plusieurs fois")
+            sides[name][line["day"]] = line
     if set(sides["M5"]) != set(sides["M15"]):
         raise ValueError("les deux passages ne portent pas sur les mêmes dates de Londres")
+    sessions = []
+    for day in sorted(sides["M5"]):
+        a, b = sides["M5"][day], sides["M15"][day]
+        row: dict[str, Any] = {
+            "day": day,
+            "outcome": {"M5": a["outcome"], "M15": b["outcome"]},
+            "confirmed": {"M5": a["outcome"] == CONFIRMED, "M15": b["outcome"] == CONFIRMED},
+            "executed": {"M5": a.get("trade") is not None, "M15": b.get("trade") is not None},
+            "m15_minus_m5": None,
+        }
+        if a.get("trade") is not None and b.get("trade") is not None:
+            ta, tb = a["trade"], b["trade"]
+            net_a, net_b = _dec(ta["net_eur"]), _dec(tb["net_eur"])
+            row["m15_minus_m5"] = {
+                "entry_minutes": (datetime.fromisoformat(tb["entry_utc"]) - datetime.fromisoformat(ta["entry_utc"]))
+                .total_seconds() / 60,
+                "stop": Decimal(tb["stop"]) - Decimal(ta["stop"]),
+                "size": Decimal(tb["size"]) - Decimal(ta["size"]),
+                "net_eur": None if net_a is None or net_b is None else net_b - net_a,
+                "net_eur_m5": net_a,
+                "net_eur_m15": net_b,
+            }  # fmt: skip
+        sessions.append(row)
 
-    def executed(row: dict[str, Any]) -> bool:
-        return row.get("trade") is not None
+    def split(key: str) -> dict[str, int]:
+        return {
+            "common": sum(1 for r in sessions if r[key]["M5"] and r[key]["M15"]),
+            "only_m5": sum(1 for r in sessions if r[key]["M5"] and not r[key]["M15"]),
+            "only_m15": sum(1 for r in sessions if r[key]["M15"] and not r[key]["M5"]),
+        }
 
-    both = [d for d in sorted(sides["M5"]) if executed(sides["M5"][d]) and executed(sides["M15"][d])]
-    pairs = Counter(
-        (str(sides["M5"][d]["outcome"]), str(sides["M15"][d]["outcome"]))
-        for d in sides["M5"]
-        if sides["M5"][d]["outcome"] != sides["M15"][d]["outcome"]
-    )
-    delays = Counter(
-        int((datetime.fromisoformat(b["trade"]["entry_utc"]) - datetime.fromisoformat(a["trade"]["entry_utc"]))
-            .total_seconds() // 60)
-        for a, b in ((sides["M5"][d], sides["M15"][d]) for d in both)
-    )  # fmt: skip
-    nets = {
-        name: sum((Decimal(sides[name][d]["trade"]["net_eur"]) for d in both if sides[name][d]["trade"]["net_eur"]),
-                  Decimal(0))
-        for name in ("M5", "M15")
-    }  # fmt: skip
+    both = [r["m15_minus_m5"] for r in sessions if r["m15_minus_m5"] is not None]
+    closed = [d for d in both if d["net_eur"] is not None]
     report: dict[str, Any] = jsonable(
         {
-            "dates": len(sides["M5"]),
-            "path_differences": {f"{a} -> {b}": n for (a, b), n in pairs.most_common()},
-            "executed": {name: sum(1 for r in sides[name].values() if executed(r)) for name in sides},
-            "executed_in_both": len(both),
-            "entry_delay_m15_minus_m5_minutes": dict(sorted(delays.items())),
-            "same_size": sum(1 for d in both if sides["M5"][d]["trade"]["size"] == sides["M15"][d]["trade"]["size"]),
-            "same_stop": sum(1 for d in both if sides["M5"][d]["trade"]["stop"] == sides["M15"][d]["trade"]["stop"]),
-            "net_of_common_entries_eur": nets,
+            "key": "date de séance de Londres",
+            "dates": len(sessions),
+            "synthesis": {
+                "confirmations": split("confirmed"),
+                "executed": split("executed"),
+                "path_differences": dict(
+                    Counter(
+                        f"{r['outcome']['M5']} -> {r['outcome']['M15']}"
+                        for r in sessions
+                        if r["outcome"]["M5"] != r["outcome"]["M15"]
+                    ).most_common()
+                ),
+                "entry_delay_minutes": dict(sorted(Counter(d["entry_minutes"] for d in both).items())),
+                "same_stop": sum(1 for d in both if d["stop"] == 0),
+                "same_size": sum(1 for d in both if d["size"] == 0),
+                "common_closed": len(closed),
+                "net_of_common_closed_eur": {
+                    "M5": sum((d["net_eur_m5"] for d in closed), Decimal(0)),
+                    "M15": sum((d["net_eur_m15"] for d in closed), Decimal(0)),
+                    "m15_minus_m5": sum((d["net_eur"] for d in closed), Decimal(0)),
+                },
+            },
+            "sessions": sessions,
+            "note": "détail par séance : sortie locale, hors Git",
         }
     )
     return report
@@ -859,15 +973,11 @@ def main(argv: list[str] | None = None) -> int:
     inputs_errors += [] if params == expected_params(trigger) else ["paramètres différents de l'attendu"]
     provenance_errors = [] if not launch["uncommitted_diff_sha256"] else ["arbre non propre au lancement"]
     provenance_errors += ["code ou commit modifié pendant le passage"] if code_changed else []
-    flow = execution(lines, result)
-    checks = {
-        "availability": reconcile(study, study_errors, lines, trigger, official),
-        "execution": {"ok": flow["ok"], "checks": flow["checks"]},
-        "liquidations": {k: v for k, v in liquidations(result).items() if k in ("ok", "errors", "pending_at_end")},
-        "bounds": bounds(lines, result),
-        "inputs": {"ok": not inputs_errors, "errors": inputs_errors, "sha256": {"before": before, "after": after}},
-        "provenance": {"ok": not provenance_errors, "errors": provenance_errors, "launch": launch, "end": finish},
-    }
+    checks = controls(
+        study, study_errors, lines, result, trigger, official,
+        {"ok": not inputs_errors, "errors": inputs_errors, "sha256": {"before": before, "after": after}},
+        {"ok": not provenance_errors, "errors": provenance_errors, "launch": launch, "end": finish},
+    )  # fmt: skip
     references = {}
     for name in ("s1", "s2", "s3"):
         path = getattr(args, f"{name}_reference")

@@ -145,19 +145,24 @@ confirmation (831 en M5, 736 en M15) est classée **une seule fois**, d'après l
 |---|---|
 | Confirmations | refus à `D` : position DAY_01 déjà ouverte ; marché fermé à `D` ; absence de cotation à `D` ; stop non admissible ; taille minimale supérieure au budget ; **ou** entrée décidée |
 | Entrées décidées | `EXÉCUTÉE` ; `STOP_DÉPASSÉ_À_L'EXÉCUTION` ; `CIBLE_ATTEINTE_À_L'EXÉCUTION` ; `ENTRÉE_REJETÉE` (passage de rejet seulement) ; `ENTRÉE_EXPIRÉE` ; `ENTRÉE_ANNULÉE_INTERRUPTION` |
-| Entrées exécutées (`EXÉCUTÉE`, `STOP_DÉPASSÉ_À_L'EXÉCUTION`, `CIBLE_ATTEINTE_À_L'EXÉCUTION`) | clôturée au stop ; clôturée à la cible ; clôturée par liquidation (`LIQUIDATION_16H`) ; encore ouverte à la fin de l'étude |
+| Entrées exécutées (`EXÉCUTÉE`, `STOP_DÉPASSÉ_À_L'EXÉCUTION`, `CIBLE_ATTEINTE_À_L'EXÉCUTION`) | sortie liée au stop ; clôturée à la cible ; clôturée par liquidation (`LIQUIDATION_16H`) ; encore ouverte à la fin de l'étude |
 
 **Issues exclusives et annotations** (précision du 2026-11-07) :
 - Une entrée **décidée** n'est pas une entrée **exécutée** : `ENTRÉE_REJETÉE`, `ENTRÉE_EXPIRÉE` et
   `ENTRÉE_ANNULÉE_INTERRUPTION` sont décidées, sans transaction. Une entrée exécutée puis sortie sur
   le même tick **reste exécutée**.
 - Chaque entrée exécutée a **une seule** issue parmi les quatre ci-dessus, lue dans le motif de
-  clôture du moteur, qui est conservé tel quel. Les sorties immédiates gardent leur motif précis et
-  sont comptées une fois : `STOP_FRANCHI_À_L'EXÉCUTION` (stop déjà dépassé, liquidée au prix de
-  sortie, sans garantie) sous « clôturée au stop », `CIBLE_ATTEINTE_À_L'EXÉCUTION` sous « clôturée
-  à la cible ». Les autres motifs du moteur se rangent ainsi : stop observé, après fermeture connue,
-  après interruption, scénario B ; cible, après fermeture connue, après interruption, scénario C.
-  Un motif non prévu fait échouer le contrôle.
+  clôture du moteur, qui est conservé tel quel comme sous-motif. Les sorties immédiates gardent leur
+  motif précis et sont comptées une fois :
+  - `STOP_FRANCHI_À_L'EXÉCUTION` est rangé dans la famille **« sortie liée au stop »** (libellé
+    validé le 2026-11-07, au lieu de « clôturée au stop »), avec son sous-motif distinct. C'est une
+    entrée **exécutée puis liquidée au prix observé** du premier tick, le stop étant déjà dépassé :
+    **sans garantie de sortie au niveau du stop**, ni prime. Aucun changement d'exécution ;
+  - `CIBLE_ATTEINTE_À_L'EXÉCUTION` sous « clôturée à la cible ».
+
+  Les autres motifs du moteur se rangent ainsi : sortie liée au stop pour le stop observé, après
+  fermeture connue, après interruption, scénario B ; clôturée à la cible pour la cible, après
+  fermeture connue, après interruption, scénario C. Un motif non prévu fait échouer le contrôle.
 - **Annotations**, qui recoupent ces issues et ne sont **jamais additionnées** comme des sorties
   distinctes : indéterminée, `NUIT_NON_PRÉVUE`, `LIQUIDATION_APRÈS_INTERRUPTION`, liquidation en
   attente à la fin.
@@ -192,10 +197,22 @@ confirmation (831 en M5, 736 en M15) est classée **une seule fois**, d'après l
   non exécutée à la fin de l'étude.
 - **Entrées non exécutées** : expirées, annulées pour interruption (avec la durée du silence),
   rejetées (passage de rejet).
-- **Rapports côte à côte**, par transaction et en distribution : rapport des distances estimées
-  à la décision (`k = 1,5` par construction), rapport net estimé à `D`, rapport obtenu à
-  l'exécution ; distance du stop en pips et en multiples de `A` ; part des coûts fixes dans le
-  risque.
+- **Mesures par entrée**, dans le détail local par séance (hors Git, champ `measures`), et en
+  distribution dans le rapport agrégé ; aucune ne sert de filtre :
+  - les **trois rapports côte à côte** : distances estimées à `D` (`k = 1,5` par construction),
+    net estimé à `D` (formule de S2, sans nuit : gain net à la cible depuis la cotation de `D`,
+    glissement, commission et conversion compris, divisé par la perte estimée au stop par contrat
+    de l'ordre), obtenu à l'exécution (`(T − prix exécuté) / (prix exécuté − S)` à l'achat) ;
+  - la **distance du stop** `|P_D − S|`, en pips et en multiples de `A` (ATR H4 figé) ;
+  - la **part des coûts fixes dans le risque** : (glissement + commission + prime de stop garanti)
+    par contrat, en USD, divisés par la perte estimée au stop par contrat en USD à la cotation de
+    dimensionnement (écart, glissement, commission et prime compris ; conversion exclue, car
+    proportionnelle).
+
+  Les deux rapports estimés portent sur les entrées décidées ; le rapport obtenu et la part des
+  coûts fixes sur les entrées exécutées. Une mesure non définissable est **absente, avec son
+  motif** (par exemple : entrée non exécutée ; stop déjà dépassé au prix exécuté, risque non
+  positif), jamais remplacée ; le rapport agrégé compte les absences par motif.
 - **Répartitions** : par jour de la semaine ; par heure d'entrée (Londres) ; en heure d'hiver
   (GMT), d'été (BST) et pendant les semaines de décalage ; par sens.
 - Drawdown au tick en euros : **global, continu** depuis 2 000 € ; **par année**, sommet
@@ -209,11 +226,16 @@ confirmation (831 en M5, 736 en M15) est classée **une seule fois**, d'après l
 
 ## 8. Comparaisons
 
-**M5 / M15**, rapprochées par date de séance de Londres : séances confirmées dans les deux, dans
-une seule (reprises du bilan de disponibilité : 724 communes, 107 propres à M5, 12 propres à M15) ;
-pour les séances exécutées dans les deux, écart d'instant d'entrée, de stop, de taille et de
-résultat ; parcours, transactions, net et drawdown côte à côte. La comparaison ne remplace pas la
-référence.
+**M5 / M15**, rapprochées par date de séance de Londres (`forex-day01-compare`, depuis les deux
+détails locaux d'un même scénario ; doublons refusés, mêmes dates exigées). Une ligne par date,
+dans la sortie locale (hors Git) : issue de chaque trajectoire, confirmée ou non, exécutée ou non,
+et, pour les séances exécutées dans les deux, les écarts M15 − M5 d'instant d'entrée, de stop, de
+taille et de résultat. Toutes les synthèses sont calculées depuis ces lignes : confirmations
+communes et propres à chaque trajectoire (attendu, d'après le bilan de disponibilité : 724
+communes, 107 propres à M5, 12 propres à M15), exécutions communes et propres, différences de
+parcours, distribution des écarts d'entrée, stops et tailles identiques, nets des séances communes
+clôturées. Parcours, transactions, net et drawdown sont aussi présentés côte à côte. La comparaison
+ne remplace pas la référence.
 
 **Avec S1, S2 et S3** (références lues au §1), description seulement :
 - chevauchement des positions dans le temps (même sens, sens opposé) ;
