@@ -215,3 +215,13 @@
   4. Règles d'exécution inchangées : liquidation au premier tick strictement postérieur à 16:00, priorité stop, cible, liquidation (ASSUMP-024), scénarios A/B/C de l'ADR-021.
   5. Variante M15 : retest, invalidation, confirmation et stop lus sur M15, mêmes règles et même délai de 60 minutes (`K + 15 min ≤ D ≤ K + 60 min`), cotation à `D` dans la M15 de confirmation, validité de l'entrée de 5 minutes. Aucun paramètre nouveau ni modifié : seul le choix de l'unité (`Trigger.M5`, référence ; `Trigger.M15`, comparaison) est exposé.
 - **Conséquence** : fiche §5 et §9 alignées sur le nouveau libellé, sans autre changement. Aucun passage historique, aucune lecture de 2022-2025.
+
+### ADR-024 : DAY_01 étudiée, résultats défavorables sur 2015-2021, aucune trajectoire retenue
+- **Date** : 2026-11-07
+- **Statut** : `ACCEPTED` (décision de l'opérateur)
+- **Source** : message de l'opérateur du 2026-11-07 sur la PR #21, après revue du bilan `docs/experiments/DAY01_REFERENCE_2015_2021_BILAN.md` (passages A M5 et M15 sur `3d38ad5`, contrôles conformes, B, C et rejet non requis).
+- **Décision** :
+  1. DAY_01 est **étudiée** : résultats défavorables sur 2015-2021 dans les conditions testées (règles de la fiche figée, capital et coûts de recherche figés, scénario A) : net −586,71 € en M5 (référence, 831 transactions), −289,12 € en M15 (comparaison, 736 transactions), sept années déficitaires dans les deux trajectoires.
+  2. M5 reste la référence et M15 la comparaison. **Aucune des deux trajectoires n'est retenue** pour poursuivre vers le paper trading.
+  3. Aucune sélection de M15 après coup, aucun changement de paramètre, aucun filtre tiré des sous-groupes positifs (jours, heures, sens, saisons).
+- **Conséquence** : étape close, PR #21 fusionnée. Aucun nouveau passage DAY_01. La suite de la bibliothèque de stratégies fera l'objet d'une décision séparée ; aucune lecture de 2022-2025, aucun entraînement, aucun ordre.
