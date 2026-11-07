@@ -644,6 +644,22 @@ def jsonable(value: Any) -> Any:
     return value
 
 
+def detail_line(t: Trajectory, s: Session) -> dict[str, Any]:
+    """One line of the details JSONL: the path of a session up to its confirmation (protocol §6).
+    The DAY_01 performance run reconciles its own sessions with these lines (DAY01_REFERENCE §5)."""
+    return {
+        "trigger": t.trigger.value,
+        "day": s.day,
+        "outcome": t.outcomes[s.day],
+        "cause": t.causes.get(s.day),
+        "cause_detail": t.cause_details.get(s.day),
+        "range": s.range,
+        "breakout": s.breakout,
+        "retest": s.retest,
+        "confirmation_utc": t.confirmations.get(s.day),
+    }
+
+
 def availability(
     bars: dict[Grid, list[dict[str, Any]]],
     m15_table: pa.Table,
@@ -662,22 +678,7 @@ def availability(
     checks = controls(trajectories, bars, m15_table, start, end, anchors)
     report: dict[str, Any] = {"window": {"start": start, "end": end}, "checks": checks}
     report["failed_checks"] = [name for name, c in checks.items() if not c["ok"]]
-    details = []
-    for t in trajectories.values():
-        for s in t.sessions:
-            details.append(
-                {
-                    "trigger": t.trigger.value,
-                    "day": s.day,
-                    "outcome": t.outcomes[s.day],
-                    "cause": t.causes.get(s.day),
-                    "cause_detail": t.cause_details.get(s.day),
-                    "range": s.range,
-                    "breakout": s.breakout,
-                    "retest": s.retest,
-                    "confirmation_utc": t.confirmations.get(s.day),
-                }
-            )
+    details = [detail_line(t, s) for t in trajectories.values() for s in t.sessions]
     report["funnel"] = {t.trigger.value: funnel(t.outcomes) for t in trajectories.values()}
     report["descriptions"] = {t.trigger.value: describe(t) for t in trajectories.values()}
     report["causes"] = {

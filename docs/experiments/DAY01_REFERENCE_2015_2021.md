@@ -1,7 +1,8 @@
 # Protocole — DAY_01, premier passage de performance 2015-2021 (référence M5, comparaison M15)
 
-**Statut** : **proposé**, soumis à l'opérateur le 2026-11-07, **avant tout lancement** et avant
-l'écriture de l'outil de passage. Étape 5 de la fiche `docs/strategies/DAY_01_LONDON_RANGE.md`
+**Statut** : principe **approuvé** par l'opérateur le 2026-11-07 (commit `03c6643`), avec trois
+précisions intégrées (§5, §6) ; outil `forex-day01-backtest` et tests synthétiques écrits ; **figé
+au commit de l'outil**, **avant tout lancement** (aucun passage historique). Étape 5 de la fiche `docs/strategies/DAY_01_LONDON_RANGE.md`
 (§9), après la clôture de l'étude de disponibilité (étape 4, PR #20, bilan
 `DAY01_AVAILABILITY_2015_2021_BILAN.md`). Ni validation de performance, ni autorisation de
 trading. Aucun paramètre ne sera modifié après lecture des résultats ; un résultat défavorable est
@@ -12,11 +13,13 @@ rapporté tel quel.
 - **Moteur** : `Day01Backtest` (`backtest/day01_engine.py`, règles `backtest/day01.py`), fusionné
   (PR #19), **inchangé**. Il est construit sur le moteur S1 sans le modifier : le rejeu de
   non-régression S1 n'est refait que si un moteur partagé est modifié.
-- **Outil de passage, à écrire après approbation de ce protocole** : `forex-day01-backtest`
-  (`backtest/day01_explore.py`), sur le modèle de `forex-s3-backtest`. Il n'ajoute que de
-  l'observation (parcours, rapprochements, liquidations, drawdown, comparaisons), couverte par des
-  tests synthétiques (`tests/test_day01_explore.py`) ; un test vérifie que les transactions et le
-  solde sont ceux du moteur seul. Chaque rapport enregistre la provenance **au lancement**
+- **Outil de passage** : `forex-day01-backtest` (`backtest/day01_explore.py`), sur le modèle de
+  `forex-s3-backtest`, et `forex-day01-compare` pour la comparaison M5 / M15 (§8). Il n'ajoute que
+  de l'observation (parcours, rapprochements, liquidations, drawdown, comparaisons), couverte par des
+  tests synthétiques (`tests/test_day01_explore.py`) ; un test vérifie que les transactions, le
+  solde, le journal, la courbe et les séances sont ceux du moteur seul. Il ne réévalue aucune règle :
+  il lit ce que le moteur a enregistré. La ligne de détail de l'étude de disponibilité est produite
+  par une seule fonction (`detail_line`), que les tests utilisent pour le rapprochement. Chaque rapport enregistre la provenance **au lancement**
   (commit, état de l'arbre, commande) ; les changements survenus pendant le passage sont contrôlés
   à part, à la fin (règle C10 de l'étude de disponibilité). Les passages partent d'un arbre propre
   au commit qui fige ce protocole et l'outil.
@@ -100,6 +103,14 @@ Jusqu'à `D`, le parcours d'une séance ne dépend ni des ticks, ni des position
 est donc rapproché, **avant toute lecture des résultats**, de la trajectoire de même
 déclenchement de l'étude de disponibilité (JSONL `1c1ed0f`).
 
+**Parcours jusqu'à `D`, séparé de la décision** (précision du 2026-11-07). Le rapprochement porte
+sur l'état jusqu'à la confirmation **incluse**. Une confirmation reste classée `CONFIRMATION` pour
+ce contrôle même si le moteur refuse ensuite l'entrée à `D` (le moteur remplace alors son
+abstention par le motif du refus, pas la confirmation : `D` reste enregistré dans
+`Session.retest`). Le refus à `D` et l'issue de l'entrée en attente sont conservés **à part**
+(champ `at_d` de chaque séance, §6). Aucune règle n'est réévaluée : les causes avant `D` sont lues
+par la classification de l'étude elle-même.
+
 - **Clé** : date de séance de Londres (`day`). Chaque côté doit contenir **exactement 1 827 dates
   distinctes**, une seule ligne par couple (`day`, `trigger`) : un doublon est refusé avant toute
   comparaison.
@@ -134,7 +145,22 @@ confirmation (831 en M5, 736 en M15) est classée **une seule fois**, d'après l
 |---|---|
 | Confirmations | refus à `D` : position DAY_01 déjà ouverte ; marché fermé à `D` ; absence de cotation à `D` ; stop non admissible ; taille minimale supérieure au budget ; **ou** entrée décidée |
 | Entrées décidées | `EXÉCUTÉE` ; `STOP_DÉPASSÉ_À_L'EXÉCUTION` ; `CIBLE_ATTEINTE_À_L'EXÉCUTION` ; `ENTRÉE_REJETÉE` (passage de rejet seulement) ; `ENTRÉE_EXPIRÉE` ; `ENTRÉE_ANNULÉE_INTERRUPTION` |
-| Positions ouvertes | sortie au stop ; à la cible ; `LIQUIDATION_16H` ; dont `LIQUIDATION_APRÈS_INTERRUPTION` ; dont `NUIT_NON_PRÉVUE` ; indéterminée (scénario appliqué) ; ouverte à la fin de l'étude |
+| Entrées exécutées (`EXÉCUTÉE`, `STOP_DÉPASSÉ_À_L'EXÉCUTION`, `CIBLE_ATTEINTE_À_L'EXÉCUTION`) | clôturée au stop ; clôturée à la cible ; clôturée par liquidation (`LIQUIDATION_16H`) ; encore ouverte à la fin de l'étude |
+
+**Issues exclusives et annotations** (précision du 2026-11-07) :
+- Une entrée **décidée** n'est pas une entrée **exécutée** : `ENTRÉE_REJETÉE`, `ENTRÉE_EXPIRÉE` et
+  `ENTRÉE_ANNULÉE_INTERRUPTION` sont décidées, sans transaction. Une entrée exécutée puis sortie sur
+  le même tick **reste exécutée**.
+- Chaque entrée exécutée a **une seule** issue parmi les quatre ci-dessus, lue dans le motif de
+  clôture du moteur, qui est conservé tel quel. Les sorties immédiates gardent leur motif précis et
+  sont comptées une fois : `STOP_FRANCHI_À_L'EXÉCUTION` (stop déjà dépassé, liquidée au prix de
+  sortie, sans garantie) sous « clôturée au stop », `CIBLE_ATTEINTE_À_L'EXÉCUTION` sous « clôturée
+  à la cible ». Les autres motifs du moteur se rangent ainsi : stop observé, après fermeture connue,
+  après interruption, scénario B ; cible, après fermeture connue, après interruption, scénario C.
+  Un motif non prévu fait échouer le contrôle.
+- **Annotations**, qui recoupent ces issues et ne sont **jamais additionnées** comme des sorties
+  distinctes : indéterminée, `NUIT_NON_PRÉVUE`, `LIQUIDATION_APRÈS_INTERRUPTION`, liquidation en
+  attente à la fin.
 
 **Contrôles bloquants** (même règle d'arrêt qu'au §5) :
 - confirmations = refus à `D` + entrées décidées ; entrées décidées = somme des issues ;
@@ -143,8 +169,14 @@ confirmation (831 en M5, 736 en M15) est classée **une seule fois**, d'après l
   compris une entrée exécutée puis sortie sur le même tick) ;
 - chaque entrée décidée attestée par un événement du moteur ; sinon anomalie, jamais une
   non-exécution supposée ;
-- toute liquidation de 16:00 a ses trois grandeurs (délai, silence clos, motif) ;
-  `LIQUIDATION_APRÈS_INTERRUPTION` compte exactement les liquidations définies par ADR-023 ;
+- toute liquidation de 16:00 **résolue** a ses trois grandeurs (délai, silence clos, motif) et la
+  transaction qu'elle clôt ; `LIQUIDATION_APRÈS_INTERRUPTION` et `NUIT_NON_PRÉVUE` concordent avec
+  le journal du moteur ;
+- **liquidation encore en attente à la fin** (précision du 2026-11-07) : situation autorisée, qui
+  ne fait pas échouer les contrôles. Sont rapportés l'heure de décision, la durée d'attente jusqu'à
+  la borne finale, la position ouverte et le silence en cours ; ni instant de clôture, ni motif de
+  sortie, ni cotation ne sont fabriqués. Elle reste prise en compte au §4 : si le silence en cours
+  dépasse 5 min d'ouverture prévue, la transaction est indéterminée et déclenche B et C ;
 - au plus une position DAY_01 ouverte à tout instant ;
 - aucune exécution après 12:05:00 Londres ; aucune décision hors `[K + unité, K + 60 min]` ;
 - 0 tick lu hors de la fenêtre ; empreintes des bougies inchangées ; paramètres attendus (C9) ;
@@ -222,15 +254,22 @@ uv run forex-day01-backtest --init-start 2015-01-01 --start 2015-01-01 --end 202
   --s2-reference data/reports/backtests/s2_ref_2015_2021_h1_a.json \
   --s3-reference data/reports/backtests/s3_ref_2015_2021_d1h4_a.json \
   --out data/reports/backtests/day01_ref_2015_2021_m5_a.json \
-  --decisions-out data/reports/backtests/day01_ref_2015_2021_m5_a_sessions.jsonl
+  --sessions-out data/reports/backtests/day01_ref_2015_2021_m5_a_sessions.jsonl
 ```
+
+La fenêtre officielle (`--init-start`, `--start` 2015-01-01, `--end` 2022-01-01) est la valeur par
+défaut ; elle active les ancrages du §5 (3 654 lignes, 1 827 dates, 831 et 736 confirmations). Le
+rapport JSON a un résumé Markdown (même nom, `.md`) ; le détail par séance n'est écrit que si les
+contrôles passent.
 
 Ordre prévu :
 1. `m5_a` (ci-dessus) ;
 2. `m15_a` : même commande avec `--trigger M15`, sorties `day01_ref_2015_2021_m15_a*` ;
 3. pour chaque déclenchement, selon `scenario_triggers` de son passage A : `--scenario B` puis
    `--scenario C` (sorties `*_b*`, `*_c*`) si `scenario_b_required` ; puis
-   `--stop-at-execution REJECT` (sorties `*_a_reject*`) si `reject_required`.
+   `--stop-at-execution REJECT` (sorties `*_a_reject*`) si `reject_required` ;
+4. comparaison M5 / M15 de chaque scénario publié, depuis les deux détails locaux :
+   `uv run forex-day01-compare --m5 <..._m5_a_sessions.jsonl> --m15 <..._m15_a_sessions.jsonl> --out <...>`.
 
 Chaque commande part d'un arbre propre au commit qui fige ce protocole et l'outil ; un passage dont
 un contrôle échoue (code 2) arrête la suite et est présenté avant toute correction.
@@ -240,9 +279,9 @@ journaux et détails par séance hors Git.
 
 ## 11. Ordre de travail
 
-1. Protocole soumis à l'opérateur (ce document) ; aucun outil écrit, aucun passage.
-2. Après approbation : outil `forex-day01-backtest` et tests synthétiques, sans passage historique ;
-   protocole figé au commit de l'outil.
+1. Protocole soumis à l'opérateur ; principe approuvé le 2026-11-07 (`03c6643`).
+2. Outil `forex-day01-backtest` et tests synthétiques, sans passage historique : fait ; protocole
+   figé au commit de l'outil.
 3. Passages 2015-2021, **sur autorisation explicite**, dans l'ordre du §10 ; bilan agrégé soumis à
    revue.
 

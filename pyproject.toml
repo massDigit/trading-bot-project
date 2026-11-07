@@ -38,6 +38,8 @@ forex-s2-volatility = "forex_bot.backtest.s2_volatility:main"
 forex-s3-availability = "forex_bot.backtest.s3_availability:main"
 forex-s3-backtest = "forex_bot.backtest.s3_explore:main"
 forex-day01-availability = "forex_bot.backtest.day01_availability:main"
+forex-day01-backtest = "forex_bot.backtest.day01_explore:main"
+forex-day01-compare = "forex_bot.backtest.day01_explore:compare_main"
 
 [tool.ruff]
 line-length = 120
