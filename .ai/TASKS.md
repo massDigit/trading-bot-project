@@ -38,7 +38,9 @@
 - [ ] Mention « Powered by Dukascopy » si les données sont intégrées à une interface (licence, section 8)
 - [x] Fiche S2 (`docs/strategies/S2_PULLBACK.md`) : approuvée (ADR-015), implémentée et évaluée sur 2015-2021 (ADR-016)
 - [x] Fiche DAY_02 (candidate « D2 », lot 3B, ADR-025) figée : `docs/strategies/DAY_02_FLAG_CONTINUATION.md`, ASSUMP-029 `APPROVED` pour la recherche hors ligne (ADR-028), PR #23 ; base de rédaction, chronologie, valeurs de référence et dérogation sur les limites journalière et hebdomadaire retenues (ADR-026, ADR-027) ; fiche figée ; aucun moteur ni passage
-- [ ] DAY_02 : proposition technique de réutilisation du code (lecture seule), à présenter avant toute implémentation ; décision sur les conditions IG avant les passages de performance
+- [x] DAY_02 : proposition technique de réutilisation du code validée (ADR-029)
+- [ ] DAY_02 : moteur hors ligne (`backtest/day02.py`, `backtest/day02_engine.py`) et 41 tests synthétiques (`tests/test_day02.py`), PR brouillon, soumis à revue ; aucun passage historique
+- [ ] DAY_02 : décision sur les conditions IG avant les passages de performance
 - [x] Fiche DAY_01 (candidate « D1 », première vague) figée : `docs/strategies/DAY_01_LONDON_RANGE.md`, ASSUMP-027 approuvée (ADR-022) ; EUR/USD seulement
 - [x] Moteur DAY_01 hors ligne (`backtest/day01.py`, `backtest/day01_engine.py`), référence M5 et variante M15, et tests synthétiques (`tests/test_day01.py`), fusionné (PR #19) ; libellés de liquidation clarifiés (ADR-023) ; aucun passage historique
 - [x] Étude de disponibilité DAY_01 2015-2021 (M5 et M15, sans tick ni exécution) : protocole approuvé dans son principe (`docs/experiments/DAY01_AVAILABILITY_2015_2021.md`), outil `forex-day01-availability` et tests synthétiques (PR #20, brouillon) ; passage autorisé fait le 2026-11-06 sur `1c1ed0f`, C1 à C10 conformes ; bilan agrégé `docs/experiments/DAY01_AVAILABILITY_2015_2021_BILAN.md` validé ; PR #20 fusionnée (`ef41596`)
