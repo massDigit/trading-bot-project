@@ -676,6 +676,54 @@ def test_retest_abstentions(tmp_path: Path) -> None:
         assert result.sessions[0].abstention == reason, reason
 
 
+def _retest_ticks(*bars: tuple[str, str, str]) -> list[Tick]:
+    """Breakout at K = 08:30, then one M5 per (open, low, close) from 08:30, then 1.13300 until 16:30."""
+    ticks, start = range_and_breakout(WINTER), at(WINTER, 8, 30)
+    for first, low, close in bars:
+        ticks += [tick(start, first), tick(start + timedelta(minutes=1), low)]
+        ticks += fill(start + timedelta(minutes=1, seconds=30), start + timedelta(minutes=5), close)
+        start += timedelta(minutes=5)
+    return ticks + fill(start, at(WINTER, 16, 30), "1.13300")
+
+
+@pytest.mark.parametrize(
+    ("bars", "reason", "contact", "last"),
+    [
+        ([("1.13200", "1.13200", "1.13200")], INVALIDATED, None, (8, 30)),  # wholly below the zone
+        ([("1.13280", "1.13240", "1.13245"), ("1.13245", "1.13240", "1.13221")], INVALIDATED, (8, 30), (8, 35)),
+        ([("1.13280", "1.13221", "1.13221")], INVALIDATED, None, (8, 30)),  # touches, but invalidates first
+        ([("1.13280", "1.13240", "1.13245")] * 12, RETEST_TIMEOUT, (8, 30), (9, 25)),
+    ],
+    ids=["invalidated-before-contact", "invalidated-after-contact", "touch-and-invalidate", "timeout-after-contact"],
+)
+def test_retest_observation_survives_every_outcome(
+    tmp_path: Path,
+    bars: list[tuple[str, str, str]],
+    reason: str,
+    contact: tuple[int, int] | None,
+    last: tuple[int, int],
+) -> None:
+    """Observation only: the contact and the last candle examined are kept whatever ends the retest.
+    Invalidation is checked before a new contact, so a candle that touches the zone and closes below
+    Z_b is an invalidation without contact."""
+    result = run(tmp_path, _retest_ticks(*bars), WINTER)
+    (session,) = result.sessions
+    assert session.abstention == reason and result.decisions == []
+    retest = got(session.retest)
+    assert retest["contact_utc"] == (None if contact is None else at(WINTER, *contact))
+    assert retest["last_examined_utc"] == at(WINTER, *last) and retest["trigger"] == "M5"
+    assert (retest["extreme"] is None) is (contact is None)
+
+
+def test_retest_observation_on_data_failure_keeps_the_candle_examined(tmp_path: Path) -> None:
+    ticks = _retest_ticks(("1.13280", "1.13240", "1.13245"))
+    ticks = [t for t in ticks if not at(WINTER, 8, 35) <= t.ts_utc < at(WINTER, 8, 41)]  # M5 [08:35) empty
+    (session,) = run(tmp_path, ticks, WINTER).sessions
+    assert session.abstention == RETEST_DATA
+    retest = got(session.retest)
+    assert (retest["contact_utc"], retest["last_examined_utc"]) == (at(WINTER, 8, 30), at(WINTER, 8, 35))
+
+
 def test_atr_unavailable_and_size_refused(tmp_path: Path) -> None:
     assert run(tmp_path / "a", example_a(WINTER), WINTER, h4=[]).sessions[0].abstention == ATR_UNAVAILABLE
     poor = ResearchConfig(costs=RESEARCH_COSTS, initial_equity=D("100"))  # budget 0.25 EUR < 0.1 contract

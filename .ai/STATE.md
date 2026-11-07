@@ -2,7 +2,7 @@
 
 > **Ce fichier donne à l'agent une image précise de l'état du projet en temps réel à chaque début de session.**
 
-**Dernière mise à jour** : 2026-11-03
+**Dernière mise à jour** : 2026-11-07
 **Version de l'application** : 0.1.0 (`pyproject.toml`), non publiée
 **Modèle de dépôt IA** : v0.2.0 (`massDigit/ai-project-template`, structure `AGENTS.md`, `.ai/`, `.agents/`)
 
@@ -123,6 +123,6 @@ décisions identique octet pour octet) ; 194 s, 175 Mio. Étape 3 rejouée aprè
 
 ## 🏁 Prochaine Étape / Milestone
 1. S1, S2 et S3 étudiées sur 2015-2021 (ADR-016, ADR-020), sans conclusion de rentabilité. Suite (stratégie, paramètres, capital ou risque, modèle de sélection) sur décision de l'opérateur seulement ; aucune expérience en cours.
-   Première vague (cahier v1.2 §6.6, §15 lot 3A) : fiche DAY_01 figée (ADR-022) ; lot de données M5/M15 2015-2021 clôturé (ADR-021, convention DAY_01 : silence > 5 min) ; moteur DAY_01 hors ligne (référence M5 et variante M15) et tests synthétiques en PR brouillon (#19), en revue ; libellés de liquidation clarifiés (ADR-023) ; aucun passage historique.
+   Première vague (cahier v1.2 §6.6, §15 lot 3A) : fiche DAY_01 figée (ADR-022) ; lot de données M5/M15 2015-2021 clôturé (ADR-021, convention DAY_01 : silence > 5 min) ; moteur DAY_01 hors ligne (référence M5 et variante M15) et tests synthétiques fusionnés (PR #19, ADR-023) ; étude de disponibilité 2015-2021 (PR #20, brouillon) : passage du 2026-11-06 sur `1c1ed0f`, C1 à C10 conformes, bilan agrégé `docs/experiments/DAY01_AVAILABILITY_2015_2021_BILAN.md` soumis à revue ; 1 816 séances attendues, 1 204 cassures, 831 confirmations M5 et 736 M15 (instants d'évaluation, pas des entrées) ; aucun tick, aucun backtest de performance.
 2. En parallèle : fermetures particulières et confirmations IG.
 3. Garder 2022-2023 pour l'évaluation des variantes figées, puis 2024-2025 pour le test final (ADR-007).

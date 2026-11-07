@@ -38,7 +38,8 @@
 - [ ] Mention « Powered by Dukascopy » si les données sont intégrées à une interface (licence, section 8)
 - [x] Fiche S2 (`docs/strategies/S2_PULLBACK.md`) : approuvée (ADR-015), implémentée et évaluée sur 2015-2021 (ADR-016)
 - [x] Fiche DAY_01 (candidate « D1 », première vague) figée : `docs/strategies/DAY_01_LONDON_RANGE.md`, ASSUMP-027 approuvée (ADR-022) ; EUR/USD seulement
-- [ ] Moteur DAY_01 hors ligne (`backtest/day01.py`, `backtest/day01_engine.py`), référence M5 et variante M15, et tests synthétiques (`tests/test_day01.py`), PR #19 brouillon, en revue ; libellés de liquidation clarifiés (ADR-023) ; aucun passage historique
+- [x] Moteur DAY_01 hors ligne (`backtest/day01.py`, `backtest/day01_engine.py`), référence M5 et variante M15, et tests synthétiques (`tests/test_day01.py`), fusionné (PR #19) ; libellés de liquidation clarifiés (ADR-023) ; aucun passage historique
+- [ ] Étude de disponibilité DAY_01 2015-2021 (M5 et M15, sans tick ni exécution) : protocole approuvé dans son principe (`docs/experiments/DAY01_AVAILABILITY_2015_2021.md`), outil `forex-day01-availability` et tests synthétiques (PR #20, brouillon) ; passage autorisé fait le 2026-11-06 sur `1c1ed0f`, C1 à C10 conformes ; bilan agrégé `docs/experiments/DAY01_AVAILABILITY_2015_2021_BILAN.md` en revue ; aucun backtest de performance
 - [x] Fiche DAY_01 fusionnée (PR #17), points ouverts conservés dans ASSUMP-027
 - [x] Lot de données M15/M5 2015-2021 (clôturé, ADR-021) : construit et audité (protocole `docs/experiments/DATA_M5_M15_2015_2021.md`, bilan `..._BILAN.md`, ASSUMP-028), contrôles conformes, intégrité validée ; convention de qualité DAY_01 (silence > 5 min, M5 sans tick et M15 à sous-créneau vide non `OK`) appliquée par recalcul des statuts 
 - [x] Fiche S3 (`docs/strategies/S3_SQUEEZE.md`) : ASSUMP-026 approuvée pour la recherche hors ligne (ADR-018, 2026-11-04)
