@@ -234,3 +234,13 @@
   1. L'ordre du lot 3B est confirmé : **D2 avant D3** (S3 déjà étudiée, ADR-020).
   2. Rédaction de la fiche DAY_02 (continuation après impulsion et drapeau) autorisée, **documentation seulement**, en PR brouillon : définitions exécutables et objectives de l'impulsion, du drapeau et de la continuation ; chronologie et informations disponibles à chaque décision ; référence et comparaison plus simple justifiées par la logique de la stratégie ; conventions de DAY_01 non transposées automatiquement (techniques distinguées des choix de stratégie ; extension d'ADR-021 explicite et soumise à validation) ; conditions IG listées comme point ouvert distinct ; mesures descriptives de chevauchement avec les stratégies étudiées, notamment S2 ; héritage technique non figé. Toutes les nouvelles valeurs restent `PROPOSED` (ASSUMP-029).
 - **Portée** : aucun moteur, aucune analyse historique, aucun backtest, aucun entraînement, aucune lecture de 2022-2025, aucun contact avec IG, aucun ordre. Pas de système de sélection, pas de nouvelle variante de S1, S2, S3 ou DAY_01.
+
+### ADR-026 : Base de rédaction de DAY_02 et convention de qualité à 5 minutes étendue à DAY_02
+- **Date** : 2026-11-07
+- **Statut** : `ACCEPTED` (décision de l'opérateur), **ASSUMP-029 reste `PROPOSED`**
+- **Source** : message de l'opérateur du 2026-11-07, après lecture de la fiche DAY_02 au commit `14b3283` (PR #23).
+- **Décision** :
+  1. Base de rédaction retenue (propositions de référence du §12 de la fiche) : H1 pour l'ATR, configuration M15, déclenchement M5 et comparaison M15, cible par projection, sortie temporelle de deux heures, horaires proposés, configurations successives, absence de filtre d'annonces. Ce sont des hypothèses de recherche, pas des paramètres démontrés optimaux.
+  2. Principe retenu : la convention de qualité M5/M15 à 5 minutes (ADR-021) est étendue à DAY_02, avec contrôle de couverture sur sa fenêtre propre, sans changer les H1 ni leur convention.
+  3. Corrections demandées avant validation : ordre des extrêmes (`o < p` strict, aucun ordre supposé dans une bougie) ; règle déterministe extension / profondeur / expiration, identique en M5 et en M15 ; convention explicite de l'étude de disponibilité sans ticks ni positions, sans égalité promise ni position fictive, mesures structurelles distinguées des mesures à `D` ; traduction opérationnelle de la limite de perte journalière du cahier (§8), dont l'omission n'est pas acquise ; précisions horaires (entrées après 15:00, position après 17:00, échéances simultanées).
+- **Portée** : documentation seulement. Aucun moteur, aucune analyse historique, aucun backtest, aucune lecture de 2022-2025, aucun ordre.
