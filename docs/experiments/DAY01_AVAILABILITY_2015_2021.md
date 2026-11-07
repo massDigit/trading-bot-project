@@ -1,9 +1,10 @@
 # DAY_01 — Disponibilité des données, développement 2015-2021 (protocole)
 
 **Statut** : protocole **approuvé dans son principe** par l'opérateur le 2026-11-06, avec deux
-précisions intégrées (§3, C9) ; outil et tests synthétiques prêts, **aucun lancement historique**
-(fiche `docs/strategies/DAY_01_LONDON_RANGE.md` §9, étape 4). Ni outil lancé, ni donnée lue à ce
-stade. Cette étude ne produit ni transaction, ni gain ou perte, ni drawdown. Ce n'est ni une
+précisions intégrées (§3, C9) ; outil et tests synthétiques prêts (fiche
+`docs/strategies/DAY_01_LONDON_RANGE.md` §9, étape 4). Passage 2015-2021 lancé sur autorisation
+le 2026-11-06 depuis `1c1ed0f`, C1 à C10 conformes ; bilan agrégé
+`DAY01_AVAILABILITY_2015_2021_BILAN.md` (portée de C6 précisée au §2). Cette étude ne produit ni transaction, ni gain ou perte, ni drawdown. Ce n'est ni une
 validation de performance, ni une autorisation de trading.
 
 ## 1. Objet
