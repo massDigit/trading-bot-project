@@ -24,9 +24,12 @@ de développement 2015-2021, avec paramètres et coûts de recherche figés :
   étudiée, résultats défavorables dans les conditions testées, **non retenue pour le paper
   trading** (ADR-024, PR #21 fusionnée, `8bc08b9`).
 
-**Aucune nouvelle expérience n'est autorisée à ce stade** : ni fiche, ni moteur, ni passage
-historique, ni entraînement, ni ordre ; 2022-2025 reste en réserve. La suite de la bibliothèque
-fera l'objet d'une décision séparée de l'opérateur.
+Suite de la bibliothèque (ADR-025) : ordre **D2 avant D3** confirmé ; fiche **DAY_02**
+(continuation après impulsion et drapeau, `docs/strategies/DAY_02_FLAG_CONTINUATION.md`,
+ASSUMP-029 `PROPOSED`) rédigée en PR brouillon, **soumise à revue**, documentation seulement.
+**Aucune expérience n'est autorisée** : ni moteur, ni analyse historique, ni backtest, ni
+entraînement, ni ordre ; 2022-2025 reste en réserve. Conditions IG : point ouvert distinct (fiche
+§8), à trancher avant tout passage de performance.
 
 ## 🧾 Synthèse vérifiée (2026-11-03)
 - PR #1 à #4 fusionnées dans `main` par commits de fusion, sur autorisation de l'opérateur

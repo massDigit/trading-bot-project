@@ -225,3 +225,12 @@
   2. M5 reste la référence et M15 la comparaison. **Aucune des deux trajectoires n'est retenue** pour poursuivre vers le paper trading.
   3. Aucune sélection de M15 après coup, aucun changement de paramètre, aucun filtre tiré des sous-groupes positifs (jours, heures, sens, saisons).
 - **Conséquence** : étape close, PR #21 fusionnée. Aucun nouveau passage DAY_01. La suite de la bibliothèque de stratégies fera l'objet d'une décision séparée ; aucune lecture de 2022-2025, aucun entraînement, aucun ordre.
+
+### ADR-025 : D2 avant D3 ; rédaction de la fiche DAY_02 autorisée
+- **Date** : 2026-11-07
+- **Statut** : `ACCEPTED` (décision de l'opérateur)
+- **Source** : message de l'opérateur du 2026-11-07, après la proposition de suite de la bibliothèque (cahier v1.2 §6.6, §15 lot 3B, §16 point 2).
+- **Décision** :
+  1. L'ordre du lot 3B est confirmé : **D2 avant D3** (S3 déjà étudiée, ADR-020).
+  2. Rédaction de la fiche DAY_02 (continuation après impulsion et drapeau) autorisée, **documentation seulement**, en PR brouillon : définitions exécutables et objectives de l'impulsion, du drapeau et de la continuation ; chronologie et informations disponibles à chaque décision ; référence et comparaison plus simple justifiées par la logique de la stratégie ; conventions de DAY_01 non transposées automatiquement (techniques distinguées des choix de stratégie ; extension d'ADR-021 explicite et soumise à validation) ; conditions IG listées comme point ouvert distinct ; mesures descriptives de chevauchement avec les stratégies étudiées, notamment S2 ; héritage technique non figé. Toutes les nouvelles valeurs restent `PROPOSED` (ASSUMP-029).
+- **Portée** : aucun moteur, aucune analyse historique, aucun backtest, aucun entraînement, aucune lecture de 2022-2025, aucun contact avec IG, aucun ordre. Pas de système de sélection, pas de nouvelle variante de S1, S2, S3 ou DAY_01.
