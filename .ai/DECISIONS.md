@@ -270,3 +270,38 @@
 - **Source** : message de l'opérateur du 2026-11-07, après la proposition technique de réutilisation présentée après la fusion de la PR #23.
 - **Décision** : `Day02Backtest` est construit sur `S1Backtest`, règles propres dans `backtest/day02.py`, **sans héritage depuis `Day01Backtest`** et **sans modification des modules existants** ; référence M5 et comparaison M15 conformes à la fiche figée. Précisions : la fonction commune sur bougies (`configuration_from`) assure la cohérence entre moteur, étude et contrôle, mais n'est pas une vérification indépendante : les tests la comparent à des attentes explicites ; causalité vérifiée (bougies et ticks postérieurs sans effet sur les événements déjà connaissables) ; reprises testées (abandon, refus à `D`, expiration ou annulation d'une entrée, clôture de position, y compris au milieu d'une M15) ; ATR H1 vérifié sur fixtures synthétiques (schéma, amorçage, H1 attendue absente ou inutilisable, fermeture connue, fenêtre d'impulsion exclue) ; frontières d'exécution couvertes (tick à `D`, validité de 5 min, silence exactement égal puis strictement supérieur à 5 min, échéances sans cotation, égalité des échéances).
 - **Portée** : moteur et tests synthétiques seulement. Ni outil de disponibilité, ni passage historique, ni rejeu historique, ni entraînement, ni lecture de 2022-2025, ni ordre. Un changement partagé éventuel doit être présenté avant d'être réalisé.
+
+### ADR-030 : Lot moteur DAY_02 clos ; protocole de disponibilité DAY_02 à rédiger
+- **Date** : 2026-11-07
+- **Statut** : `ACCEPTED` (décision de l'opérateur)
+- **Source** : message de l'opérateur du 2026-11-07 validant le correctif au commit `263e676` (PR #24).
+- **Décision** : le lot moteur DAY_02 avec tests synthétiques est **clos** ; PR #24 fusionnée (`653cdac`). Aucun rejeu historique S1 n'est demandé, les modules partagés étant inchangés. Rédaction du protocole de l'étude de disponibilité DAY_02 autorisée, documentation seulement, en PR brouillon : convention « parcours sans position » pour M5 et M15, fenêtres et couverture (amorçage H1, fenêtre propre), décomptes et dénominateurs, mesures structurelles séparées des mesures à `D`, contrôles des reprises, des bornes et des bougies réutilisées, limites du rapprochement avec la performance, provenance et conditions bloquantes. Le partage de `configuration_from` n'est pas présenté comme une vérification indépendante.
+- **Portée** : ni outil, ni passage historique, ni entraînement, ni lecture de 2022-2025, ni ordre ; protocole présenté avant l'écriture de l'outil.
+
+### ADR-031 : Protocole de disponibilité DAY_02 approuvé dans son principe ; outil et tests synthétiques autorisés
+- **Date** : 2026-11-07
+- **Statut** : `ACCEPTED` (décision de l'opérateur)
+- **Source** : message de l'opérateur du 2026-11-07 sur le protocole au commit `3345afd` (PR #25).
+- **Décision** : principe du protocole `docs/experiments/DAY02_AVAILABILITY_2015_2021.md` approuvé ; écriture de `forex-day02-availability` et de ses tests synthétiques autorisée, avec quatre précisions intégrées : (1) calendrier construit depuis ses règles et rapproché de l'ancrage 1 827 jours ouvrés / 11 exclusions / 1 816 séances, sur la fenêtre officielle complète seulement ; (2) couverture nécessaire jusqu'à 15:00 séparée de la couverture descriptive 07:00-17:00, silences de plus de 5 min lus dans les sorties du lot audité à 5 min (le rapport à 10 min ne suffit pas) ; (3) C4 distingue les configurations valides des événements qui les terminent, contrôles de formation et de sortie seulement si `F` ou `D` existent, C6 et C7 comparent aussi les séances sans configuration et seulement les champs de l'étape concernée ; (4) chaque mesure nomme son domaine et compte ses absences avec leur motif, profondeur structurelle sur le bid distincte de l'extrême ask du stop à la vente. Restent retenus : parcours sans position, contrôles des reprises, recalcul distinct C6, absence d'égalité globale attendue avec la performance.
+- **Portée** : outil et tests synthétiques seulement ; ni passage historique, ni lecture des données de recherche, ni entraînement, ni ordre, ni lecture de 2022-2025 ; règles figées et moteur inchangés.
+
+### ADR-032 : Corrections de l'outil de disponibilité DAY_02 avant tout passage
+- **Date** : 2026-11-07
+- **Statut** : `ACCEPTED` (décision de l'opérateur)
+- **Source** : revue de l'opérateur du commit `1e6ad36` (PR #25).
+- **Décision** :
+  1. *C4* : une issue « impulsion prolongée sans pause » est acceptée au-delà de 7 M15 ; le contrôle vérifie qu'elle survient à la clôture de la première extension qui dépasse 6 M15 (cas synthétique avec une pause avant cette extension). Moteur inchangé.
+  2. *Empreintes* : empreinte H1 complète reprise des rapports d'audit locaux (`existing_bars_sha256` des deux audits intraday, provenance vérifiée) et comparée en entier ; rapport de qualité utilisé par `load_gaps` ajouté aux empreintes avant et après. Aucune référence historique n'existe pour ce rapport : elle est déclarée absente, et l'empreinte calculée le 2026-11-07 n'est pas présentée comme une référence ; ancrage de contenu par les 383 trous des passages DAY_01, sur la fenêtre officielle. Consultation des métadonnées et rapports d'audit existants et calcul des empreintes des fichiers 2015-2021 autorisés pour cette préparation, sans analyse des cotations.
+  3. *ATR H1 indisponible* : causes rétablies (amorçage initial, H1 prévue absente, H1 inutilisable, non déterminée explicite), lues sur l'historique et les états connaissables à l'instant, sans modifier le calcul.
+  4. *Portée* : C6 présenté comme recalcul distinct de la reconnaissance et de la formation avec ATR partagé ; silences distincts séparés des intersections silence–séance.
+- **Portée** : aucun passage de disponibilité ou de performance, aucun entraînement, aucune lecture de 2022-2025.
+
+### ADR-033 : Étude de disponibilité DAY_02 close ; protocole de performance DAY_02 à rédiger
+- **Date** : 2026-11-07
+- **Statut** : `ACCEPTED` (décision de l'opérateur)
+- **Source** : revue de l'opérateur du bilan au commit `6011ad1` (PR #25).
+- **Décision** :
+  1. Cohérence des totaux et lecture générale du bilan validées. Précisions documentaires intégrées sans rejouer l'étude : comparaison M5 / M15 limitée aux séances dont la première configuration forme un drapeau (588 des 1 816 séances, à côté de 197 sans configuration et 1 031 terminées avant `F`) ; absence de sortie M15 sans sortie M5 et décalages de `D` limités à ces premières configurations appariées ; première configuration comparable à la performance seulement à état de reprise identique (une position héritée de la veille peut retarder ou empêcher la première recherche).
+  2. Script de reproduction renforcé (exactement une ligne M5 et une ligne M15 par date, doublons, totaux, partition, matrice 150 / 27 / 0 / 411, décalages de `D`) et exécuté sur le détail local existant, sans lecture de cotation : chiffres publiés retrouvés.
+  3. Étude close, PR #25 fusionnée. Rédaction du protocole de performance DAY_02 autorisée en documentation seulement, à présenter avant l'outil ; aucune égalité globale avec les 307 et 272 sorties confirmées ne doit y être imposée.
+- **Portée** : aucun backtest de performance, aucun entraînement, aucun ordre, aucune lecture de 2022-2025.
