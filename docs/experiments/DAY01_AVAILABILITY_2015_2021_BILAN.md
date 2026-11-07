@@ -48,8 +48,10 @@ Tous conformes, 0 écart.
 | C9 | paramètres attendus pour chaque trajectoire, autres paramètres identiques, 0 tick lu, entrées inchangées |
 | C10 | provenance relevée au lancement ; aucun changement pendant le passage |
 
-**Portée de C6.** Le contrôle parcourt les séances de chaque trajectoire, par des requêtes DuckDB
-sur la table M15, hors du moteur (l'ATR du moteur est la seule valeur reprise) :
+**Portée de C6.** Le recalcul indépendant porte sur la **référence M5** : C6 en parcourt les
+séances par des requêtes DuckDB sur la table M15, hors du moteur (l'ATR du moteur est la seule
+valeur reprise). C5 vérifie ensuite, séance par séance, que la trajectoire M15 a les mêmes étapes
+communes (issues des étapes 1 à 5, range, ATR, cassure). Sur la référence M5, C6 contrôle :
 
 - complétude du range comparée à l'issue du moteur sur les **1 816 séances attendues** (les
   11 jours sans séance sont sautés) ;
@@ -146,7 +148,9 @@ Les trois lignes par horloge de Londres répartissent les 1 816 séances attendu
 
 Les deux trajectoires sont rapprochées **par date de séance de Londres** : le champ `day` du JSONL
 de détail est la date de Londres de la séance (§4 de la fiche), et chaque date doit porter
-exactement une ligne M5 et une ligne M15. Pour chaque date, on compare les issues. Pour les dates
+exactement une ligne M5 et une ligne M15. Le script refuse tout doublon d'un couple
+(`day`, `trigger`) avant de l'insérer, puis exige une ligne M5 et une ligne M15 par date ; pour ce
+fichier officiel, il exige aussi 3 654 lignes et 1 827 dates. Pour chaque date, on compare les issues. Pour les dates
 confirmées des deux côtés, on compare `D` (`confirmation_utc`) de chaque trajectoire. Le calcul lit
 seulement le JSONL local, hors Git ; il ne rejoue pas l'étude.
 
@@ -201,11 +205,19 @@ from collections import Counter
 from datetime import datetime
 
 pairs: dict[str, dict[str, dict]] = {}
+lines = 0
 for line in open(sys.argv[1], encoding="utf-8"):
-    row = json.loads(line)
-    pairs.setdefault(row["day"], {})[row["trigger"]] = row  # day = London session date
-assert all(set(p) == {"M5", "M15"} for p in pairs.values()), "date sans ses deux trajectoires"
-print("dates de Londres rapprochées :", len(pairs))
+    row, lines = json.loads(line), lines + 1
+    day, trigger = row["day"], row["trigger"]  # day = London session date
+    if trigger in pairs.setdefault(day, {}):
+        sys.exit(f"doublon du couple ({day}, {trigger}) à la ligne {lines}")
+    pairs[day][trigger] = row
+incomplete = sorted(d for d, p in pairs.items() if set(p) != {"M5", "M15"})
+if incomplete:
+    sys.exit(f"{len(incomplete)} date(s) sans exactement une ligne M5 et une ligne M15 : {incomplete[:5]}")
+if (lines, len(pairs)) != (3654, 1827):  # official file of the 1c1ed0f run
+    sys.exit(f"{lines} lignes et {len(pairs)} dates, au lieu de 3654 et 1827")
+print("lignes :", lines, "; dates de Londres rapprochées :", len(pairs))
 same = [p for p in pairs.values() if p["M5"]["outcome"] == p["M15"]["outcome"]]
 diff = [p for p in pairs.values() if p["M5"]["outcome"] != p["M15"]["outcome"]]
 print("même issue :", len(same), "; issue différente :", len(diff))
