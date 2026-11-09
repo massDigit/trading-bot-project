@@ -223,9 +223,17 @@ n'est pas reconstituée.
 
 ### 6.2 Publié par IG (site public, consulté le 2026-11-08 entre 11:04 et 11:05 UTC)
 
-Les pages ne portent pas de date de publication. Seule la page des frais cite une période pour
-ses spreads moyens : 12 semaines jusqu'au 29 mai 2020. Ces textes sont généraux et non
-contractuels ; ils ne remplacent pas S4 ou S5.
+Ces textes sont généraux et non contractuels ; ils ne remplacent pas S4 ou S5.
+
+**Dates affichées.** Complément du 2026-11-09, de 12:14:58 à 12:15:13 UTC, nouvelle lecture des
+cinq pages :
+- **P2, P3, P4, P5** affichent « 20 septembre 2026 » (élément de date placé sous le titre de
+  l'article). La même date figurait déjà dans les instantanés de la consultation initiale du
+  2026-11-08. Elle n'est **pas assimilée** à une date de publication, de mise à jour ou d'entrée
+  en vigueur : la page ne dit pas ce qu'elle représente.
+- **P1** n'affiche pas de date propre. Elle cite une période pour ses spreads moyens (12
+  semaines jusqu'au 29 mai 2020) et la date d'entrée en vigueur de MiFID II (3 janvier 2018) ;
+  aucune des deux ne date les frais publiés.
 
 | Réf. | Page |
 |---|---|
@@ -245,7 +253,7 @@ contractuels ; ils ne remplacent pas S4 ou S5.
 | Financement forex (aide) | « Taille x (taux tom-next + charge administrative) », taille = nombre de lots × valeur d'un lot ; charge administrative « ne dépasse pas 0,0022% par jour » ; « trois jours les mercredis » | P5 |
 
 P1 (1 % par an) et P5 (au plus 0,0022 % par jour, soit environ 0,80 % sur 365 jours) ne donnent
-pas la même valeur : l'écart n'est pas tranché.
+pas la même valeur : l'écart n'est pas tranché (question au §6.3).
 
 ### 6.3 En attente du support (SUP)
 
@@ -262,6 +270,8 @@ le pas de taille ni le côté de déclenchement : ce n'est pas une confirmation.
 | Prix depuis lequel les distances minimales sont mesurées | SUP |
 | Minimums et prime applicables entre 2015 et 2021 | SUP |
 | Taux de conversion appliqué (cours, côté) et assiette exacte des 0,8 % | Non encore posée |
+| Frais administratifs du financement forex : 1 % par an (P1) ou au plus 0,0022 % par jour (P5), base de calcul (jours par an) et unités du tom-next, de la taille et des frais | Non encore posée |
+| Heure effective du financement pendant les semaines où les changements d'heure européen et américain ne coïncident pas (« ordinairement 23h00 heure de Paris », P1) | Non encore posée |
 
 ### 6.4 Supposé pour 2015-2021
 
@@ -274,8 +284,9 @@ publiée en 2026 **n'est pas appliquée rétroactivement** à 2015-2021 sans dé
 ## 7. Rapprochement des coûts simulés avec les sources IG (aucun paramètre modifié)
 
 Scénario simulé : `RESEARCH_COSTS` (`backtest/explore.py`), appliqué à la clôture par
-`_settle` (`backtest/engine.py`). Sources IG : P1 et P5 (§6.2), publiées sans date, consultées le
-2026-11-08.
+`_settle` (`backtest/engine.py`). Sources IG : P1 et P5 (§6.2), consultées le 2026-11-08 et
+relues le 2026-11-09 (P1 sans date propre ; P5 affiche « 20 septembre 2026 », non assimilée à
+une date de publication ou d'entrée en vigueur).
 
 ### 7.1 Conversion
 
@@ -291,18 +302,21 @@ Scénario simulé : `RESEARCH_COSTS` (`backtest/explore.py`), appliqué à la cl
 
 | Élément | Simulé | Publié par IG | Écart ou inconnue |
 |---|---|---|---|
-| Formule | 1 USD × contrats Mini × nuits, toujours un coût (ASSUMED) | Nuits × (tom-next + frais administratifs) × taille | Forfait simulé contre taux variable |
-| Taux | Forfait de 1 USD par contrat Mini et par nuit | Tom-next (selon le marché, crédit ou débit selon le sens) + frais administratifs de 1 % par an (P1) ou au plus 0,0022 % par jour (P5) | Tom-next 2015-2021 inconnu |
-| Assiette | Nombre de contrats | « Taille » = nombre de lots × valeur d'un lot (valeur notionnelle) | Assiette différente |
+| Formule | 1 USD × contrats Mini × nuits, toujours un coût (ASSUMED) | Transcription des sources, **pas encore une formule implémentable** : « nombre de nuits x (taux tom-next + frais administratifs annuels) x taille de l'ordre » (P1) ; « Taille x (taux tom-next + charge administrative) » (P5) | Les unités du tom-next (points, taux ou montant), de la taille et des frais administratifs (annuels ou journaliers) doivent être rendues compatibles avant tout calcul ; non confirmées |
+| Taux | Forfait de 1 USD par contrat Mini et par nuit | Tom-next (selon le marché, crédit ou débit selon le sens) + frais administratifs de 1 % par an (P1) ou au plus 0,0022 % par jour (P5) | Différence certaine : forfait fixe simulé contre taux variables ; tom-next 2015-2021 inconnu |
+| Dépendance à la taille | Proportionnel au nombre de contrats | Proportionnel à la « taille » (P5 : nombre de lots × valeur d'un lot) | Les deux calculs dépendent de la taille de position ; la conversion exacte entre contrats, valeur d'un lot et devise du montant reste à confirmer |
 | Sens | Toujours débité | Tom-next : débit ou crédit selon le sens ; frais administratifs : débit | Le crédit n'est pas simulé |
-| Heure | Changement de journée de négociation à 17:00 New York (`trading_day`) | Après la fermeture de session, « ordinairement 23h00 heure de Paris » | 17:00 New York = 23:00 Paris, sauf pendant les semaines où les changements d'heure européen et américain ne coïncident pas (22:00 Paris) |
-| Jours | Une nuit par journée de négociation franchie ; un passage du vendredi au lundi compte 3 nuits | Une nuit par jour, **triple le mercredi** | Même total sur une semaine complète ; répartition différente pour une détention qui ne couvre ni un mercredi soir ni un week-end entier |
+| Heure | Changement de journée de négociation à 17:00 New York (`trading_day`) | Après la fermeture de session, « ordinairement 23h00 heure de Paris » | Calcul des fuseaux : 17:00 New York correspond à 23:00 Paris, et à 22:00 Paris pendant les semaines où les changements d'heure européen et américain ne coïncident pas. « Ordinairement » ne suffit pas à établir la règle effective d'IG pendant ces semaines (question au §6.3) |
+| Jours | Une nuit par journée de négociation franchie ; un passage du vendredi au lundi compte 3 nuits | Une nuit par jour, **triple le mercredi** | Calendriers différents, notamment pour une position présente le mercredi soir ou détenue pendant le week-end. Au mieux, pour une position constante sur une semaine ordinaire, les deux conventions peuvent couvrir le même nombre de jours de financement, selon le calendrier applicable (jours fériés compris) ; cela ne démontre **aucune égalité des montants**, le forfait simulé restant différent du tom-next et des frais administratifs |
 
-**Ordre de grandeur, à titre indicatif (CALC, non appliqué).** Pour 1 contrat Mini à un cours
-de 1,12 (notionnel d'environ 11 200 USD), les frais administratifs seuls représentent environ
-0,31 USD par nuit à 1 % par an et au plus 0,25 USD à 0,0022 % par jour. S'y ajoute le tom-next,
-de signe et de montant inconnus pour 2015-2021. Ce calcul ne dit donc pas si le forfait de 1 USD
-majore ou minore le coût réel.
+**Ordre de grandeur, à titre indicatif (CALC, non appliqué).** Calcul illustratif qui suppose,
+sans confirmation d'IG, que la « taille » est la valeur notionnelle en USD et que le taux annuel
+se répartit sur une **base de 365 jours** (choix de l'illustration, pas une convention IG
+confirmée). Pour 1 contrat Mini à un cours de 1,12 (notionnel d'environ 11 200 USD), les frais
+administratifs seuls représentent alors environ 0,31 USD par nuit à 1 % par an (11 200 × 1 % /
+365), et au plus 0,25 USD à 0,0022 % par jour. S'y ajoute le tom-next, de signe et de montant
+inconnus pour 2015-2021. Ce calcul ne dit donc pas si le forfait de 1 USD majore ou minore le coût
+réel.
 
 **Portée.** Le rapprochement décrit des formules ; il ne modifie ni le moteur, ni les paramètres,
 ni les coûts. Les valeurs publiées en 2026 ne sont pas appliquées à 2015-2021 sans décision
