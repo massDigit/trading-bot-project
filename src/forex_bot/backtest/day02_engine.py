@@ -66,6 +66,7 @@ from forex_bot.backtest.day02 import (
     Attempt,
     Closing,
     Configuration,
+    Context,
     Day02Params,
     Trigger,
     ceil_m15,
@@ -84,7 +85,7 @@ from forex_bot.backtest.engine import (
 )
 from forex_bot.backtest.feed import Silence, Tick, classify_silence
 from forex_bot.backtest.s1 import EntrySignal, S1Params
-from forex_bot.backtest.s2 import ContinuousWilderAtr, GapScenario
+from forex_bot.backtest.s2 import ContinuousWilderAtr, GapScenario, first_missing
 from forex_bot.history.bars import Gap
 from forex_bot.history.calendar import MarketState, market_state, trading_day
 from forex_bot.market import Quote
@@ -129,8 +130,10 @@ class Day02Backtest(S1Backtest):
         scenario: GapScenario = GapScenario.OBSERVED_ONLY,
         start_utc: datetime | None = None,
         end_utc: datetime | None = None,
+        h4: Sequence[dict[str, Any]] = (),
     ) -> None:
-        # No H4 nor D1: S1 rules are never evaluated; the S1 parameters only carry the ATR period.
+        # No D1; H4 only for the H3 context of the exploratory campaign (unused by the reference).
+        # S1 rules are never evaluated; the S1 parameters only carry the ATR period.
         super().__init__(
             [], [], ticks, gaps, S1Params(atr_period=params.atr_period), config, start_utc=start_utc, end_utc=end_utc
         )
@@ -140,6 +143,12 @@ class Day02Backtest(S1Backtest):
         if self.h1_end != sorted(self.h1_end):
             raise ValueError("bougies H1 attendues dans l'ordre chronologique")
         self.h1_atr = ContinuousWilderAtr(self.h1, params.atr_period)  # continuity of the expected H1
+        self.context_h4 = list(h4)
+        self.context_h4_end = [b["end_utc"] for b in self.context_h4]
+        if self.context_h4_end != sorted(self.context_h4_end):
+            raise ValueError("bougies H4 attendues dans l'ordre chronologique")
+        if params.context is not Context.NONE and not self.context_h4:
+            raise ValueError("contexte H4 demandé sans bougies H4")
         self.m5 = {b["start_utc"]: b for b in m5}
         self.m15 = {b["start_utc"]: b for b in m15}
         self.trigger_bars = self.m5 if params.trigger is Trigger.M5 else self.m15
@@ -214,6 +223,25 @@ class Day02Backtest(S1Backtest):
 
         return self.h1_atr.at(i, state)
 
+    def context_at(self, cutoff: datetime, known_at: datetime) -> int | None:
+        """H3: sign of SMA(n) minus its previous value on the H4 bid closes, i.e. of close(k) - close(k - n),
+        where k is the last H4 ended by `cutoff`. The n + 1 H4 must be contiguous in the expected schedule
+        and usable with states as knowable at `known_at`; otherwise None (context not computable)."""
+        n = self.day02.context_period
+        k = bisect.bisect_right(self.context_h4_end, cutoff) - 1
+        if k - n < 0:
+            return None
+        bars = self.context_h4[k - n : k + 1]
+        if first_missing(bars, bars[0]["start_utc"], bars[-1]["end_utc"]) is not None:
+            return None
+        config = self.config
+        if not all(
+            bar_state(b, known_at, self.gaps, config.gap_threshold, config.documented_closures).usable for b in bars
+        ):
+            return None
+        diff = bars[-1]["bid_close"] - bars[0]["bid_close"]
+        return 1 if diff > 0 else -1 if diff < 0 else 0
+
     # ------------------------------------------------------------------ session
 
     def _session(self, day: date) -> datetime | None:
@@ -232,7 +260,7 @@ class Day02Backtest(S1Backtest):
             resume, after = max(start, closed), POSITION_CLOSED
         decided: datetime | None = None
         while True:
-            search = configuration_from(resume, day, self.m15, self.trigger_bars, self.atr_at, p)
+            search = configuration_from(resume, day, self.m15, self.trigger_bars, self.atr_at, p, self.context_at)
             attempt = Attempt(day, resume, after, search)
             self.attempts.append(attempt)
             config = search.configuration

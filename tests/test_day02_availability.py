@@ -383,7 +383,7 @@ def test_command_refuses_unknown_hashes_and_withholds_results_on_a_failed_check(
     monkeypatch.setattr(tool, "H1_SHA256", full[:8] + "0" * 56)  # same published prefix, other hash
     assert main([*argv, "--out", str(out), "--details-out", str(details)]) == 2 and not out.exists()
     monkeypatch.setattr(tool, "H1_SHA256", full)
-    monkeypatch.setattr(tool, "resume_errors", lambda paths: ["reprise falsifiée"])
+    monkeypatch.setattr(tool, "resume_errors", lambda paths, *_: ["reprise falsifiée"])
     assert main([*argv, "--out", str(out), "--details-out", str(details)]) == 2
     report = json.loads(out.read_text())
     assert report["failed_checks"] == ["C3"] and "comptes" not in report and not details.exists()

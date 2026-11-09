@@ -75,9 +75,9 @@ from forex_bot.backtest.day02_availability import (
     FORMATION_ENDS,
     GAPS_ANCHOR,
     H1_SHA256,
+    H4_SHA256,
     LOT,
     OFFICIAL_WINDOW,
-    PARAMS,
     QUALITY_REPORT,
     SearchLine,
     SessionPath,
@@ -88,6 +88,7 @@ from forex_bot.backtest.day02_availability import (
     study_days,
 )
 from forex_bot.backtest.day02_engine import Day02Backtest, Day02Result
+from forex_bot.backtest.day02_variants import REFERENCE, VARIANTS, needs_h4, variant_of, variant_params
 from forex_bot.backtest.engine import DecisionRecord, ResearchConfig, StopAtExecution, StopType, Trade
 from forex_bot.backtest.explore import RESEARCH_COSTS, _peak_rss_mib, _trade, _trade_totals
 from forex_bot.backtest.feed import Silence, Tick
@@ -216,7 +217,7 @@ def recompute_errors(result: Day02Result, engine: Day02Backtest) -> list[str]:
     errors = []
     for a in result.attempts:
         again = configuration_from(
-            a.resume_utc, a.day, engine.m15, engine.trigger_bars, engine.atr_at, result.day02_params
+            a.resume_utc, a.day, engine.m15, engine.trigger_bars, engine.atr_at, result.day02_params, engine.context_at
         )
         if again != a.search:
             errors.append(f"{a.day} reprise {a.resume_utc.isoformat()} : recherche différente du recalcul")
@@ -230,7 +231,9 @@ def independent_errors(result: Day02Result, engine: Day02Backtest) -> list[str]:
     errors = []
     for a in result.attempts:
         mine = first_configuration_view(a.search.configuration)
-        other = independent_first(a.day, rows, engine.atr_at, resume=a.resume_utc)
+        other = independent_first(
+            a.day, rows, engine.atr_at, resume=a.resume_utc, params=result.day02_params, context=engine.context_at
+        )
         if mine != other:
             errors.append(f"{a.day} reprise {a.resume_utc.isoformat()} : {mine} ≠ recalcul {other}")
     return errors
@@ -1221,29 +1224,37 @@ def main(argv: list[str] | None = None) -> int:
         parser.add_argument(f"--{name}-reference", type=Path, help=f"rapport {name.upper()} de référence")
     parser.add_argument("--out", type=Path, required=True, help="rapport JSON (hors Git, sous data/)")
     parser.add_argument("--sessions-out", type=Path, required=True, help="détail JSONL par séance (hors Git)")
+    parser.add_argument("--variant", choices=list(VARIANTS), default=REFERENCE, help="campagne exploratoire H1-H3")
     args = parser.parse_args(argv)
     if not args.init_start <= args.start < args.end:
         parser.error("dates attendues : init-start <= start < end")
     require_development_window(args.init_start, args.end)
     began = time.perf_counter()
     trigger = Trigger(args.trigger)
-    params = PARAMS[trigger]  # frozen values; only the trigger is chosen
+    # Frozen values: only the trigger is chosen, plus, for the exploratory campaign, a registered variant.
+    params = variant_params(args.variant, trigger)
+    reference = args.variant == REFERENCE
     official = (args.start, args.end) == OFFICIAL_WINDOW
     directory = args.data_dir / "bars" / SOURCE / INSTRUMENT
     candles = {g: directory / LOT / f"{g.value}.parquet" for g in Grid}
     h1_path = directory / f"{Timeframe.H1.value}.parquet"
+    h4_path = directory / f"{Timeframe.H4.value}.parquet"
     quality = args.data_dir / "reports" / QUALITY_REPORT
-    inputs = (*candles.values(), h1_path, quality)
+    with_h4 = needs_h4(args.variant)
+    inputs = (*candles.values(), h1_path, quality, *((h4_path,) if with_h4 else ()))
     before = {path.as_posix(): sha256_file(path) for path in inputs}
     wrong = [g.value for g, path in candles.items() if before[path.as_posix()] != CANDLES_SHA256[g]]
     wrong += ["1h"] if before[h1_path.as_posix()] != H1_SHA256 else []
+    wrong += ["4h"] if with_h4 and before[h4_path.as_posix()] != H4_SHA256 else []
     study_hash = sha256_file(args.availability)
-    wrong += ["étude de disponibilité"] if official and study_hash != STUDY_SHA256 else []
+    # The anchored study is the reference's; a variant is matched with its own study (same variant).
+    wrong += ["étude de disponibilité"] if official and reference and study_hash != STUDY_SHA256 else []
     if wrong:
         print(f"empreintes {wrong} différentes des références : aucune lecture", file=sys.stderr)
         return 2
     bars = {g: read_candles(path, args.end)[0] for g, path in candles.items()}
     h1 = load_bars(args.data_dir, SOURCE, INSTRUMENT, Timeframe.H1, args.init_start, args.end)
+    h4 = load_bars(args.data_dir, SOURCE, INSTRUMENT, Timeframe.H4, args.init_start, args.end) if with_h4 else []
     gaps = load_gaps(quality, args.end)
     files = tick_files(HistoryStore(args.data_dir).tick_files(SOURCE, INSTRUMENT), args.start, args.end)
     config = ResearchConfig(
@@ -1252,12 +1263,15 @@ def main(argv: list[str] | None = None) -> int:
     seen = [0]
     engine = Day02Run(
         bars[Grid.M5], bars[Grid.M15], h1, _counting(stream_ticks(files, args.start, args.end), seen), gaps, params,
-        config, scenario=SCENARIOS[args.scenario], start_utc=args.start, end_utc=args.end,
+        config, scenario=SCENARIOS[args.scenario], start_utc=args.start, end_utc=args.end, h4=h4,
     )  # fmt: skip
     result = engine.run()
     days = study_days(args.start, args.end)
     with args.availability.open(encoding="utf-8") as rows:
         study, study_errors = study_lines((json.loads(r) for r in rows), official)
+    study_variants = {str(row.get("variant", REFERENCE)) for row in study.values()}
+    if study_variants != {args.variant}:
+        study_errors = [*study_errors, f"étude de la variante {sorted(study_variants)}, passage {args.variant}"]
     after = {path.as_posix(): sha256_file(path) for path in inputs}
     finish = end_check(launch, tree_state())
     code_changed = finish["commit"] != launch["commit"] or any(
@@ -1269,7 +1283,10 @@ def main(argv: list[str] | None = None) -> int:
     inputs_errors = [] if before == after else ["empreintes des entrées modifiées pendant le passage"]
     inputs_errors += [] if sha256_file(args.availability) == study_hash else ["étude modifiée pendant le passage"]
     inputs_errors += [] if window_ok else ["tick lu hors de la fenêtre"]
-    inputs_errors += [] if params == PARAMS[trigger] else ["paramètres différents de l'attendu"]
+    inputs_errors += [] if params == variant_params(args.variant, trigger) else ["paramètres différents de l'attendu"]
+    inputs_errors += [] if variant_of(params) == args.variant else ["paramètres hors de la variante"]
+    late_h4 = [b for b in h4 if b["end_utc"] > args.end]
+    inputs_errors += [f"{len(late_h4)} H4 lue(s) après la fin"] if late_h4 else []
     inputs_errors += [f"{len(gaps)} trous chargés ≠ {GAPS_ANCHOR}"] if official and len(gaps) != GAPS_ANCHOR else []
     provenance_errors = [] if not launch["uncommitted_diff_sha256"] else ["arbre non propre au lancement"]
     provenance_errors += ["code ou commit modifié pendant le passage"] if code_changed else []
@@ -1277,8 +1294,11 @@ def main(argv: list[str] | None = None) -> int:
         "5m": CANDLES_SHA256[Grid.M5],
         "15m": CANDLES_SHA256[Grid.M15],
         "1h": H1_SHA256,
+        **({"4h": H4_SHA256} if with_h4 else {}),
         QUALITY_REPORT: "aucune référence historique : empreinte enregistrée au passage ; ancrage par les trous",
-        "étude": STUDY_SHA256 if official else "fenêtre non officielle : empreinte enregistrée seulement",
+        "étude": STUDY_SHA256
+        if official and reference
+        else "variante ou fenêtre non officielle : empreinte enregistrée seulement",
     }
     checks, matched = controls(
         result, engine, days, study, study_errors,
@@ -1310,6 +1330,7 @@ def main(argv: list[str] | None = None) -> int:
             "une sortie confirmée n'est pas une entrée",
             "window": {"init_start": args.init_start, "start": args.start, "end": args.end, "official": official},
             "config": {
+                **({} if reference else {"variant": args.variant}),
                 "trigger": trigger.value,
                 "scenario": args.scenario,
                 "passage": passage_of(args.scenario, config.stop_at_execution),
@@ -1324,8 +1345,8 @@ def main(argv: list[str] | None = None) -> int:
                 "size_increment": config.size_increment,
                 "daily_weekly_limits": "non appliquées (ADR-027), franchissements non décrits ; 6 % : seuil de revue",
             },
-            "inputs": {"m5": len(bars[Grid.M5]), "m15": len(bars[Grid.M15]), "h1": len(h1), "gaps": len(gaps),
-                       "tick_files": len(files), "ticks": seen[0], "sessions": len(days),
+            "inputs": {"m5": len(bars[Grid.M5]), "m15": len(bars[Grid.M15]), "h1": len(h1), "h4": len(h4),
+                       "gaps": len(gaps), "tick_files": len(files), "ticks": seen[0], "sessions": len(days),
                        "availability": str(args.availability)},
             **body,
             "sessions_file": sessions_file,

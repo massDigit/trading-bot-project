@@ -330,3 +330,14 @@
   4. La réponse du support IG n'est plus un préalable à ce premier passage. Les échanges avec IG restent documentaires (`CONFIRMATIONS.md`) et ne modifient pas ce protocole.
   5. Toute évaluation ultérieure avec des conditions IG mieux documentées fera l'objet d'un **protocole distinct, fixé avant son lancement**, quel que soit le résultat du premier passage.
 - **Portée** : documentation seulement. Aucun changement de moteur, de paramètres ou de coûts ; le code reste celui de `66557cd`, et la décision est consignée dans un commit documentaire distinct. La revue du code de la PR #26 reste nécessaire ; **aucun passage historique n'est autorisé** par cette décision (autorisation explicite attendue après la revue). Aucune lecture de 2022-2025, aucun ordre.
+
+### ADR-036 : Campagne exploratoire DAY_02 H1-H3 sur 2015-2021 (M5), référence conservée
+- **Date** : 2026-11-09
+- **Statut** : `ACCEPTED` (décision de l'opérateur)
+- **Source** : messages de l'opérateur du 2026-11-09 après le premier passage DAY_02 (net négatif, M5 et M15, scénario A seul requis), l'audit des règles et le plan d'amélioration ; contrainte impérative de causalité.
+- **Décision** :
+  1. Campagne complète autorisée sur H1 (reconnaissance différée), H2 (profondeur sur clôture) et H3 (contexte directionnel), seules et combinées (7 variantes et la référence), déclenchement M5, 2015-2021 seulement ; exécution autonome (implémentation, tests, études, passages, scénarios conditionnels, relances techniques tracées).
+  2. Une définition par hypothèse, fixée et enregistrée avant la lecture des résultats des variantes (`docs/experiments/DAY02_IMPROVEMENT_CAMPAIGN.md` §3) ; une seule branche de recherche, configurations explicites (`--variant`).
+  3. Causalité impérative : aucune information postérieure à T dans une décision à T ; tests de troncature et d'altération après T ; reconnaissance tardive sans décision ni exécution antidatée.
+  4. Exploration seulement : le découpage 2015-2018 / 2019-2021 reste exploratoire ; aucune variante n'est validée pour le réel sur cette base.
+- **Portée** : la référence DAY_02 (ADR-028, ADR-034, ADR-035), ses règles et son résultat négatif restent inchangés et reproductibles. Coûts, capital et risque de l'ADR-035. Aucun accès à 2022-2025, aucun ordre réel ou démo, aucun modèle d'apprentissage, aucune fusion ni remplacement de la référence sans accord de l'opérateur.

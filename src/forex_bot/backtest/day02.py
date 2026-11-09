@@ -16,7 +16,7 @@ priority (depth first). Research only: nothing here sends an order.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal
@@ -25,6 +25,13 @@ from typing import Any
 
 from forex_bot.backtest.day01 import M5, M15, bar_ok, london
 from forex_bot.risk import Side
+
+
+class Context(StrEnum):
+    """Directional context of the exploratory campaign H3 (DAY02_IMPROVEMENT_CAMPAIGN.md); none in the reference."""
+
+    NONE = "aucun"  # reference: the impulse alone gives the direction (sheet §3.1)
+    H4_SMA_SLOPE = "pente de la moyenne simple H4"  # H3: sign of SMA(n) H4 minus its previous value
 
 
 class Trigger(StrEnum):
@@ -59,6 +66,11 @@ class Day02Params:
     interruption_threshold: timedelta = timedelta(minutes=5)
     atr_period: int = 14
     trigger: Trigger = Trigger.M5
+    # Exploratory campaign (DAY02_IMPROVEMENT_CAMPAIGN.md), all off in the frozen reference:
+    deferred_recognition: bool = False  # H1: an impulse may be recognised after its peak candle (p < j)
+    depth_on_close: bool = False  # H2: the 50 % depth invalidates on the bid close, not on the extreme
+    context: Context = Context.NONE  # H3: impulse admitted only in the direction of the H4 context
+    context_period: int = 20  # H3: SMA of the last 20 H4 bid closes
 
     @property
     def trigger_step(self) -> timedelta:
@@ -73,6 +85,10 @@ PEAK_BEFORE_END = "sommet antérieur à la dernière bougie (p < j)"
 AMPLITUDE = "amplitude insuffisante"
 WEAK_CLOSE = "clôture non forte"
 AMBIGUOUS = "cas ambigu : hausse et baisse à la fois"
+# Exploratory campaign only (never produced by the reference parameters).
+DEEP_BEFORE_RECOGNITION = "repli trop profond avant la reconnaissance"  # H1: a closed candle after p
+CONTEXT_AGAINST = "contexte H4 contraire ou neutre"  # H3
+CONTEXT_UNAVAILABLE = "contexte H4 non calculable"  # H3
 
 # End of a configuration, one cause, the first that occurs (sheet §9).
 FLAG_DATA = "données inutilisables pendant le drapeau"
@@ -181,6 +197,15 @@ class Search:
 
 # ATR H1 on the last H1 ended by `cutoff`, candle states as knowable at `known_at`.
 AtrOf = Callable[[datetime, datetime], Decimal | None]
+# H3: sign of the H4 context (+1 up, -1 down, 0 flat) on the last H4 ended by `cutoff`, or None.
+ContextOf = Callable[[datetime, datetime], int | None]
+
+
+def breaches_depth(bar: Mapping[str, Any], long: bool, limit: Decimal, on_close: bool) -> bool:
+    """Depth invalidation: the extreme beyond the limit (reference), or the bid close (H2)."""
+    if on_close:
+        return bool(bar["bid_close"] < limit if long else bar["bid_close"] > limit)
+    return bool(bar["bid_low"] < limit if long else bar["bid_high"] > limit)
 
 
 def _side_cause(side: Side, window: list[Mapping[str, Any]], a: Decimal, p: Day02Params) -> tuple[str | None, Any]:
@@ -197,8 +222,10 @@ def _side_cause(side: Side, window: list[Mapping[str, Any]], a: Decimal, p: Day0
         k = len(lows) - 1 - lows[::-1].index(peak)
     if not o < k:
         return ORDER, None
-    if k != len(window) - 1:
+    if k != len(window) - 1 and not p.deferred_recognition:
         return PEAK_BEFORE_END, None  # restriction chosen for the reference (p = j), not implied by o < p
+    # Amplitude and strong close on the close of j, the last candle closed at t_j: p = j in the reference;
+    # under H1 they are not moved to p, they state that at t_j the price still holds the impulse.
     close, amplitude = window[-1]["bid_close"], abs(peak - origin)
     move = close - origin if long else origin - close
     if move < p.min_amplitude * a:
@@ -206,7 +233,12 @@ def _side_cause(side: Side, window: list[Mapping[str, Any]], a: Decimal, p: Day0
     strong = close >= peak - p.strong_close * amplitude if long else close <= peak + p.strong_close * amplitude
     if not strong:
         return WEAK_CLOSE, None
-    return None, (origin, o, peak)
+    # H1: the candles after p, already closed at t_j, are pause candles (none reaches E: p is the last
+    # one that does); each must respect the depth, with the E and I of the window, as in §5.3.
+    limit = peak - (amplitude / 2) if long else peak + (amplitude / 2)
+    if any(breaches_depth(b, long, limit, p.depth_on_close) for b in window[k + 1 :]):
+        return DEEP_BEFORE_RECOGNITION, None
+    return None, (origin, o, peak, k)
 
 
 def configuration_from(
@@ -216,6 +248,7 @@ def configuration_from(
     trigger_bars: Mapping[datetime, Mapping[str, Any]],
     atr_of: AtrOf,
     params: Day02Params,
+    context_of: ContextOf | None = None,
 ) -> Search:
     """Path from a resume state at `resume_utc` (no configuration, entry or position) on session `day`.
 
@@ -252,10 +285,21 @@ def configuration_from(
             t += M15
             continue
         side = Side.LONG if long_found is not None else Side.SHORT
-        origin, o, peak = long_found if long_found is not None else short_found
-        config = Configuration(side, t, a, origin, starts[o], peak, starts[-1])
+        origin, o, peak, k = long_found if long_found is not None else short_found
+        if p.context is not Context.NONE:
+            # H3, read only once an impulse is found: last H4 ended by the start of the window (as A).
+            sign = None if context_of is None else context_of(starts[0], t)
+            if sign is None:
+                search.examined.append(Examined(t, CONTEXT_UNAVAILABLE))
+                t += M15
+                continue
+            if sign != (1 if side is Side.LONG else -1):
+                search.examined.append(Examined(t, CONTEXT_AGAINST))
+                t += M15
+                continue
+        config = Configuration(side, t, a, origin, starts[o], peak, starts[k])
         search.configuration = config
-        _follow(config, day, m15, trigger_bars, p)
+        _follow(config, day, m15, trigger_bars, p, window[k + 1 :])
         return search
     return search
 
@@ -276,14 +320,20 @@ def _follow(
     m15: Mapping[datetime, Mapping[str, Any]],
     trigger_bars: Mapping[datetime, Mapping[str, Any]],
     p: Day02Params,
+    initial_pauses: Sequence[Mapping[str, Any]] = (),
 ) -> None:
-    """Flag formation on M15 (§5.3), then exit on the trigger unit (§5.4), deadlines (§5.5)."""
+    """Flag formation on M15 (§5.3), then exit on the trigger unit (§5.4), deadlines (§5.5).
+
+    `initial_pauses` (H1 only): pause candles after p already closed at t_j. They count, but nothing is
+    dated before t_j: with two of them the flag is formed at F = t_j, the instant they are all known."""
     long = config.side is Side.LONG
     last_flag = london(day, p.last_flag)
-    pauses: list[Mapping[str, Any]] = []
+    pauses: list[Mapping[str, Any]] = list(initial_pauses)
     start = config.recognised_utc
+    if len(pauses) >= p.min_pause:
+        config.flag_utc = config.recognised_utc  # = end of the second pause candle, never earlier than t_j
     # Formation: the first rule that applies alone, values known before the candle.
-    while True:
+    while config.flag_utc is None:
         end = start + M15
         deadline, cause = _deadline(config, day, p)
         if end > deadline:
@@ -298,7 +348,7 @@ def _follow(
             _end(config, FLAG_DATA, end, f"M15 {start.isoformat()}, prix non lus")
             return
         limit = config.depth_limit  # old E and old I: priority of the invalidation over the extension
-        if (long and bar["bid_low"] < limit) or (not long and bar["bid_high"] > limit):
+        if breaches_depth(bar, long, limit, p.depth_on_close):
             _end(config, TOO_DEEP, end, f"M15 {start.isoformat()}")
             return
         if (long and bar["bid_high"] > config.peak) or (not long and bar["bid_low"] < config.peak):
@@ -315,6 +365,8 @@ def _follow(
                 config.flag_utc = end
                 break
         start = end
+    if config.flag_utc is None:
+        raise RuntimeError("formation terminée sans F")
     config.pause_starts = [b["start_utc"] for b in pauses]
     config.deadline_utc, cause = _deadline(config, day, p)
     config.slope = (pauses[-1]["bid_close"] - pauses[0]["bid_close"]) / config.atr
@@ -334,7 +386,7 @@ def _follow(
             _end(config, FLAG_DATA, end, f"{p.trigger.value} {start.isoformat()}, prix non lus")
             return
         extreme = min(extreme, bar["bid_low"]) if long else max(extreme, bar["ask_high"])
-        if (long and bar["bid_low"] < config.depth_limit) or (not long and bar["bid_high"] > config.depth_limit):
+        if breaches_depth(bar, long, config.depth_limit, p.depth_on_close):
             _end(config, TOO_DEEP, end, f"{p.trigger.value} {start.isoformat()}")  # before the exit (§5.4)
             return
         if (long and bar["bid_close"] > level) or (not long and bar["bid_close"] < level):
