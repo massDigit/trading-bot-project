@@ -9,8 +9,10 @@ revue de f705858 : deux corrections intégrées (écart entre indicateur approch
 corrections**, soumis à revue. Aucun passage historique. Étape 6 de la fiche figée `docs/strategies/DAY_02_FLAG_CONTINUATION.md` (§10,
 ADR-028), après la clôture de l'étude de disponibilité (étape 5, PR #25, bilan
 `DAY02_AVAILABILITY_2015_2021_BILAN.md`, ADR-033). Ni validation de performance, ni autorisation de
-trading. **Les passages restent subordonnés à la décision de l'opérateur sur les conditions IG
-(§10)**. Aucun paramètre ne sera modifié après lecture des résultats ; un résultat défavorable est
+trading. Conditions IG : l'opérateur a retenu le 2026-11-09 l'option (b), hypothèses de
+recherche figées conservées à l'identique (§10, ADR-035), consignée dans un commit documentaire
+distinct du code gelé à `66557cd`. **Les passages restent subordonnés à la revue du code et à une
+autorisation explicite d'exécution**. Aucun paramètre ne sera modifié après lecture des résultats ; un résultat défavorable est
 rapporté tel quel.
 
 ## 1. Code et données
@@ -316,8 +318,14 @@ indépendantes, chacune avec son capital : **ce n'est pas une simulation de port
 6. Les limites 1 % et 2 % ne sont pas appliquées (ADR-027) : le résultat n'est pas celui d'un compte
    qui les applique.
 7. Aucun filtre d'annonces : la part des configurations touchées n'est pas mesurable.
+8. Hypothèses de recherche `ASSUMED`, non confirmées chez IG (ADR-035) : taille minimale et pas de
+   0,1 contrat Mini, aucune distance minimale du courtier appliquée au stop garanti, conversion à
+   0,5 %, financement forfaitaire de 1 USD par contrat Mini et par nuit. Les relevés du compte réel
+   (`docs/CONFIRMATIONS.md` §6 et §7) en diffèrent sur plusieurs points et ne sont pas intégrés. Le
+   résultat mesure DAY_02 dans ce modèle ; il ne démontre ni sa rentabilité réelle chez IG ni
+   l'admissibilité de toutes ses transactions.
 
-## 10. Conditions IG : décision encore nécessaire avant les passages
+## 10. Conditions IG : option (b) retenue (ADR-035)
 
 La fiche (§8) liste les informations IG manquantes et les hypothèses de recherche qui les
 remplacent : distance minimale et prime du stop garanti, côté de déclenchement des stops,
@@ -336,8 +344,17 @@ dans une ADR :
   dans le bilan.
 
 Aucune variante de sensibilité aux conditions IG n'est prévue par ce protocole. L'outil a été
-écrit et testé sur données synthétiques avant cette décision (autorisation du 2026-11-07) ; la
-décision reste **ouverte** et aucun passage historique n'est autorisé.
+écrit et testé sur données synthétiques avant cette décision (autorisation du 2026-11-07).
+
+**Décision du 2026-11-09 (ADR-035) : option (b).** Le premier passage est mené sous les
+hypothèses de recherche actuellement figées, conservées à l'identique, avec leurs limites (§9,
+points 5, 6 et 8), rappelées dans le bilan. Ces valeurs restent `ASSUMED`. Les échanges avec IG
+autorisés par l'opérateur après la rédaction de l'option (a) sont documentaires
+(`docs/CONFIRMATIONS.md` §6 et §7) : leurs résultats ne sont pas intégrés à ce protocole, et la
+réponse du support n'est pas un préalable au passage. Toute évaluation ultérieure avec des
+conditions IG mieux documentées fera l'objet d'un **protocole distinct, fixé avant son
+lancement**, quel que soit le résultat de ce premier passage. Cette décision n'autorise aucun
+passage : la revue du code et une autorisation explicite d'exécution restent nécessaires.
 
 ## 11. Commandes (figées avec l'outil)
 
@@ -370,8 +387,11 @@ Ordre prévu :
 4. comparaison M5 / M15 de chaque scénario dont les deux passages existent :
    `uv run forex-day02-compare --m5-report <...> --m15-report <...> --m5 <..._sessions.jsonl> --m15 <..._sessions.jsonl> --out <...>`.
 
- Chaque commande part d'un arbre propre
-au commit qui fige ce protocole et l'outil ; un contrôle en échec (code 2) arrête la suite et est
+ Chaque commande part d'un arbre propre.
+Le code et les tests sont figés à `66557cd` ; les commits documentaires posés ensuite (ADR-035)
+ne modifient ni `src/`, ni `tests/`, ni `pyproject.toml`, ni `uv.lock`. Avant le premier passage,
+`git diff --stat 66557cd HEAD -- src tests pyproject.toml uv.lock` doit être vide ; la provenance
+enregistrée dans chaque rapport est celle du commit de lancement ; un contrôle en échec (code 2) arrête la suite et est
 présenté avant toute correction. Bilan agrégé : `DAY02_REFERENCE_2015_2021_BILAN.md` ; journaux et
 détails hors Git.
 
@@ -381,12 +401,15 @@ détails hors Git.
 2. Outil `forex-day02-backtest`, `forex-day02-compare` et tests synthétiques (dont des tentatives
    faussées pour les contrôles des §5 et §6), sans passage historique : fait ; revue de f705858,
    deux corrections (§7, §8) ; protocole figé au commit de ces corrections, soumis à revue.
-3. Décision de l'opérateur sur les conditions IG (§10) : **ouverte**.
-4. Passages 2015-2021, **sur autorisation explicite**, dans l'ordre du §11.
+3. Décision de l'opérateur sur les conditions IG (§10) : option (b) retenue le 2026-11-09
+   (ADR-035), dans un commit documentaire distinct du gel `66557cd`.
+4. Revue du code de la PR #26 au gel `66557cd` : en cours.
+5. Passages 2015-2021, **sur autorisation explicite** après cette revue, dans l'ordre du §11.
 
 ## 13. Interdits
 
 Aucune donnée 2022-2025 ; aucun réglage après lecture des résultats ; aucune variante non
 enregistrée ici ; aucune égalité imposée avec les totaux de l'étude de disponibilité ; aucun
-entraînement ; aucun ordre, même en démo ; aucun contact avec IG par l'agent ; aucun détail par
+entraînement ; aucun ordre, même en démo ; aucune valeur obtenue d'IG intégrée à ce protocole (les échanges
+autorisés par l'opérateur restent documentaires, §10) ; aucun détail par
 séance publié.
