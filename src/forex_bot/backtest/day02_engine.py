@@ -20,7 +20,8 @@ Specific to DAY_02, session by session (London date, times in Europe/London):
   deadline reached: time exit 2 h after the execution, or liquidation at 17:00 (LIQUIDATION_17H when
   both fall at the same instant), executed at the first tick strictly after it, whose delay, closed
   silence and closing reason are kept apart (`Closing`); a position may remain after its deadline
-  for lack of quotes, without any invented price;
+  for lack of quotes, without any invented price; the exploratory LATE configuration
+  (DAY02_LATE_EXIT_CAMPAIGN.md) has no time exit and liquidates at 22:55 Europe/Paris instead;
 - open position across a silence strictly longer than 5 min: trade kept, marked indeterminate,
   scenario A (observed only), B (stop first) or C (target first), one trajectory each, as DAY_01;
   a known closure is not an unexplained interruption;
@@ -48,7 +49,6 @@ from forex_bot.backtest.day02 import (
     EXECUTED,
     EXIT,
     EXPIRED,
-    LIQUIDATION,
     MARKET_CLOSED,
     NO_QUOTE,
     NO_SESSION,
@@ -71,6 +71,7 @@ from forex_bot.backtest.day02 import (
     Trigger,
     ceil_m15,
     configuration_from,
+    liquidation_utc,
     session_day,
 )
 from forex_bot.backtest.engine import (
@@ -110,7 +111,7 @@ class _Due:
     """The closing order of the open position: its deadline and its reason."""
 
     utc: datetime
-    reason: str  # TIME_EXIT or LIQUIDATION
+    reason: str  # TIME_EXIT or the liquidation label of the parameters
     coincident: bool  # time exit exactly at 17:00
 
 
@@ -174,7 +175,7 @@ class Day02Backtest(S1Backtest):
         decided: datetime | None = None
         if start is not None and end is not None:
             for day in _london_days(start, end):
-                if not start <= london(day, p.impulse_start) or london(day, p.liquidation) > end:
+                if not start <= london(day, p.impulse_start) or liquidation_utc(day, p) > end:
                     continue  # the whole session must lie in the study window
                 decided = self._session(day) or decided
         if self.end_utc is not None:
@@ -523,13 +524,16 @@ class Day02Backtest(S1Backtest):
             attempt.entry_outcome, attempt.entry_outcome_utc = outcome, tick.ts_utc
 
     def _closing_due(self, executed: datetime, day: date | None) -> _Due | None:
-        """First deadline: time exit 2 h after the execution, or 17:00; equality gives LIQUIDATION_17H."""
+        """First deadline: time exit 2 h after the execution, or 17:00; equality gives LIQUIDATION_17H.
+        Without a time exit (LATE), the liquidation of the session alone (22:55 Europe/Paris)."""
         if day is None:
             return None
-        time_exit, liquidation = executed + self.day02.time_exit, london(day, self.day02.liquidation)
-        if time_exit < liquidation:
+        p = self.day02
+        liquidation = liquidation_utc(day, p)
+        if p.time_exit is not None and (time_exit := executed + p.time_exit) < liquidation:
             return _Due(time_exit, TIME_EXIT, False)
-        return _Due(liquidation, LIQUIDATION, time_exit == liquidation)
+        coincident = p.time_exit is not None and executed + p.time_exit == liquidation
+        return _Due(liquidation, p.liquidation_reason, coincident)
 
     def _close(
         self, tick: Tick, price: Decimal, reason: str, stop_triggered: bool, hypotheses: list[str] | None = None

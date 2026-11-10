@@ -18,10 +18,11 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
-from datetime import date, datetime, time, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
 from enum import StrEnum
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from forex_bot.backtest.day01 import M5, M15, bar_ok, london
 from forex_bot.risk import Side
@@ -59,8 +60,10 @@ class Day02Params:
     exit_margin: Decimal = Decimal("0.1")  # x A beyond E
     stop_margin: Decimal = Decimal("0.25")  # x A beyond the flag extreme
     entry_validity: timedelta = timedelta(minutes=5)  # ]D, D + 5 min]
-    time_exit: timedelta = timedelta(hours=2)  # after the execution
+    time_exit: timedelta | None = timedelta(hours=2)  # after the execution; None: no time exit (LATE)
     liquidation: time = time(17)
+    # Zone of the liquidation wall-clock time on the session date; the reference reads London.
+    liquidation_zone: str = "Europe/London"
     # ADR-021 extended by ADR-026: interruption = silence strictly longer than 5 min of expected-open
     # time, for pending entries and open positions. The H1 ATR keeps the H1 convention (ResearchConfig).
     interruption_threshold: timedelta = timedelta(minutes=5)
@@ -75,6 +78,21 @@ class Day02Params:
     @property
     def trigger_step(self) -> timedelta:
         return M5 if self.trigger is Trigger.M5 else M15
+
+    @property
+    def liquidation_reason(self) -> str:
+        """Label of the liquidation order: LIQUIDATION_17H for the reference, its own label otherwise."""
+        if (self.liquidation, self.liquidation_zone) == (time(17), "Europe/London"):
+            return LIQUIDATION
+        return LATE_LIQUIDATION
+
+
+def liquidation_utc(day: date, p: Day02Params) -> datetime:
+    """UTC instant of the liquidation of session `day`: its wall-clock time in its zone on the session
+    date (London date), daylight saving changes included; 17:00 London for the reference."""
+    if p.liquidation_zone == "Europe/London":
+        return london(day, p.liquidation)
+    return datetime.combine(day, p.liquidation, tzinfo=ZoneInfo(p.liquidation_zone)).astimezone(UTC)
 
 
 # Reasons an examined M15 does not recognise an impulse (the search goes on), sheet §9.
@@ -118,6 +136,8 @@ CANCELLED_INTERRUPTION = "ENTRÉE_ANNULÉE_INTERRUPTION"
 # Closing orders (sheet §6.3): the first deadline reached; equality gives LIQUIDATION_17H.
 TIME_EXIT = "SORTIE_TEMPORELLE"
 LIQUIDATION = "LIQUIDATION_17H"
+# Exploratory exit campaign (DAY02_LATE_EXIT_CAMPAIGN.md): liquidation at 22:55 Europe/Paris.
+LATE_LIQUIDATION = "LIQUIDATION_22H55_PARIS"
 # Annotation: the position closed on a later trading day than its entry, whatever the closing reason.
 UNPLANNED_NIGHT = "NUIT_NON_PRÉVUE"
 

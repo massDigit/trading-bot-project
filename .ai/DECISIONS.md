@@ -341,3 +341,13 @@
   3. Causalité impérative : aucune information postérieure à T dans une décision à T ; tests de troncature et d'altération après T ; reconnaissance tardive sans décision ni exécution antidatée.
   4. Exploration seulement : le découpage 2015-2018 / 2019-2021 reste exploratoire ; aucune variante n'est validée pour le réel sur cette base.
 - **Portée** : la référence DAY_02 (ADR-028, ADR-034, ADR-035), ses règles et son résultat négatif restent inchangés et reproductibles. Coûts, capital et risque de l'ADR-035. Aucun accès à 2022-2025, aucun ordre réel ou démo, aucun modèle d'apprentissage, aucune fusion ni remplacement de la référence sans accord de l'opérateur.
+
+### ADR-037 : Campagne exploratoire DAY_02 « sorties tardives » (LATE) sur 2015-2021 (M5), référence conservée
+- **Date** : 2026-11-10
+- **Statut** : `ACCEPTED` (décision de l'opérateur)
+- **Source** : message de l'opérateur du 2026-11-10 après la campagne H1-H3 (ADR-036, lecture « abandonner »).
+- **Décision** :
+  1. Comparer la référence inchangée à une variante unique `LATE` : mêmes entrées, horaires de recherche, stop initial, cible et dimensionnement ; sortie temporelle de 2 h supprimée ; liquidation de 17:00 Londres remplacée par 22:55 `Europe/Paris` (changements d'heure compris) ; entre-temps cible et stop seulement, sans sortie partielle ni stop suiveur ; une position à la fois, reprises inchangées ; exécution à l'échéance au premier tick strictement postérieur, sans prix inventé.
+  2. Financement du modèle ADR-035 appliqué à chaque passage de 17:00 New York, même sur une position close le même jour civil ; 22:55 Paris est une borne de recherche, pas une garantie d'éviter le financement. Incertitudes IG signalées à part.
+  3. Exécution autonome sur 2015-2021 (préparation, tests, études, passages, scénarios conditionnels), couverture des horaires supplémentaires vérifiée, contrôles de causalité conservés ; définition, mesures et lecture fixées avant les résultats (`docs/experiments/DAY02_LATE_EXIT_CAMPAIGN.md`).
+- **Portée** : exploration seulement. Référence DAY_02 et résultats antérieurs inchangés et reproductibles ; coûts, capital et risque de l'ADR-035. Aucun accès à 2022-2025, aucun ordre réel ou démo, aucune modification de paramètre après lecture, aucune fusion ni remplacement de la référence sans accord de l'opérateur.

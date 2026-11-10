@@ -53,6 +53,7 @@ from forex_bot.backtest.day02 import (
     Trigger,
     ceil_m15,
     configuration_from,
+    liquidation_utc,
     session_day,
 )
 from forex_bot.backtest.day02_engine import Day02Backtest
@@ -62,7 +63,7 @@ from forex_bot.backtest.explore import RESEARCH_COSTS
 from forex_bot.backtest.feed import Silence, classify_silence
 from forex_bot.backtest.s2 import ContinuousWilderAtr
 from forex_bot.history.bars import Gap
-from forex_bot.history.calendar import Timeframe, expected_open_minutes
+from forex_bot.history.calendar import MarketState, Timeframe, expected_open_minutes, market_state
 from forex_bot.history.intraday import NO_TICK, NO_VALID_TICK, SUBSLOTS_FLAG, Content, Grid
 from forex_bot.history.intraday_audit import end_check, provenance, sha256_file, tree_state
 from forex_bot.risk import Side
@@ -811,30 +812,57 @@ def silences(m5: Sequence[Mapping[str, Any]]) -> list[tuple[datetime, datetime, 
     return out
 
 
-def coverage(days: list[date], m5: Sequence[Mapping[str, Any]], m15: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+def late_exit(p: Day02Params) -> Day02Params | None:
+    """The parameters themselves when they hold positions after 17:00 London (LATE), else None."""
+    return None if (p.liquidation, p.liquidation_zone) == (FULL[1], "Europe/London") else p
+
+
+def coverage(
+    days: list[date],
+    m5: Sequence[Mapping[str, Any]],
+    m15: Sequence[Mapping[str, Any]],
+    late: Day02Params | None = None,
+) -> dict[str, Any]:
     """Needed coverage (07:00-15:00, recognition and exit) and descriptive coverage of the whole DAY_02
-    window (07:00-17:00): candles not OK by cause, and silences > 5 min intersecting each window."""
+    window (07:00-17:00): candles not OK by cause, and silences > 5 min intersecting each window.
+    With the LATE parameters, also the extra hours a position may be held: 17:00 London to the late
+    liquidation (22:55 Europe/Paris), expected-open slots only (closed slots counted apart)."""
     rows = {Grid.M5: {b["start_utc"]: b for b in m5}, Grid.M15: {b["start_utc"]: b for b in m15}}
     found = silences(m5)
     starts = [s for s, _, _ in found]
     out: dict[str, Any] = {"source_des_silences": "M5 auditées à 5 min : dernier et premier tick valides"}
-    for name, (lo, hi) in (("nécessaire_07_15", NEEDED), ("complète_07_17", FULL)):
+    Bound = Callable[[date], datetime]
+    windows: list[tuple[str, Bound, Bound]] = [
+        ("nécessaire_07_15", lambda d: london(d, NEEDED[0]), lambda d: london(d, NEEDED[1])),
+        ("complète_07_17", lambda d: london(d, FULL[0]), lambda d: london(d, FULL[1])),
+    ]
+    if late is not None:
+        windows.append(
+            ("positions_17_londres_22h55_paris", lambda d: london(d, FULL[1]), lambda d: liquidation_utc(d, late))
+        )
+    for name, lo, hi in windows:
         part: dict[str, Any] = {}
         for grid, step in ((Grid.M15, M15), (Grid.M5, M5)):
-            expected, causes = 0, Counter[str]()
+            expected, closed, causes = 0, 0, Counter[str]()
             for day in days:
-                cursor = london(day, lo)
-                while cursor < london(day, hi):
+                cursor = lo(day)
+                while cursor < hi(day):
+                    if late is not None and market_state(cursor) is not MarketState.OPEN:
+                        closed += 1  # market closed by the calendar (only in the extra hours)
+                        cursor += step
+                        continue
                     expected += 1
                     bar = rows[grid].get(cursor)
                     if not bar_ok(bar):
                         causes[bar_cause(bar)] += 1
                     cursor += step
             part[grid.value] = {"créneaux": expected, "non_ok": sum(causes.values()), "causes": dict(causes)}
+            if late is not None:
+                part[grid.value]["créneaux_marché_fermé"] = closed
         distinct: set[tuple[datetime, datetime]] = set()
         crossings, minutes, sessions = 0, 0.0, 0
         for day in days:
-            a, b = london(day, lo), london(day, hi)
+            a, b = lo(day), hi(day)
             hits = [(s, e) for s, e, _ in found[: bisect.bisect_left(starts, b)] if e > a]
             sessions += bool(hits)
             crossings += len(hits)
@@ -941,7 +969,7 @@ def availability(
         "checks": checks,
         "comptes": {t.value: counts(paths[t]) for t in TRIGGERS},
         "descriptions": {t.value: descriptions(paths[t], engines[t]) for t in TRIGGERS},
-        "couverture": coverage(days, bars[Grid.M5], bars[Grid.M15]),
+        "couverture": coverage(days, bars[Grid.M5], bars[Grid.M15], late_exit(params[Trigger.M5])),
     }
     if variant != REFERENCE:
         report["variant"] = variant

@@ -9,25 +9,32 @@ reproducible. Each hypothesis has one definition, fixed before any result of the
   trigger candles), no longer on its extreme; the stop still lies beyond the flag extreme;
 - H3, H4 context: an impulse is admitted only in the direction of the slope of the 20 H4 SMA (sign of
   close(k) - close(k - 20)), k the last H4 ended by the start of the impulse window.
+
+Exit campaign (docs/experiments/DAY02_LATE_EXIT_CAMPAIGN.md), apart from H1-H3:
+- LATE, longer holding: same entries, stop, target and sizing as the reference; no time exit after 2 h;
+  the 17:00 London liquidation replaced by a liquidation at 22:55 Europe/Paris on the session date
+  (daylight saving changes of each zone included); until then the target and the stop only.
 Research only: nothing here sends an order.
 """
 
 from __future__ import annotations
 
 from dataclasses import replace
+from datetime import time
 
 from forex_bot.backtest.day02 import Context, Day02Params, Trigger
 
-# (H1, H2, H3) switched on, by variant.
-VARIANTS: dict[str, tuple[bool, bool, bool]] = {
-    "REF": (False, False, False),
-    "H1": (True, False, False),
-    "H2": (False, True, False),
-    "H3": (False, False, True),
-    "H1H2": (True, True, False),
-    "H1H3": (True, False, True),
-    "H2H3": (False, True, True),
-    "H1H2H3": (True, True, True),
+# (H1, H2, H3, LATE) switched on, by variant.
+VARIANTS: dict[str, tuple[bool, bool, bool, bool]] = {
+    "REF": (False, False, False, False),
+    "H1": (True, False, False, False),
+    "H2": (False, True, False, False),
+    "H3": (False, False, True, False),
+    "H1H2": (True, True, False, False),
+    "H1H3": (True, False, True, False),
+    "H2H3": (False, True, True, False),
+    "H1H2H3": (True, True, True, False),
+    "LATE": (False, False, False, True),
 }
 REFERENCE = "REF"
 
@@ -36,13 +43,16 @@ def variant_params(name: str, trigger: Trigger = Trigger.M5) -> Day02Params:
     """Parameters of a variant: the frozen reference values, plus the switches of its hypotheses."""
     if name not in VARIANTS:
         raise ValueError(f"variante inconnue : {name}")
-    h1, h2, h3 = VARIANTS[name]
-    return replace(
+    h1, h2, h3, late = VARIANTS[name]
+    params = replace(
         Day02Params(trigger=trigger),
         deferred_recognition=h1,
         depth_on_close=h2,
         context=Context.H4_SMA_SLOPE if h3 else Context.NONE,
     )
+    if late:
+        params = replace(params, time_exit=None, liquidation=time(22, 55), liquidation_zone="Europe/Paris")
+    return params
 
 
 def variant_of(params: Day02Params) -> str:

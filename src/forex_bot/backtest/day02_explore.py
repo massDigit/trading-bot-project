@@ -38,6 +38,7 @@ from datetime import time as wall
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from forex_bot.backtest.data import load_bars, load_gaps, require_development_window, stream_ticks, tick_files
 from forex_bot.backtest.day01 import LONDON, london
@@ -49,6 +50,7 @@ from forex_bot.backtest.day02 import (
     EXECUTED,
     EXIT,
     EXPIRED,
+    LATE_LIQUIDATION,
     LIQUIDATION,
     MARKET_CLOSED,
     NO_QUOTE,
@@ -123,6 +125,8 @@ CLOSED_STOP = "sortie liée au stop"
 CLOSED_TARGET = "clôturée à la cible"
 OPEN_AT_END = "ouverte à la fin de l'étude"
 EXIT_OUTCOMES = (CLOSED_STOP, CLOSED_TARGET, TIME_EXIT, LIQUIDATION, OPEN_AT_END)
+# Exploratory LATE configuration (DAY02_LATE_EXIT_CAMPAIGN.md): no time exit, liquidation at 22:55 Paris.
+LATE_EXIT_OUTCOMES = (CLOSED_STOP, CLOSED_TARGET, LATE_LIQUIDATION, OPEN_AT_END)
 STOP_BEYOND_AT_EXECUTION = "STOP_FRANCHI_À_L'EXÉCUTION"  # filled then liquidated at the observed price
 EXIT_CATEGORY = {
     "STOP_OBSERVÉ": CLOSED_STOP,
@@ -137,6 +141,7 @@ EXIT_CATEGORY = {
     TARGET_AT_EXECUTION: CLOSED_TARGET,
     TIME_EXIT: TIME_EXIT,
     LIQUIDATION: LIQUIDATION,
+    LATE_LIQUIDATION: LATE_LIQUIDATION,
 }
 IMMEDIATE_EXIT = {STOP_AT_EXECUTION: STOP_BEYOND_AT_EXECUTION, TARGET_AT_EXECUTION: TARGET_AT_EXECUTION}
 # Annotations overlap the exclusive outcomes; they are never added up as exits.
@@ -193,6 +198,15 @@ def d_of(attempt: Attempt) -> datetime | None:
 def trade_of(attempt: Attempt, by_decision: Mapping[datetime, Trade]) -> Trade | None:
     d = d_of(attempt)
     return None if d is None or attempt.entry_outcome not in EXECUTED_OUTCOMES else by_decision.get(d)
+
+
+def exit_outcomes(p: Day02Params) -> tuple[str, ...]:
+    """Exclusive outcomes an executed entry may have under `p` (the reference keeps its own list)."""
+    if p.time_exit is None and p.liquidation_reason == LATE_LIQUIDATION:
+        return LATE_EXIT_OUTCOMES
+    if p.time_exit is not None and p.liquidation_reason == LIQUIDATION:
+        return EXIT_OUTCOMES
+    raise ValueError("échéances de clôture hors des configurations enregistrées")
 
 
 def exit_outcome(trade: Trade) -> str:
@@ -476,7 +490,9 @@ def reconcile(
 # ---------------------------------------------------------------------- §6 funnel
 
 
-def funnel(attempts: Sequence[Attempt], trades: Sequence[Trade]) -> dict[str, Any]:
+def funnel(
+    attempts: Sequence[Attempt], trades: Sequence[Trade], outcomes_of: tuple[str, ...] = EXIT_OUTCOMES
+) -> dict[str, Any]:
     """Searches -> configurations -> flags formed -> confirmed exits -> refusal at D or decided entry
     -> entry outcome -> exclusive outcome of an executed entry, annotations beside. The end for unusable
     data after F is an outcome of the formed flags. Read from the engine's records only."""
@@ -528,7 +544,7 @@ def funnel(attempts: Sequence[Attempt], trades: Sequence[Trade]) -> dict[str, An
         "no_trade_for_an_unexecuted_entry": all(per_entry[d] == 0 for d in unexecuted),
         "every_trade_from_an_executed_entry": set(per_entry) <= set(executed),
         "one_exclusive_outcome_per_executed_entry": sum(outcomes.values()) == len(executed)
-        and all(k in EXIT_OUTCOMES for k in outcomes),
+        and all(k in outcomes_of for k in outcomes),
         "immediate_exits_keep_their_reason": immediate_ok,
     }
     return {
@@ -545,7 +561,7 @@ def funnel(attempts: Sequence[Attempt], trades: Sequence[Trade]) -> dict[str, An
         "entry_outcomes": {k: entries.get(k, 0) for k in (*EXECUTED_OUTCOMES, *NOT_EXECUTED_OUTCOMES)},
         "entries_executed": len(executed),
         "entries_not_executed": len(unexecuted),
-        "executed_outcomes": {k: outcomes.get(k, 0) for k in EXIT_OUTCOMES},
+        "executed_outcomes": {k: outcomes.get(k, 0) for k in outcomes_of},
         "closing_reasons": {k: dict(v.most_common()) for k, v in reasons.items()},
         "checks": checks,
         "ok": all(checks.values()),
@@ -576,13 +592,25 @@ def trade_annotations(result: Day02Result) -> dict[datetime, list[str]]:
 # ---------------------------------------------------------------------- closings and bounds
 
 
+def liquidation_instant(day: date, p: Day02Params) -> datetime:
+    """Liquidation of session `day`, recomputed apart from the engine: 17:00 London (reference) or the
+    wall-clock time of its zone on the session date (LATE: 22:55 Europe/Paris)."""
+    if p.liquidation_zone == "Europe/London":
+        return london(day, p.liquidation)
+    return datetime.combine(day, p.liquidation, tzinfo=ZoneInfo(p.liquidation_zone)).astimezone(UTC)
+
+
 def due_of(entry_utc: datetime, day: date, p: Day02Params) -> tuple[datetime, str, bool]:
-    """First deadline (sheet §6.3): time exit 2 h after the execution or 17:00; LIQUIDATION_17H if equal."""
-    time_exit, liquidation = entry_utc + p.time_exit, london(day, p.liquidation)
+    """First deadline (sheet §6.3): time exit 2 h after the execution or 17:00; LIQUIDATION_17H if equal.
+    LATE: no time exit, liquidation at 22:55 Europe/Paris on the session date (recomputed here apart)."""
+    liquidation = liquidation_instant(day, p)
+    if p.time_exit is None:
+        return (liquidation, p.liquidation_reason, False)
+    time_exit = entry_utc + p.time_exit
     return (
         (time_exit, TIME_EXIT, False)
         if time_exit < liquidation
-        else (liquidation, LIQUIDATION, time_exit == liquidation)
+        else (liquidation, p.liquidation_reason, time_exit == liquidation)
     )
 
 
@@ -607,7 +635,7 @@ def closings(result: Day02Result) -> dict[str, Any]:
     errors += [
         f"clôture {t.exit_utc} par {t.exit_reason} sans ordre de clôture"
         for t in result.trades
-        if t.exit_reason in (TIME_EXIT, LIQUIDATION) and t.exit_utc not in per_trade
+        if t.exit_reason in (TIME_EXIT, LIQUIDATION, LATE_LIQUIDATION) and t.exit_utc not in per_trade
     ]
     nights = sorted(
         t.decided_utc for t in result.trades if t.exit_utc and trading_day(t.exit_utc) != trading_day(t.entry_utc)
@@ -635,7 +663,7 @@ def closings(result: Day02Result) -> dict[str, Any]:
         t.decided_utc
         for t in all_trades(result)
         if (day := days.get(t.decided_utc)) is not None
-        and (t.exit_utc is None or t.exit_utc > london(day, p.liquidation))
+        and (t.exit_utc is None or t.exit_utc > liquidation_instant(day, p))
     ]
     return {
         "ok": not errors,
@@ -708,7 +736,7 @@ def controls(
     origin: dict[str, Any],
 ) -> tuple[dict[str, Any], set[int]]:
     """Every control that must pass before any result is presented (protocol §5, §6)."""
-    flow = funnel(result.attempts, all_trades(result))
+    flow = funnel(result.attempts, all_trades(result), exit_outcomes(result.day02_params))
     matched_report, matched = reconcile(study, study_errors, result, days)
     checks = {
         "recomputation": recomputation(result, engine),
@@ -985,12 +1013,13 @@ def performance(
 ) -> dict[str, Any]:
     end = result.end_utc or start
     trades = all_trades(result)
+    ends = exit_outcomes(result.day02_params)
     by_year: dict[int, dict[str, Any]] = {}
     for year in years(start, end):
         closed = [t for t in result.trades if t.exit_utc is not None and t.exit_utc.year == year]
         dd = engine.yearly.years.get(year)
         by_year[year] = {
-            "funnel": counts(funnel([a for a in result.attempts if a.day.year == year], trades)),
+            "funnel": counts(funnel([a for a in result.attempts if a.day.year == year], trades, ends)),
             "closed_trades": _trade_totals(closed),
             "tick_drawdown": None if dd is None else asdict(dd),
         }
@@ -998,7 +1027,7 @@ def performance(
     gaps = [a["approximation_gap_pips"] for line in lines for a in line["attempts"]]
     report: dict[str, Any] = jsonable(
         {
-            "funnel": funnel(result.attempts, trades),
+            "funnel": funnel(result.attempts, trades, ends),
             "annotations": {"note": "non additives : elles recoupent les issues exclusives",
                             **{k: marks.get(k, 0) for k in ANNOTATIONS}},
             "closings": closings(result),
