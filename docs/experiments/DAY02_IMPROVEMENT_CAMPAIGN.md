@@ -1,6 +1,7 @@
 # Campagne exploratoire DAY_02 : H1, H2, H3 seules et combinées (2015-2021, déclenchement M5)
 
-**Statut** : campagne **exploratoire** autorisée par l'opérateur le 2026-11-09. Ce n'est pas une
+**Statut** : campagne **exploratoire** autorisée par l'opérateur le 2026-11-09, **terminée le
+2026-11-10 : recommandation « abandonner » (§7)**. Ce n'est pas une
 validation. Les définitions ci-dessous ont été fixées et enregistrées (commit de lancement) **avant
 la lecture de tout résultat des variantes**. La référence DAY_02 (fiche figée, ADR-028, protocole
 `DAY02_REFERENCE_2015_2021.md`, ADR-035) reste inchangée, reproductible, et son résultat négatif est
@@ -184,8 +185,112 @@ Une variante retenue ne serait éprouvée que par un protocole distinct, gelé a
 ## 6. Registre des essais
 
 Tous les essais sont conservés, y compris défavorables ou invalidés. Sorties sous
-`data/reports/backtests/day02_campaign/` (hors Git).
+`data/reports/backtests/day02_campaign/` (hors Git). Tous les passages ont été lancés sur `a827964`,
+arbre propre, et terminés sans changement de commit ni de fichier suivi (provenance vérifiée en fin
+de passage). Aucun essai n'a été invalidé ; aucune correction de bug n'a été nécessaire.
 
 | # | Essai | Configuration | Commit | Résultat | Incident |
 |---|---|---|---|---|---|
-| — | définitions, code et tests | §3 | (ce commit) | 574 tests | — |
+| — | définitions, code et tests | §3 | a827964 | 574 tests | — |
+| 1-8 | études de disponibilité 2015-2021 | REF, H1, H2, H3, H1H2, H1H3, H2H3, H1H2H3 | a827964 | C1-C10 réussis pour les 8 ; REF identique octet pour octet à l'étude de référence | — |
+| 9-16 | passages de performance M5, scénario A | les 8 | a827964 | contrôles réussis ; aucun scénario B/C ni rejet requis ; REF identique à `day02_ref_2015_2021_m5_a` (rapport et détail des séances) | — |
+| 17-24 | disponibilité tronquée au 2018-01-01 | les 8 | a827964 | chaque séance antérieure à 2018 identique à l'étude complète (778 séances × 8) | — |
+| 25-26 | performance H1H2H3 tronquée (→2015-04-01, →2015-07-01) | H1H2H3 | a827964 | les 63 séances avant 2015-04-01 (tentatives, journal, transactions) identiques entre les deux troncatures et le passage complet ; 7 transactions identiques | — |
+
+## 7. Bilan (exploratoire)
+
+### 7.1 Tableau 2015-2021 (M5, scénario A, coûts et risque ADR-035)
+
+Risque par transaction 5 EUR (0,25 % de 2 000 EUR) ; R = résultat / risque à l'exécution ; ± = erreur
+type. Drawdown relatif au tick ; « max sans » = plus longue suite de séances sans transaction.
+
+| Variante | Trans. | /an | Sem. actives | Max sans | Mois sans | Brut € | Coûts € | Net € | R net | R brut | PF | DD rel. | Série pertes |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| REF | 298 | 42,6 | 58,7 % | 26 | 2 | −17,91 | 52,75 | −70,66 | −0,064 ± 0,044 | −0,020 ± 0,043 | 0,82 | 5,66 % | 10 |
+| H1 | 316 | 45,1 | 60,9 % | 25 | 1 | −12,40 | 55,58 | −67,98 | −0,061 ± 0,043 | −0,018 ± 0,042 | 0,84 | 5,24 % | 10 |
+| H2 | 358 | 51,1 | 65,6 % | 26 | 2 | −1,96 | 61,02 | −62,98 | −0,055 ± 0,039 | −0,013 ± 0,038 | 0,87 | 5,08 % | 10 |
+| H3 | 159 | 22,7 | 36,9 % | 71 | 10 | +10,19 | 30,34 | −20,15 | −0,033 ± 0,065 | +0,013 ± 0,064 | 0,91 | 2,53 % | 7 |
+| H1H2 | 384 | 54,9 | 69,1 % | 25 | 1 | −0,75 | 64,64 | −65,40 | −0,052 ± 0,038 | −0,011 ± 0,037 | 0,87 | 4,61 % | 10 |
+| H1H3 | 174 | 24,9 | 40,4 % | 63 | 8 | +9,43 | 32,39 | −22,96 | −0,036 ± 0,062 | +0,009 ± 0,060 | 0,91 | 2,92 % | 7 |
+| H2H3 | 195 | 27,9 | 42,1 % | 46 | 7 | +32,40 | 34,38 | −1,98 | −0,013 ± 0,056 | +0,030 ± 0,055 | 0,99 | 2,43 % | 7 |
+| H1H2H3 | 216 | 30,9 | 45,9 % | 46 | 4 | +23,15 | 37,43 | −14,28 | −0,025 ± 0,054 | +0,017 ± 0,053 | 0,95 | 3,38 % | 6 |
+
+Le coût moyen reste d'environ 0,17-0,19 EUR par transaction (≈ 0,035-0,04 R) pour toutes les
+variantes ; aucune ne change la structure de coût. La distance médiane du stop reste de 18-19 pips.
+
+### 7.2 Par période (exploratoire, années déjà examinées)
+
+| Variante | 2015-2018 : n | net € | R brut | 2019-2021 : n | net € | R brut |
+|---|---:|---:|---:|---:|---:|---:|
+| REF | 170 | −61,13 | −0,066 ± 0,059 | 128 | −9,53 | +0,041 ± 0,062 |
+| H1 | 182 | −50,14 | −0,051 ± 0,058 | 134 | −17,84 | +0,028 ± 0,060 |
+| H2 | 197 | −44,98 | −0,043 ± 0,054 | 161 | −18,00 | +0,024 ± 0,054 |
+| H3 | 89 | −0,08 | +0,021 ± 0,089 | 70 | −20,07 | +0,002 ± 0,092 |
+| H1H2 | 215 | −33,34 | −0,022 ± 0,053 | 169 | −32,06 | +0,002 ± 0,051 |
+| H1H3 | 95 | +3,87 | +0,029 ± 0,087 | 79 | −26,83 | −0,015 ± 0,083 |
+| H2H3 | 106 | +14,19 | +0,049 ± 0,077 | 89 | −16,17 | +0,008 ± 0,078 |
+| H1H2H3 | 118 | +20,08 | +0,059 ± 0,075 | 98 | −34,36 | −0,034 ± 0,073 |
+
+Toutes les variantes améliorent 2015-2018 et **toutes dégradent 2019-2021** par rapport à la
+référence, en net comme en R brut. L'écart se creuse avec le nombre de règles combinées :
+H1H2H3 gagne +0,125 R brut sur 2015-2018 et en perd 0,074 sur 2019-2021.
+
+### 7.3 Lecture enregistrée (§5)
+
+- **Piste à poursuivre** : aucune variante (net négatif sur 2015-2021 pour les huit).
+- **À reformuler** : aucune. Le critère exige une espérance brute améliorée de plus d'une erreur type
+  dans les deux périodes ; sur 2019-2021, toutes les variantes ont une espérance brute inférieure à la
+  référence. Sur 2015-2018, seules H1H3, H2H3 et H1H2H3 dépassent une erreur type.
+- **À abandonner** : H1, H2, H3 et leurs quatre combinaisons, selon la grille fixée avant les
+  résultats.
+
+### 7.4 Interactions
+
+- **H1 et H2 (parcours)** : effets faibles et à peine additifs. H1 ajoute 18 transactions (+2,7 EUR
+  net), H2 en ajoute 60 (+7,7 EUR), H1H2 en ajoute 86 (+5,3 EUR). Les transactions ajoutées ont une
+  espérance brute proche de zéro (+0,05 à +0,12 R), ce qui ne couvre pas les coûts ; les quelques
+  transactions de la référence perdues en route étaient meilleures (+0,23 à +0,45 R brut, sur 5 à 17
+  transactions). Elles augmentent la régularité (semaines actives 61-69 % contre 59 %) sans améliorer
+  l'espérance.
+- **H3 (filtre)** : l'essentiel du gain net vient du retrait de transactions. Les 161 transactions de
+  la référence que H3 écarte ont une espérance nette de −0,105 R (−62 EUR), mais l'espérance brute de
+  H3 (+0,013 R) ne s'écarte de celle de la référence que d'environ une demi-erreur type. Le filtre
+  divise l'activité par deux (37 % de semaines actives, jusqu'à 71 séances sans transaction,
+  10 mois sans transaction), contraire à l'objectif de régularité. Son effet s'inverse entre
+  périodes (+61 EUR sur 2015-2018, −10,5 EUR sur 2019-2021).
+- **H2 avec H3** : la meilleure combinaison (H2H3, −1,98 EUR, +18 EUR par rapport à H3 seule, avec
+  36 transactions de plus). Ajouter H1 (H1H2H3) dégrade le net de 12 EUR : pas d'additivité.
+
+### 7.5 Limites
+
+- **Appariement** : les trajectoires divergent dès la première transaction différente (une position
+  à la fois). Le rapprochement par `D` et sens décrit les différences ; il n'attribue pas un effet
+  causal à une règle. Le retrait d'une transaction peut libérer une occasion plus tardive.
+- **Erreurs types** : calculées sur chaque échantillon séparément ; les échantillons se recouvrent
+  largement, donc les écarts ne sont pas indépendants. Aucun écart n'atteint deux erreurs types.
+- **Périodes** : découpage exploratoire sur des années déjà examinées ; 2022-2025 non lus.
+- **Comparaisons multiples** : 7 variantes contre une référence ; le meilleur résultat (H2H3) est
+  attendu meilleur que la référence par simple sélection.
+- **Hypothèses de coût** : ADR-035 (ASSUMED), inchangées.
+
+### 7.6 Causalité sur données réelles
+
+Rejeu tronqué sur les données réelles (en plus des tests synthétiques) :
+- études de disponibilité arrêtées au 2018-01-01 : pour les huit configurations, les 778 séances
+  antérieures sont identiques, champ pour champ, à celles de l'étude complète ;
+- passage H1H2H3 (les trois règles, contexte H4 compris) arrêté au 2015-04-01 puis au 2015-07-01 :
+  les 63 séances antérieures au 2015-04-01 (tentatives, causes, journal) et les 7 transactions
+  closes sont identiques entre les deux troncatures et le passage complet.
+
+Les données postérieures à T ne modifient donc aucune décision antérieure à T.
+
+### 7.7 Recommandation
+
+**Abandonner H1, H2 et H3 sous leur forme actuelle.** Aucune ne passe la grille enregistrée.
+L'amélioration observée sur 2015-2018 ne se reproduit pas sur 2019-2021 et s'inverse d'autant plus
+que les règles sont combinées, signe d'un ajustement à la première période plutôt que d'un effet
+stable. H3 réduit surtout l'exposition, au prix de la régularité. H1 et H2 augmentent la fréquence
+sans apporter d'espérance.
+
+La référence DAY_02 reste inchangée et reproductible. Les nouvelles idées relèvent d'un lot
+ultérieur, sur autorisation de l'opérateur.
