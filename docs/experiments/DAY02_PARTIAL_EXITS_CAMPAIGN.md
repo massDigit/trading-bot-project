@@ -1,7 +1,8 @@
 # Campagne exploratoire DAY_02 : prises de bénéfices partielles et protection du solde (2015-2021, M5)
 
 **Statut** : campagne **exploratoire** autorisée par l'opérateur le 2026-11-13 (ADR-038), sur la base
-du cadrage présenté le même jour et de ses précisions. Ce n'est pas une validation. Définitions,
+du cadrage présenté le même jour et de ses précisions ; **terminée le 2026-11-13 : aucune
+configuration retenue, LATE reste la meilleure (§13)**. Ce n'est pas une validation. Définitions,
 mesures et lecture fixées et enregistrées au commit de lancement, **avant tout résultat**. La
 référence de cette campagne est **LATE inchangée** (ADR-037) ; la référence DAY_02 et tous les
 résultats antérieurs restent conservés et reproductibles. Années 2015-2021 déjà utilisées par
@@ -154,7 +155,119 @@ du vendredi. Coûts `ASSUMED` de l'ADR-035.
 ## 12. Registre des essais
 
 Sorties sous `data/reports/backtests/day02_partial_exits/` (hors Git). Tous les essais conservés.
+Tous lancés sur `9dad2f8`, arbre propre, sans changement de commit ni de fichier suivi. Une mise en
+veille de la machine (environ 35 min) a suspendu les quatre passages complets sans les interrompre ;
+la reproduction exacte de LATE confirme l'absence d'effet. Aucun essai invalidé, aucune correction.
 
 | # | Essai | Configuration | Commit | Résultat | Incident |
 |---|---|---|---|---|---|
-| — | définitions, code et tests | §1-§8 | (ce commit) | 616 tests | — |
+| — | définitions, code et tests | §1-§8 | 9dad2f8 | 616 tests | — |
+| 1-4 | disponibilité 2015-2021 | LATE, PROT, PART, FULL | 9dad2f8 | C1-C10 conformes ; parcours identiques à LATE | — |
+| 5-6 | performance FULL tronquée (→2015-04-01, →2015-07-01) | FULL | 9dad2f8 | 63 séances et 8 transactions identiques au passage complet avant la coupure | — |
+| 7 | performance M5, scénario A | LATE | 9dad2f8 | contrôles conformes ; rapport et détail des séances identiques à `day02_late_exit/perf_LATE_m5_a` | veille |
+| 8-10 | performance M5, scénario A | PROT, PART, FULL | 9dad2f8 | contrôles conformes, contrôle des plans compris ; aucun scénario B/C ni rejet requis ; 0 transaction indéterminée | veille |
+
+## 13. Bilan (exploratoire)
+
+### 13.1 Tableau 2015-2021 (M5, scénario A, coûts et risque ADR-035)
+
+R = net / risque initial (celui de LATE) ; ± = erreur type.
+
+| | LATE | PROT | PART | FULL |
+|---|---:|---:|---:|---:|
+| Transactions | 296 | 296 | 295 | 295 |
+| Brut € | 112,79 | 103,03 | 75,31 | 49,42 |
+| Coûts € | 76,48 | 78,68 | 74,49 | 80,70 |
+| dont prime de stop garanti (USD) | 42,12 | 45,36 | 40,68 | 49,08 |
+| **Net €** | **+36,32** | **+24,35** | **+0,82** | **−31,28** |
+| R net | +0,029 ± 0,064 | +0,010 ± 0,063 | −0,007 ± 0,059 | −0,035 ± 0,056 |
+| Drawdown au tick € / relatif | 52,08 / 2,55 % | 66,75 / 3,33 % | 63,02 / 3,13 % | 76,10 / 3,78 % |
+| Net 2015-2018 / 2019-2021 € | +5,29 / +31,03 | −12,39 / +36,74 | −10,20 / +11,03 | −40,28 / +9,00 |
+| Dernière sortie : stop / cible / 22:55 | 141 / 110 / 45 | 154 / 103 / 39 | 152 / 43 / 100 | 216 / 27 / 52 |
+| Durée médiane (min) | 165 | 164 | 238 | 183 |
+
+**Effet apparié contre LATE** (mêmes entrées ; 295-296 communes, au plus une entrée de LATE perdue,
+aucune nouvelle) : PROT −0,020 R ± 0,012 ; PART −0,040 ± 0,021 ; FULL −0,068 ± 0,021. Négatif dans
+les deux périodes pour les trois (2015-2018 / 2019-2021 : PROT −0,032 / −0,003 ; PART −0,035 /
+−0,047 ; FULL −0,081 / −0,051). Les différences viennent des mêmes positions, pas des reprises.
+
+### 13.2 Ce qui se passe à chaque niveau (PART et FULL)
+
+| | PART | FULL |
+|---|---:|---:|
+| Positions avec 3 / 2 / 1 portion(s) | 132 / 109 / 52 (+2 de 6 pas) | 129 / 114 / 52 |
+| TP1 atteint (dont sans quantité) | 152 (26) | 152 (26) |
+| TP1 exécuté : fois, quantité, net € | 126, 14,9, +173,79 | 126, 14,8, +172,77 |
+| P atteint | 126 | 126 |
+| TP2 atteint (dont sans quantité) | 110 (42) | 103 (42) |
+| TP2 exécuté : fois, quantité, net € | 68, 7,0, +143,40 | 61, 6,2, +127,48 |
+| **TP3 atteint / positions qui en portaient une quantité** | **30 / 243 (12 %)** | **16 / 243 (7 %)** |
+| TP3 exécuté : quantité, net € | 3,5, +126,62 | 1,9, +73,64 |
+| Solde liquidé à 22:55 : n, net € | 100, +115,06 | 52, +56,39 |
+| Solde au stop initial : n, net € | 152, −558,04 | 137, −527,24 |
+| Solde au stop au prix d'entrée : n, net € | — | 16, −4,25 |
+| Solde au stop au niveau TP1 : n, net € | — | 63, +69,94 |
+
+La somme des lignes de chaque colonne redonne le net de la configuration au centime près.
+
+**Protection, comparaison séparée « stop initial conservé »** (observateur a posteriori, jamais lu
+par la simulation) :
+- PROT : 124 passages au prix d'entrée ; 16 soldes clos par ce stop : 5 pertes évitées (14,66 €),
+  11 continuations interrompues (34,78 €), soit −20,12 € pour la protection ;
+- FULL : 126 passages au prix d'entrée et 92 au niveau TP1 ; 79 soldes clos par un stop déplacé :
+  31 pertes évitées (47,56 €), 48 continuations interrompues (80,03 €), soit −32,47 €.
+- Déplacements à moins de 5 pips de la cotation (distance minimale relevée chez IG, non appliquée) :
+  1 dans PROT, 11 dans FULL.
+
+### 13.3 Granularité des tailles (R net moyen par position ; effet apparié contre LATE)
+
+| Pas | LATE | PROT | PART | FULL | Écart PART | Écart FULL |
+|---|---:|---:|---:|---:|---:|---:|
+| 1 (0,1) | −0,185 | −0,270 | −0,232 | −0,284 | 0,000 | −0,052 ± 0,035 |
+| 2 (0,2) | +0,078 | +0,079 | +0,028 | +0,001 | −0,059 ± 0,038 | −0,094 ± 0,034 |
+| 3 et plus | +0,067 | +0,059 | +0,051 | +0,033 | −0,040 ± 0,036 | −0,052 ± 0,035 |
+
+Les positions de 0,1 contrat (17 %) ne peuvent pas être fractionnées : PART les laisse identiques à
+LATE, la protection les dégrade. À 0,2 contrat, la portion TP1 et la portion TP3 encadrent un TP2
+sans quantité : c'est la classe la plus dégradée. Les positions à trois portions perdent moins, mais
+perdent aussi.
+
+### 13.4 Mécanismes et compromis
+
+- **Les prises partielles raccourcissent les gains sans réduire les pertes.** Quand TP1 n'est pas
+  atteint (144 positions sur 295-296), toute la taille sort au stop initial, comme dans LATE. Quand la
+  position réussit, une partie sort plus tôt (TP1 ≈ 1 R au lieu de TP2 ≈ 1,5 R) et une partie vise TP3,
+  atteint 30 fois sur 243 dans PART : la dernière portion revient le plus souvent à 22:55 ou au stop.
+  L'espérance des positions gagnantes baisse, celle des perdantes ne change pas.
+- **La protection coupe plus de continuations qu'elle n'évite de pertes.** Le stop au prix d'entrée
+  après P, ou à TP1 après TP2, est atteint par des retours qui repartent ensuite vers la cible ; dans
+  ces années, ces retours sont plus fréquents que les retournements complets jusqu'au stop initial.
+  La protection augmente aussi les primes de stop garanti (plus de sorties au stop).
+- **Combinaison** : les deux effets s'ajoutent (FULL ≈ PART + protection).
+- **Ce qui n'est pas conclu** : ces résultats valent pour ces niveaux et ces seuils précis, fixés
+  avant lecture, sur des années déjà utilisées. Ils ne disent pas qu'aucune sortie partielle ne peut
+  servir DAY_02, ni qu'un autre placement améliorerait la stratégie ; aucun autre n'est testé ici.
+- **Régularité et risque** : même nombre de transactions et mêmes entrées ; le drawdown augmente dans
+  les trois configurations (3,1 % à 3,8 % contre 2,55 %).
+
+### 13.5 Positions conservées au-delà de l'échéance
+
+Une seule, la même dans les quatre configurations : position du vendredi 2017-03-24 (semaine de
+décalage), close à la réouverture du dimanche, trois nuits financées. Ce n'est pas une clôture
+intraday réussie. Toutes les autres échéances ont été exécutées en moins de quelques secondes.
+
+### 13.6 Lecture enregistrée (§10)
+
+Aucune configuration ne dépasse le net de LATE sur 2015-2021 et dans chaque période : aucune n'est
+une piste à approfondir selon la lecture enregistrée. PROT fait mieux que LATE sur 2019-2021 seulement
+(+36,74 contre +31,03 €), pas sur 2015-2018. L'effet apparié est négatif dans les deux périodes pour
+les trois (indicateur, pas preuve) ; pour FULL il dépasse trois erreurs types sur 2015-2021.
+
+### 13.7 Recommandation
+
+**Ne pas retenir PROT, PART ni FULL sous cette forme ; LATE reste la meilleure configuration DAY_02
+du modèle.** Les mécanismes observés (gains raccourcis, pertes inchangées ; protection qui coupe des
+continuations) sont cohérents entre périodes et entre classes de taille. Toute autre forme de sortie
+partielle relèverait d'une hypothèse nouvelle, définie avant lecture, sur autorisation de
+l'opérateur ; elle ne doit pas être choisie d'après ces résultats sur les mêmes années. Limites IG du
+§11 inchangées ; aucune donnée 2022-2025 lue.
