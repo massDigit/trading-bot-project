@@ -195,7 +195,7 @@ les deux périodes pour les trois (2015-2018 / 2019-2021 : PROT −0,032 / −0,
 
 | | PART | FULL |
 |---|---:|---:|
-| Positions avec 3 / 2 / 1 portion(s) | 132 / 109 / 52 (+2 de 6 pas) | 129 / 114 / 52 |
+| Positions avec 3 / 2 / 1 portion(s) | 134 / 109 / 52 | 129 / 114 / 52 |
 | TP1 atteint (dont sans quantité) | 152 (26) | 152 (26) |
 | TP1 exécuté : fois, quantité, net € | 126, 14,9, +173,79 | 126, 14,8, +172,77 |
 | P atteint | 126 | 126 |
@@ -235,7 +235,7 @@ perdent aussi.
 ### 13.4 Mécanismes et compromis
 
 - **Les prises partielles raccourcissent les gains sans réduire les pertes.** Quand TP1 n'est pas
-  atteint (144 positions sur 295-296), toute la taille sort au stop initial, comme dans LATE. Quand la
+  atteint (143 positions sur 295), toute la taille sort comme dans LATE (stop initial ou 22:55). Quand la
   position réussit, une partie sort plus tôt (TP1 ≈ 1 R au lieu de TP2 ≈ 1,5 R) et une partie vise TP3,
   atteint 30 fois sur 243 dans PART : la dernière portion revient le plus souvent à 22:55 ou au stop.
   L'espérance des positions gagnantes baisse, celle des perdantes ne change pas.
@@ -243,7 +243,8 @@ perdent aussi.
   après P, ou à TP1 après TP2, est atteint par des retours qui repartent ensuite vers la cible ; dans
   ces années, ces retours sont plus fréquents que les retournements complets jusqu'au stop initial.
   La protection augmente aussi les primes de stop garanti (plus de sorties au stop).
-- **Combinaison** : les deux effets s'ajoutent (FULL ≈ PART + protection).
+- **Combinaison** : les deux effets s'ajoutent à peu près (effet apparié : PART −0,040 R et PROT
+  −0,020 R ; FULL −0,068 R).
 - **Ce qui n'est pas conclu** : ces résultats valent pour ces niveaux et ces seuils précis, fixés
   avant lecture, sur des années déjà utilisées. Ils ne disent pas qu'aucune sortie partielle ne peut
   servir DAY_02, ni qu'un autre placement améliorerait la stratégie ; aucun autre n'est testé ici.
@@ -254,7 +255,7 @@ perdent aussi.
 
 Une seule, la même dans les quatre configurations : position du vendredi 2017-03-24 (semaine de
 décalage), close à la réouverture du dimanche, trois nuits financées. Ce n'est pas une clôture
-intraday réussie. Toutes les autres échéances ont été exécutées en moins de quelques secondes.
+intraday réussie. Toutes les autres liquidations ont été exécutées moins de 30 secondes après l'échéance.
 
 ### 13.6 Lecture enregistrée (§10)
 
@@ -267,7 +268,7 @@ les trois (indicateur, pas preuve) ; pour FULL il dépasse trois erreurs types s
 
 **Ne pas retenir PROT, PART ni FULL sous cette forme ; LATE reste la meilleure configuration DAY_02
 du modèle.** Les mécanismes observés (gains raccourcis, pertes inchangées ; protection qui coupe des
-continuations) sont cohérents entre périodes et entre classes de taille. Toute autre forme de sortie
+continuations) sont de même signe dans les deux périodes et dans les classes de taille fractionnables. Toute autre forme de sortie
 partielle relèverait d'une hypothèse nouvelle, définie avant lecture, sur autorisation de
 l'opérateur ; elle ne doit pas être choisie d'après ces résultats sur les mêmes années. Limites IG du
 §11 inchangées ; aucune donnée 2022-2025 lue.
