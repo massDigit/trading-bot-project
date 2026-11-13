@@ -74,6 +74,9 @@ class Day02Params:
     depth_on_close: bool = False  # H2: the 50 % depth invalidates on the bid close, not on the extreme
     context: Context = Context.NONE  # H3: impulse admitted only in the direction of the H4 context
     context_period: int = 20  # H3: SMA of the last 20 H4 bid closes
+    # Partial exits campaign (DAY02_PARTIAL_EXITS_CAMPAIGN.md), off in the reference and in LATE:
+    partial_exits: bool = False  # TP1 / TP2 / TP3 portions (backtest/day02_partials.py)
+    protection: bool = False  # stop of the remaining quantity moved closer (never further)
 
     @property
     def trigger_step(self) -> timedelta:

@@ -76,7 +76,7 @@ def run_search(
 
 
 def test_registry_has_the_reference_and_seven_variants_with_one_definition_each() -> None:
-    assert list(VARIANTS) == ["REF", "H1", "H2", "H3", "H1H2", "H1H3", "H2H3", "H1H2H3", "LATE"]
+    assert list(VARIANTS) == ["REF", "H1", "H2", "H3", "H1H2", "H1H3", "H2H3", "H1H2H3", "LATE", "PROT", "PART", "FULL"]
     assert variant_params(REFERENCE) == Day02Params()  # the frozen reference is untouched
     for name in VARIANTS:
         assert variant_of(variant_params(name)) == name

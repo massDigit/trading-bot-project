@@ -90,6 +90,7 @@ from forex_bot.backtest.day02_availability import (
     study_days,
 )
 from forex_bot.backtest.day02_engine import Day02Backtest, Day02Result
+from forex_bot.backtest.day02_partials import plan_errors, plan_measures, plan_view
 from forex_bot.backtest.day02_variants import REFERENCE, VARIANTS, needs_h4, variant_of, variant_params
 from forex_bot.backtest.engine import DecisionRecord, ResearchConfig, StopAtExecution, StopType, Trade
 from forex_bot.backtest.explore import RESEARCH_COSTS, _peak_rss_mib, _trade, _trade_totals
@@ -748,6 +749,19 @@ def controls(
         "inputs": inputs,
         "provenance": origin,
     }
+    p = result.day02_params
+    if p.partial_exits or p.protection:  # partial exits campaign only: the other reports are unchanged
+        errors = plan_errors(
+            result.plans, {t.decided_utc: t for t in all_trades(result)}, p.partial_exits, p.protection
+        )
+        planned = {plan.decided_utc for plan in result.plans}
+        immediate = set(IMMEDIATE_EXIT.values()) | {TARGET_AT_EXECUTION}
+        errors += [
+            f"{t.decided_utc.isoformat()} : transaction exécutée sans plan de sortie"
+            for t in all_trades(result)
+            if t.decided_utc not in planned and t.exit_reason not in immediate and t.exit_reason != STOP_AT_EXECUTION
+        ]
+        checks["partials"] = {"ok": not errors, "error_count": len(errors), "errors": errors[:50]}
     return checks, matched
 
 
@@ -816,6 +830,8 @@ def session_lines(
     by_decision = {t.decided_utc: t for t in all_trades(result)}
     records = {r.decision_utc: r for r in result.decisions}
     marks, skipped = trade_annotations(result), dict(result.skipped_days)
+    plans = {plan.decided_utc: plan for plan in result.plans}
+    planning = result.day02_params.partial_exits or result.day02_params.protection
     lines = []
     for day in days:
         attempts = []
@@ -841,6 +857,7 @@ def session_lines(
                     "matched_with_study": id(a) in matched,
                     "approximation_gap_pips": gap if id(a) in matched and c and c.outcome == EXIT else None,
                     "trade": None if trade is None else trade_line(trade, marks.get(trade.decided_utc, [])),
+                    **({"plan": plan_view(plans[d]) if d in plans else None} if planning else {}),
                     "measures": measured,
                     "d_utc": d,
                 }
@@ -1013,7 +1030,8 @@ def performance(
 ) -> dict[str, Any]:
     end = result.end_utc or start
     trades = all_trades(result)
-    ends = exit_outcomes(result.day02_params)
+    p = result.day02_params
+    ends = exit_outcomes(p)
     by_year: dict[int, dict[str, Any]] = {}
     for year in years(start, end):
         closed = [t for t in result.trades if t.exit_utc is not None and t.exit_utc.year == year]
@@ -1031,6 +1049,7 @@ def performance(
             "annotations": {"note": "non additives : elles recoupent les issues exclusives",
                             **{k: marks.get(k, 0) for k in ANNOTATIONS}},
             "closings": closings(result),
+            **({"partials": plan_measures(result.plans)} if p.partial_exits or p.protection else {}),
             "trades": [_trade(t) for t in result.trades],
             "open_trade_at_end": _trade(result.open_trade) if result.open_trade else None,
             "silence_at_end": result.silence_at_end,

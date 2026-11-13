@@ -35,6 +35,7 @@ Research only: no order is ever sent and nothing here talks to a broker.
 from __future__ import annotations
 
 import bisect
+import copy
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
@@ -74,6 +75,18 @@ from forex_bot.backtest.day02 import (
     liquidation_utc,
     session_day,
 )
+from forex_bot.backtest.day02_partials import (
+    FINAL,
+    MOVE_BREAK_EVEN,
+    MOVE_TP1,
+    PORTIONS,
+    Leg,
+    Plan,
+    StopMove,
+    ahead,
+    build_plan,
+    tighter,
+)
 from forex_bot.backtest.engine import (
     BacktestResult,
     DecisionRecord,
@@ -82,6 +95,7 @@ from forex_bot.backtest.engine import (
     ResearchConfig,
     S1Backtest,
     StopType,
+    Trade,
     _PendingExit,
 )
 from forex_bot.backtest.feed import Silence, Tick, classify_silence
@@ -104,6 +118,7 @@ class Day02Result(BacktestResult):
     silence_at_end: dict[str, Any] | None = None
     unexecuted_closing: tuple[datetime, str] | None = None  # closing order due, not executed by the end
     unplanned_nights: list[datetime] = field(default_factory=list)  # NUIT_NON_PRÉVUE, by decision instant
+    plans: list[Plan] = field(default_factory=list)  # partial exits campaign only (empty otherwise)
 
 
 @dataclass(frozen=True)
@@ -132,6 +147,7 @@ class Day02Backtest(S1Backtest):
         start_utc: datetime | None = None,
         end_utc: datetime | None = None,
         h4: Sequence[dict[str, Any]] = (),
+        observe_counterfactual: bool = True,
     ) -> None:
         # No D1; H4 only for the H3 context of the exploratory campaign (unused by the reference).
         # S1 rules are never evaluated; the S1 parameters only carry the ATR period.
@@ -164,6 +180,11 @@ class Day02Backtest(S1Backtest):
         self._pending_attempt: Attempt | None = None
         self._position_attempt: Attempt | None = None  # attempt of the open position, ended by its close
         self.unplanned_nights: list[datetime] = []  # decision instants of trades closed on a later trading day
+        # Partial exits campaign: plan of the open position, every plan, passive counterfactual observers.
+        self._plan: Plan | None = None
+        self.plans: list[Plan] = []
+        self.observe_counterfactual = observe_counterfactual
+        self._shadows: list[_Shadow] = []
 
     # ------------------------------------------------------------------ public
 
@@ -206,6 +227,7 @@ class Day02Backtest(S1Backtest):
             silence_at_end=self.silence_at_end,
             unexecuted_closing=self.unexecuted_closing,
             unplanned_nights=self.unplanned_nights,
+            plans=self.plans,
         )
 
     def atr_at(self, cutoff: datetime, known_at: datetime) -> Decimal | None:
@@ -409,6 +431,10 @@ class Day02Backtest(S1Backtest):
     # ------------------------------------------------------------------ tick replay
 
     def _target_reached(self, tick: Tick) -> bool:
+        plan = self._plan
+        if plan is not None and self.position is not None:  # a pending portion's level is reached
+            price = self._exit_side(tick)
+            return any(ahead(plan.side, price, plan.level(n)) for n in plan.pending())
         position, target = self.position, self.target
         if position is None or target is None:
             return False
@@ -420,6 +446,8 @@ class Day02Backtest(S1Backtest):
             if until is not None and (tick.ts_utc > until if inclusive else tick.ts_utc >= until):
                 return
             self._peeked = None
+            if self._shadows:
+                self._follow_shadows(tick)  # a posteriori observers: they never change the replay
             previous = self._last_tick
             due = self._due
             if self.position is not None and self.pending_exit is None and due is not None and tick.ts_utc > due.utc:
@@ -431,7 +459,9 @@ class Day02Backtest(S1Backtest):
             if self.position is not None:
                 self._observed_stop(tick)
             if self.position is not None and self._target_reached(tick):
-                self._close(tick, self._exit_side(tick), "CIBLE", stop_triggered=False)
+                self._take_targets(tick, "CIBLE")
+            if self.position is not None and self._plan is not None:
+                self._protect(tick)  # decided on this quote, in force from the next one
             pending = self.pending_exit
             if pending is not None and self.position is not None and tick.ts_utc > pending.decided_utc:
                 self._close(tick, self._exit_side(tick), pending.reason, stop_triggered=False)
@@ -463,7 +493,7 @@ class Day02Backtest(S1Backtest):
             if stop_hit:
                 self._close(tick, self._stop_execution(tick), "STOP_FERMETURE_CONNUE", stop_triggered=True)
             elif target_hit:
-                self._close(tick, self._exit_side(tick), "CIBLE_APRÈS_FERMETURE", stop_triggered=False)
+                self._take_targets(tick, "CIBLE_APRÈS_FERMETURE")
             return
         position.unobservable_crossings.append(span)
         self._log(tick.ts_utc, "INTERRUPTION_POSITION", f"{span} : transaction conservée, indéterminée")
@@ -472,11 +502,14 @@ class Day02Backtest(S1Backtest):
             self._log(tick.ts_utc, "SCÉNARIO_B", accounted)
             self._close(
                 tick,
-                position.stop,
+                self._stop_level(),  # the stop in force before the gap, never one decided after it
                 "STOP_SCÉNARIO_B",
                 stop_triggered=True,
                 hypotheses=[f"stop supposé franchi pendant le trou, avant la cible ; {accounted}"],
             )
+        elif self.scenario is GapScenario.TARGET_FIRST and self._plan is not None:
+            self._log(tick.ts_utc, "SCÉNARIO_C", accounted)
+            self._scenario_c(tick, accounted)
         elif self.scenario is GapScenario.TARGET_FIRST and self.target is not None:
             self._log(tick.ts_utc, "SCÉNARIO_C", accounted)
             self._close(
@@ -489,7 +522,7 @@ class Day02Backtest(S1Backtest):
         elif stop_hit:
             self._close(tick, self._stop_execution(tick), "STOP_APRÈS_INTERRUPTION", stop_triggered=True)
         elif target_hit:
-            self._close(tick, self._exit_side(tick), "CIBLE_APRÈS_INTERRUPTION", stop_triggered=False)
+            self._take_targets(tick, "CIBLE_APRÈS_INTERRUPTION")
         else:
             self._log(tick.ts_utc, "SCÉNARIO_A", f"{span} : franchissement possible non observé, position maintenue")
 
@@ -507,6 +540,7 @@ class Day02Backtest(S1Backtest):
             outcome = EXECUTED
             self.target = target
             self._due = self._closing_due(position.entry_utc, attempt.day if attempt else None)
+            self._plan = self._new_plan(position, target, attempt)
             if self._target_reached(tick):
                 outcome = TARGET_AT_EXECUTION
                 self._close(
@@ -541,9 +575,12 @@ class Day02Backtest(S1Backtest):
         pending, due, attempt = self.pending_exit, self._due, self._position_attempt
         previous = self._last_tick  # still the tick before `tick`: it is updated after the events
         entered = self._open_position().entry_utc
+        plan, self._plan = self._plan, None
         self.pending_exit = None  # the S1 engine would log a channel exit: DAY_02 has only its closing order
         super()._close(tick, price, reason, stop_triggered, hypotheses)
         self.target, self._due, self._position_attempt = None, None, None
+        if plan is not None:
+            self._end_plan(plan, self.trades[-1], tick, reason, stop_triggered, due)
         if pending is not None:
             self._record_closing(tick, pending, previous, reason, due)
         if trading_day(tick.ts_utc) != trading_day(entered):
@@ -555,6 +592,187 @@ class Day02Backtest(S1Backtest):
                 attempt.events.append(f"{UNPLANNED_NIGHT} : clôture {reason}")
         if attempt is not None and attempt.ended_utc is None:
             attempt.ended_utc, attempt.ended_by = tick.ts_utc, POSITION_CLOSED  # true instant of the exit tick
+
+    # ------------------------------------------------------------------ partial exits and protection
+
+    def _new_plan(self, position: Trade, target: Decimal | None, attempt: Attempt | None) -> Plan | None:
+        p = self.day02
+        config = attempt.search.configuration if attempt is not None else None
+        if not (p.partial_exits or p.protection) or target is None or config is None or config.peak is None:
+            return None
+        plan = build_plan(
+            position.decided_utc,
+            position.side,
+            position.size,
+            position.entry_price,
+            position.stop,
+            config.peak,
+            target,
+            partial=p.partial_exits,
+            protection=p.protection,
+        )
+        if plan is not None:
+            self.plans.append(plan)
+            quantities = ", ".join(f"{n} {q}" for n, q in plan.quantities.items())
+            self._log(
+                position.entry_utc,
+                "PLAN_DE_SORTIE",
+                f"TP1 {plan.tp1:.5f}, P {plan.progress:.5f}, TP2 {plan.tp2:.5f}, TP3 {plan.tp3:.5f} ; {quantities}",
+            )
+        return plan
+
+    def _stop_level(self) -> Decimal:
+        """The stop in force: the protected one under a plan, the technical stop otherwise."""
+        plan = self._plan
+        return plan.stop if plan is not None else self._open_position().stop
+
+    def _crossed(self, tick: Tick) -> bool:
+        if self._plan is None:
+            return super()._crossed(tick)
+        stop = self._plan.stop
+        return tick.bid <= stop if self._open_position().side is Side.LONG else tick.ask >= stop
+
+    def _stop_execution(self, tick: Tick) -> Decimal:
+        if self._plan is None:
+            return super()._stop_execution(tick)
+        return self._plan.stop if self.config.stop_type is StopType.GUARANTEED else self._exit_side(tick)
+
+    def _mark_reached(self, plan: Plan, price: Decimal, utc: datetime) -> None:
+        for name in ("TP1", "P", "TP2", "TP3"):
+            if name not in plan.reached and ahead(plan.side, price, plan.level(name)):
+                plan.reached[name] = utc
+
+    def _take_targets(self, tick: Tick, reason: str) -> None:
+        """Reference: the whole position at the target. Under a plan: every pending portion whose level
+        the quote reaches, in level order, at the price of the quote; the last one closes the position."""
+        plan = self._plan
+        if plan is None:
+            self._close(tick, self._exit_side(tick), reason, stop_triggered=False)
+            return
+        price = self._exit_side(tick)
+        self._mark_reached(plan, price, tick.ts_utc)
+        for name in plan.pending():
+            if self.position is None or not ahead(plan.side, price, plan.level(name)):
+                break
+            self._execute_portion(tick, plan, name, price, reason)
+
+    def _execute_portion(self, tick: Tick, plan: Plan, name: str, price: Decimal, reason: str, **kw: Any) -> None:
+        position = self._open_position()
+        quantity = plan.quantities[name]
+        plan.executed[name] = tick.ts_utc
+        if quantity >= position.size:  # the last quantity: the position closes with this portion
+            self._close(tick, price, reason, stop_triggered=False, hypotheses=kw.get("hypotheses"))
+            plan.legs[-1].portion = name
+            return
+        leg = copy.copy(position)
+        leg.size = quantity
+        settled = self._settle(leg, tick, price, stop_triggered=False)
+        self.balance += settled.net_account
+        position.size -= quantity
+        position.hypotheses.extend(kw.get("hypotheses") or [])
+        plan.legs.append(
+            Leg(
+                tick.ts_utc,
+                name,
+                quantity,
+                price,
+                reason,
+                plan.stop,
+                settled.move_quote,
+                dict(settled.lines),
+                settled.rate,
+                settled.fee,
+                settled.net_account,
+                self._nights(position, tick),
+            )
+        )
+        self._sample(tick.ts_utc, tick)
+        self._log(
+            tick.ts_utc,
+            "SORTIE_PARTIELLE",
+            f"{name} {quantity} à {price} ({reason}), net {settled.net_account:.2f} EUR, solde {position.size}",
+        )
+
+    def _nights(self, position: Trade, tick: Tick) -> int:
+        return (trading_day(tick.ts_utc) - trading_day(position.entry_utc)).days
+
+    def _protect(self, tick: Tick) -> None:
+        """Stop of the remaining quantity moved closer on the events observed on this quote; it acts from
+        the next quote. Without protection, only the events are recorded."""
+        plan = self._plan
+        if plan is None:
+            return
+        price = self._exit_side(tick)
+        self._mark_reached(plan, price, tick.ts_utc)
+        if not plan.protection:
+            return
+        candidates = []
+        if "P" in plan.reached:
+            candidates.append((plan.entry_price, MOVE_BREAK_EVEN))
+        if "TP2" in plan.reached:
+            candidates.append((plan.tp1, MOVE_TP1))
+        for stop, cause in candidates:
+            if tighter(plan.side, stop, plan.stop):
+                distance = abs(price - stop) / self.config.spec.pip_size
+                plan.moves.append(StopMove(tick.ts_utc, plan.stop, stop, cause, distance))
+                self._log(tick.ts_utc, "STOP_DÉPLACÉ", f"{plan.stop} → {stop} ({cause}), en vigueur au tick suivant")
+                plan.stop = stop
+
+    def _scenario_c(self, tick: Tick, accounted: str) -> None:
+        """Target first under a plan: the next pending portion is supposed executed at its level during
+        the gap (levels before it supposed reached); the remaining quantity stays open and the resume quote
+        is then processed as any quote (stop in force, levels, protection from the next quote)."""
+        plan = self._plan
+        if plan is None or not plan.pending():
+            return
+        name = plan.pending()[0]
+        level = plan.level(name)
+        self._mark_reached(plan, level, tick.ts_utc)
+        self._execute_portion(
+            tick,
+            plan,
+            name,
+            level,  # level only: no invisible price improvement
+            "CIBLE_SCÉNARIO_C",
+            hypotheses=[f"{name} supposé atteint pendant le trou, avant le stop ; {accounted}"],
+        )
+
+    def _end_plan(
+        self, plan: Plan, trade: Trade, tick: Tick, reason: str, stop_triggered: bool, due: _Due | None
+    ) -> None:
+        """The last execution, then the economic transaction: the whole size and the sum of every leg
+        (EUR exact; quote amounts expressed at the rate of the last execution)."""
+        rate = trade.conversion_rate or Decimal(1)
+        plan.legs.append(
+            Leg(tick.ts_utc, FINAL, trade.size, trade.exit_price or Decimal(0), reason, plan.stop,
+                trade.price_pnl_quote or Decimal(0), dict(trade.costs_quote), rate, trade.conversion_fee or Decimal(0),
+                trade.net_account or Decimal(0), self._nights(trade, tick))
+        )  # fmt: skip
+        if stop_triggered and plan.protection and plan.stop != plan.initial_stop and self.observe_counterfactual:
+            self._shadows.append(_Shadow(plan, copy.copy(trade), tick.ts_utc, due))
+        if len(plan.legs) == 1:
+            return  # one execution: the trade is already the whole transaction
+        others = plan.legs[:-1]
+        trade.size = plan.size
+        # EUR amounts are exact sums of the legs; quote amounts are those EUR sums at the last rate.
+        trade.price_pnl_quote = sum((leg.gross_account for leg in plan.legs), Decimal(0)) / rate
+        lines: dict[str, Decimal] = {}
+        for leg in plan.legs:
+            for name, amount in leg.lines.items():
+                lines[name] = lines.get(name, Decimal(0)) + amount * leg.rate / rate
+        trade.costs_quote = lines
+        trade.conversion_fee = sum((leg.fee for leg in plan.legs), Decimal(0))
+        trade.net_account = sum((leg.net_account for leg in plan.legs), Decimal(0))
+        trade.hypotheses.append(f"sorties partielles : {', '.join(f'{leg.portion} {leg.size}' for leg in others)}")
+
+    def _follow_shadows(self, tick: Tick) -> None:
+        """What the remaining quantity closed by a moved stop would have done under the initial stop:
+        initial stop, pending levels, then the liquidation order; recorded on its plan only."""
+        for shadow in list(self._shadows):
+            if tick.ts_utc <= shadow.since:
+                continue
+            if shadow.step(tick, self):
+                self._shadows.remove(shadow)
 
     def _record_closing(
         self, tick: Tick, pending: _PendingExit, previous: Tick | None, reason: str, due: _Due | None
@@ -602,6 +820,60 @@ class Day02Backtest(S1Backtest):
         if due is not None and due.utc < end:
             self.unexecuted_closing = (due.utc, due.reason)
             self._log(end, "CLÔTURE_NON_EXÉCUTÉE", f"{due.reason} due à {due.utc.isoformat()}, aucun tick postérieur")
+
+
+@dataclass
+class _Shadow:
+    """Remaining quantity closed by a moved stop, followed with the initial stop (a posteriori only)."""
+
+    plan: Plan
+    trade: Trade  # copy of the closed trade, remaining size and entry
+    since: datetime  # its real close: the observer starts at the next quote
+    due: _Due | None
+    open: dict[str, Decimal] = field(default_factory=dict)  # pending portion -> quantity
+    legs: list[tuple[str, Decimal, Decimal, str]] = field(default_factory=list)  # portion, size, price, how
+    net: Decimal = Decimal(0)
+
+    def __post_init__(self) -> None:
+        pending = self.plan.pending()
+        self.open = {n: self.plan.quantities[n] for n in pending}
+        left = self.trade.size - sum(self.open.values(), Decimal(0))
+        if left > 0:  # the remaining size not attached to a pending portion stays to the deadline
+            self.open[FINAL] = left
+
+    def _settle(self, engine: Day02Backtest, tick: Tick, name: str, price: Decimal, how: str, stop: bool) -> None:
+        leg = copy.copy(self.trade)
+        leg.size = self.open.pop(name)
+        settled = engine._settle(leg, tick, price, stop_triggered=stop)
+        self.net += settled.net_account
+        self.legs.append((name, leg.size, price, how))
+
+    def step(self, tick: Tick, engine: Day02Backtest) -> bool:
+        """True when the observer is closed. Initial stop first, then levels, then the liquidation."""
+        plan = self.plan
+        long = plan.side is Side.LONG
+        price = tick.bid if long else tick.ask
+        if (tick.bid <= plan.initial_stop) if long else (tick.ask >= plan.initial_stop):
+            for name in list(self.open):
+                self._settle(engine, tick, name, plan.initial_stop, "stop initial", True)
+        else:
+            for name in [n for n in PORTIONS if n in self.open]:
+                if ahead(plan.side, price, plan.level(name)):
+                    self._settle(engine, tick, name, price, name, False)
+            if self.open and self.due is not None and tick.ts_utc > self.due.utc:
+                for name in list(self.open):
+                    self._settle(engine, tick, name, price, "échéance", False)
+        if self.open:
+            return False
+        actual = plan.legs[-1].net_account
+        plan.counterfactual = {
+            "closed_utc": tick.ts_utc,
+            "legs": self.legs,
+            "net_account": self.net,
+            "actual_net_of_remaining": actual,
+            "difference": self.net - actual,  # > 0: continuation cut short; < 0: loss avoided
+        }
+        return True
 
 
 def _london_days(start: datetime, end: datetime) -> list[date]:

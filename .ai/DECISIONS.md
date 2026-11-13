@@ -351,3 +351,13 @@
   2. Financement du modèle ADR-035 appliqué à chaque passage de 17:00 New York, même sur une position close le même jour civil ; 22:55 Paris est une borne de recherche, pas une garantie d'éviter le financement. Incertitudes IG signalées à part.
   3. Exécution autonome sur 2015-2021 (préparation, tests, études, passages, scénarios conditionnels), couverture des horaires supplémentaires vérifiée, contrôles de causalité conservés ; définition, mesures et lecture fixées avant les résultats (`docs/experiments/DAY02_LATE_EXIT_CAMPAIGN.md`).
 - **Portée** : exploration seulement. Référence DAY_02 et résultats antérieurs inchangés et reproductibles ; coûts, capital et risque de l'ADR-035. Aucun accès à 2022-2025, aucun ordre réel ou démo, aucune modification de paramètre après lecture, aucune fusion ni remplacement de la référence sans accord de l'opérateur.
+
+### ADR-038 : Campagne exploratoire DAY_02 « prises partielles et protection » (PROT, PART, FULL) contre LATE, 2015-2021 (M5)
+- **Date** : 2026-11-13
+- **Statut** : `ACCEPTED` (décision de l'opérateur)
+- **Source** : cadrage présenté le 2026-11-13 et autorisation de l'opérateur avec ses précisions ; méthodes de sorties partielles décrites par Kathy Lien comme source d'hypothèses.
+- **Décision** :
+  1. Plan 2 × 2 contre LATE inchangée : PROT (sortie unique à TP2, stop protégé), PART (TP1 / TP2 / TP3, stop fixe), FULL (les deux). TP1 = entrée + min(R0, ⅔ (TP2 − entrée)), P = mi-chemin TP1 → TP2, TP2 = E + I, TP3 = E + 2 I ; tiers en pas de 0,1 au plus fort reste (TP1 > TP3 > TP2), 0,1 contrat en sortie unique à TP2 ; stop au prix d'entrée quand P est atteint, au niveau TP1 quand TP2 est atteint, jamais éloigné, effectif à la cotation suivante.
+  2. Niveau atteint et portion exécutée distincts ; conservation des quantités ; scénarios d'interruption explicites pour le solde ; LATE reproduite exactement ; risque initial total inchangé.
+  3. Exécution autonome sur 2015-2021 jusqu'au bilan ; lecture exploratoire, critère d'une erreur type comme indicateur seulement ; positions conservées au-delà de l'échéance rapportées à part.
+- **Portée** : exploration seulement (`docs/experiments/DAY02_PARTIAL_EXITS_CAMPAIGN.md`). Aucun autre niveau testé (pas de TP3 = E + 1,5 I), aucun réglage guidé par les résultats, aucune lecture de 2022-2025, aucun ordre ; limites IG (clôture partielle, modification et distance minimale du stop garanti) explicites ; une amélioration simulée ne vaut pas exécutabilité réelle. Références et résultats antérieurs conservés.

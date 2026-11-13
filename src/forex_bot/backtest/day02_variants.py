@@ -14,6 +14,11 @@ Exit campaign (docs/experiments/DAY02_LATE_EXIT_CAMPAIGN.md), apart from H1-H3:
 - LATE, longer holding: same entries, stop, target and sizing as the reference; no time exit after 2 h;
   the 17:00 London liquidation replaced by a liquidation at 22:55 Europe/Paris on the session date
   (daylight saving changes of each zone included); until then the target and the stop only.
+
+Partial exits campaign (docs/experiments/DAY02_PARTIAL_EXITS_CAMPAIGN.md), on top of LATE unchanged:
+- PROT: single exit at TP2, stop of the position protected (entry price at P, TP1 level at TP2);
+- PART: TP1 / TP2 / TP3 portions, initial stop never moved;
+- FULL: TP1 / TP2 / TP3 portions and the protection of the remaining quantity.
 Research only: nothing here sends an order.
 """
 
@@ -24,17 +29,20 @@ from datetime import time
 
 from forex_bot.backtest.day02 import Context, Day02Params, Trigger
 
-# (H1, H2, H3, LATE) switched on, by variant.
-VARIANTS: dict[str, tuple[bool, bool, bool, bool]] = {
-    "REF": (False, False, False, False),
-    "H1": (True, False, False, False),
-    "H2": (False, True, False, False),
-    "H3": (False, False, True, False),
-    "H1H2": (True, True, False, False),
-    "H1H3": (True, False, True, False),
-    "H2H3": (False, True, True, False),
-    "H1H2H3": (True, True, True, False),
-    "LATE": (False, False, False, True),
+# (H1, H2, H3, LATE, partial exits, protection) switched on, by variant.
+VARIANTS: dict[str, tuple[bool, bool, bool, bool, bool, bool]] = {
+    "REF": (False, False, False, False, False, False),
+    "H1": (True, False, False, False, False, False),
+    "H2": (False, True, False, False, False, False),
+    "H3": (False, False, True, False, False, False),
+    "H1H2": (True, True, False, False, False, False),
+    "H1H3": (True, False, True, False, False, False),
+    "H2H3": (False, True, True, False, False, False),
+    "H1H2H3": (True, True, True, False, False, False),
+    "LATE": (False, False, False, True, False, False),
+    "PROT": (False, False, False, True, False, True),
+    "PART": (False, False, False, True, True, False),
+    "FULL": (False, False, False, True, True, True),
 }
 REFERENCE = "REF"
 
@@ -43,7 +51,7 @@ def variant_params(name: str, trigger: Trigger = Trigger.M5) -> Day02Params:
     """Parameters of a variant: the frozen reference values, plus the switches of its hypotheses."""
     if name not in VARIANTS:
         raise ValueError(f"variante inconnue : {name}")
-    h1, h2, h3, late = VARIANTS[name]
+    h1, h2, h3, late, partial, protection = VARIANTS[name]
     params = replace(
         Day02Params(trigger=trigger),
         deferred_recognition=h1,
@@ -52,7 +60,7 @@ def variant_params(name: str, trigger: Trigger = Trigger.M5) -> Day02Params:
     )
     if late:
         params = replace(params, time_exit=None, liquidation=time(22, 55), liquidation_zone="Europe/Paris")
-    return params
+    return replace(params, partial_exits=partial, protection=protection)
 
 
 def variant_of(params: Day02Params) -> str:
