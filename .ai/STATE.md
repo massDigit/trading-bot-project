@@ -2,7 +2,7 @@
 
 > **Ce fichier donne à l'agent une image précise de l'état du projet en temps réel à chaque début de session.**
 
-**Dernière mise à jour** : 2026-11-07
+**Dernière mise à jour** : 2026-11-14
 **Version de l'application** : 0.1.0 (`pyproject.toml`), non publiée
 **Modèle de dépôt IA** : v0.2.0 (`massDigit/ai-project-template`, structure `AGENTS.md`, `.ai/`, `.agents/`)
 
@@ -27,10 +27,36 @@ de développement 2015-2021, avec paramètres et coûts de recherche figés :
 Suite de la bibliothèque (ADR-025) : ordre **D2 avant D3** confirmé ; fiche **DAY_02**
 (continuation après impulsion et drapeau, `docs/strategies/DAY_02_FLAG_CONTINUATION.md`,
 ASSUMP-029) rédigée en PR #23 ; base de rédaction et extension de la convention de qualité à 5 min retenues (ADR-026), corrections intégrées (ordre des extrêmes, extension / profondeur / échéances, étude de disponibilité sans position, limite de perte journalière, horaires), chronologie, valeurs de référence et dérogation sur les limites journalière et hebdomadaire retenues (ADR-027) ; **fiche figée le 2026-11-07, ASSUMP-029 `APPROVED` pour la recherche hors ligne seulement (ADR-028)** ; réutilisation validée et implémentation autorisée (ADR-029) : moteur `backtest/day02_engine.py` (`Day02Backtest` sur `S1Backtest`, sans héritage de DAY_01), règles sur bougies `backtest/day02.py`, 45 tests synthétiques `tests/test_day02.py` ; lot moteur **clos**, PR #24 fusionnée (`653cdac`, ADR-030) ; aucun module existant modifié ; 506 tests réussis. Protocole de disponibilité `docs/experiments/DAY02_AVAILABILITY_2015_2021.md` approuvé dans son principe, précisions intégrées (ADR-031) ; outil `forex-day02-availability` (`backtest/day02_availability.py`) et 20 tests synthétiques en PR brouillon #25, corrections après revue intégrées (ADR-032) ; passage 2015-2021 autorisé et fait le 2026-11-07 sur `eb48d6c`, C1 à C10 conformes ; bilan agrégé `docs/experiments/DAY02_AVAILABILITY_2015_2021_BILAN.md` **validé** après précisions (périmètre de la comparaison M5 / M15, état de reprise, reproduction vérifiée sur le détail local), étude **close** (PR #25 fusionnée, ADR-033) : 1 816 séances, 2 725 configurations M5 (2 720 M15), 1 009 drapeaux formés (1 008), 307 sorties confirmées M5 et 272 M15 (instants `D`, pas des entrées) ; aucun passage de performance, aucune lecture des données de recherche. Protocole de performance `docs/experiments/DAY02_REFERENCE_2015_2021.md` approuvé dans sa base, trois précisions intégrées (ADR-034) ; outils `forex-day02-backtest` et `forex-day02-compare` (`backtest/day02_explore.py`) et 20 tests synthétiques (`tests/test_day02_explore.py`) en PR brouillon #26 ; revue de f705858 : écart à `D` corrigé (côté de `P_D`) et détails par séance rattachés à leur rapport (empreinte, passage, règle d'exécution, fenêtre) ; protocole figé au commit de ces corrections (`66557cd`) et **soumis à revue** ; 546 tests réussis ; conditions IG : **option (b) retenue le 2026-11-09** (ADR-035), hypothèses de recherche figées conservées à l'identique, `ASSUMED`, consignée dans un commit documentaire distinct du code gelé ; relevés du compte réel consignés à part (`docs/CONFIRMATIONS.md` §6 et §7, PR #27 fusionnée), non intégrés ; aucun passage historique (revue du code puis autorisation explicite attendues).
-**Aucune expérience n'est autorisée** : ni moteur, ni analyse historique, ni backtest, ni
-entraînement, ni ordre ; 2022-2025 reste en réserve. Conditions IG du premier passage DAY_02 :
-option (b) retenue (ADR-035) ; toute évaluation avec des conditions IG mieux documentées fera
-l'objet d'un protocole distinct, fixé avant son lancement.
+
+### DAY_02 : état au 2026-11-14 (passages et campagnes exploratoires, rien de fusionné)
+- **Premier passage de performance** 2015-2021, autorisé, fait sur `2215d08` (branche
+  `docs/day02-reference-protocol`, **PR #26 toujours en brouillon** ; conflit de CHANGELOG et fichier
+  de bilan `DAY02_REFERENCE_2015_2021_BILAN.md` encore à faire) : M5 298 transactions, net −70,66 €,
+  −0,064 ± 0,044 R, drawdown relatif 5,66 % ; M15 263 transactions, net −51,97 € ; aucun scénario
+  B/C ni rejet requis. Rapports hors Git `data/reports/backtests/day02_ref_2015_2021_*`.
+- **Campagne H1-H3** (ADR-036, `docs/experiments/DAY02_IMPROVEMENT_CAMPAIGN.md`, branche
+  `research/day02-h1-h3`) : 7 variantes (reconnaissance différée, profondeur sur clôture, contexte
+  H4) ; toutes nettes négatives, mieux sur 2015-2018 et moins bien sur 2019-2021 ; **abandonnées**.
+- **Campagne LATE** (ADR-037, `docs/experiments/DAY02_LATE_EXIT_CAMPAIGN.md`, branche
+  `research/day02-late-exit`) : sortie de 2 h supprimée, liquidation à 22:55 `Europe/Paris` ;
+  296 transactions, net **+36,32 €**, +0,029 ± 0,064 R, drawdown relatif 2,55 % ; effet apparié
+  +0,092 ± 0,047 R ; « piste à poursuivre » de justesse, **sous protocole distinct** ; espérance nette
+  non distinguable de zéro. **Meilleure configuration DAY_02 à ce jour.**
+- **Campagne prises partielles et protection** (ADR-038,
+  `docs/experiments/DAY02_PARTIAL_EXITS_CAMPAIGN.md`, branche `research/day02-partial-exits`) :
+  PROT +24,35 €, PART +0,82 €, FULL −31,28 € contre LATE +36,32 € ; effet apparié négatif dans les
+  deux périodes ; **aucune retenue**, LATE reste la meilleure.
+- **Branches empilées, poussées, sans PR** : `docs/day02-reference-protocol` → `research/day02-h1-h3`
+  → `research/day02-late-exit` → `research/day02-partial-exits`. Aucune fusion ni remplacement de la
+  référence sans accord de l'opérateur. Configurations explicites `--variant` (REF, H1…H1H2H3, LATE,
+  PROT, PART, FULL) ; la référence et LATE se reproduisent à l'identique.
+- **Méthode suivie** : définitions, mesures et lecture enregistrées avant tout résultat ; causalité
+  stricte (tests de troncature et d'altération après T, rejeux tronqués sur données réelles) ;
+  comparaisons « et si » calculées à part ; tous les essais conservés. Sorties détaillées hors Git
+  (`data/reports/backtests/day02_campaign/`, `day02_late_exit/`, `day02_partial_exits/`).
+- **Aucune nouvelle expérience sans autorisation de l'opérateur** ; 2022-2025 reste en réserve ;
+  aucun ordre. Coûts et conditions IG : hypothèses `ASSUMED` de l'ADR-035 ; toute évaluation avec
+  des conditions IG mieux documentées fera l'objet d'un protocole distinct.
 
 ## 🧾 Synthèse vérifiée (2026-11-03)
 - PR #1 à #4 fusionnées dans `main` par commits de fusion, sur autorisation de l'opérateur
@@ -133,6 +159,9 @@ l'objet d'un protocole distinct, fixé avant son lancement.
 
 ## 🏁 Prochaine Étape / Milestone
 1. S1, S2 et S3 étudiées sur 2015-2021 (ADR-016, ADR-020), sans conclusion de rentabilité. Suite (stratégie, paramètres, capital ou risque, modèle de sélection) sur décision de l'opérateur seulement ; aucune expérience en cours.
-   Première vague (cahier v1.2 §6.6, §15 lot 3A) : fiche DAY_01 figée (ADR-022) ; lot de données M5/M15 2015-2021 clôturé (ADR-021, convention DAY_01 : silence > 5 min) ; moteur DAY_01 hors ligne (référence M5 et variante M15) et tests synthétiques fusionnés (PR #19, ADR-023) ; étude de disponibilité 2015-2021 **close** (PR #20 fusionnée, `ef41596`) : passage du 2026-11-06 sur `1c1ed0f`, C1 à C10 conformes, bilan agrégé `docs/experiments/DAY01_AVAILABILITY_2015_2021_BILAN.md` validé ; 1 816 séances attendues, 1 204 cassures, 831 confirmations M5 et 736 M15 (instants d'évaluation, pas des entrées). Protocole de performance `docs/experiments/DAY01_REFERENCE_2015_2021.md` approuvé dans son principe (2026-11-07, `03c6643`), trois précisions intégrées (parcours jusqu'à `D` séparé de la décision, issues exclusives et annotations, liquidation en attente à la fin) ; outil `forex-day01-backtest` et `forex-day01-compare` avec tests synthétiques, figé à `3d38ad5`. Passages A M5 et M15 autorisés et faits le 2026-11-07 sur `3d38ad5`, contrôles conformes, aucun passage B, C ni rejet requis ; bilan agrégé `docs/experiments/DAY01_REFERENCE_2015_2021_BILAN.md` validé, étape **close** (PR #21 fusionnée, ADR-024) : net −586,71 € en M5 (831 transactions, sept années déficitaires, drawdown relatif maximal 31,1 %), −289,12 € en M15 (736 transactions). **DAY_01 étudiée, résultats défavorables dans les conditions testées ; aucune trajectoire retenue pour le paper trading** ; aucune sélection de M15 après coup, aucun changement de paramètre, aucun filtre tiré des sous-groupes positifs. Suite de la bibliothèque : décision séparée à venir.
-2. En parallèle : fermetures particulières et confirmations IG.
-3. Garder 2022-2023 pour l'évaluation des variantes figées, puis 2024-2025 pour le test final (ADR-007).
+   Première vague (cahier v1.2 §6.6, §15 lot 3A) : fiche DAY_01 figée (ADR-022) ; lot de données M5/M15 2015-2021 clôturé (ADR-021, convention DAY_01 : silence > 5 min) ; moteur DAY_01 hors ligne (référence M5 et variante M15) et tests synthétiques fusionnés (PR #19, ADR-023) ; étude de disponibilité 2015-2021 **close** (PR #20 fusionnée, `ef41596`) : passage du 2026-11-06 sur `1c1ed0f`, C1 à C10 conformes, bilan agrégé `docs/experiments/DAY01_AVAILABILITY_2015_2021_BILAN.md` validé ; 1 816 séances attendues, 1 204 cassures, 831 confirmations M5 et 736 M15 (instants d'évaluation, pas des entrées). Protocole de performance `docs/experiments/DAY01_REFERENCE_2015_2021.md` approuvé dans son principe (2026-11-07, `03c6643`), trois précisions intégrées (parcours jusqu'à `D` séparé de la décision, issues exclusives et annotations, liquidation en attente à la fin) ; outil `forex-day01-backtest` et `forex-day01-compare` avec tests synthétiques, figé à `3d38ad5`. Passages A M5 et M15 autorisés et faits le 2026-11-07 sur `3d38ad5`, contrôles conformes, aucun passage B, C ni rejet requis ; bilan agrégé `docs/experiments/DAY01_REFERENCE_2015_2021_BILAN.md` validé, étape **close** (PR #21 fusionnée, ADR-024) : net −586,71 € en M5 (831 transactions, sept années déficitaires, drawdown relatif maximal 31,1 %), −289,12 € en M15 (736 transactions). **DAY_01 étudiée, résultats défavorables dans les conditions testées ; aucune trajectoire retenue pour le paper trading** ; aucune sélection de M15 après coup, aucun changement de paramètre, aucun filtre tiré des sous-groupes positifs. Suite de la bibliothèque : DAY_02 en cours d'étude (voir « Focus Courant »).
+2. DAY_02 : nouvelle proposition d'amélioration attendue de l'opérateur, sans modifier les campagnes
+   faites ; LATE comme meilleure base actuelle ; suites possibles de LATE (2022-2023, conditions IG)
+   sous protocole distinct seulement. Clôture de la PR #26 (bilan du premier passage, CHANGELOG).
+3. En parallèle : fermetures particulières et confirmations IG.
+4. Garder 2022-2023 pour l'évaluation des variantes figées, puis 2024-2025 pour le test final (ADR-007).
