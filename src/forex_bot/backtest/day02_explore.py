@@ -308,7 +308,7 @@ def expected_end(attempt: Attempt, trade: Trade | None) -> tuple[datetime | None
         return c.ended_utc, c.outcome
     if attempt.at_d != ENTRY_DECIDED:
         return c.ended_utc, attempt.at_d
-    if attempt.entry_outcome in NOT_EXECUTED_OUTCOMES:
+    if attempt.entry_outcome in (*NOT_EXECUTED_OUTCOMES, *LOT_NOT_EXECUTED):
         return attempt.entry_outcome_utc, attempt.entry_outcome
     if trade is None or trade.exit_utc is None:
         return None, None

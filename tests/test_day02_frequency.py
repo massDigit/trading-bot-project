@@ -28,6 +28,7 @@ from forex_bot.backtest.day02 import (
     is_nowick,
 )
 from forex_bot.backtest.day02_availability import bound_errors, independent_first, reuse_errors
+from forex_bot.backtest.day02_explore import expected_end
 from forex_bot.backtest.day02_variants import ALL_VARIANTS, FREQUENCY, VARIANTS, variant_of, variant_params
 from forex_bot.backtest.feed import Tick
 
@@ -147,6 +148,8 @@ def test_e3_is_cancelled_when_the_target_comes_first_and_never_fills_at_d(tmp_pa
     attempt = next(x for x in e3.attempts if x.at_d == ENTRY_DECIDED)
     assert (attempt.entry_outcome, attempt.entry_outcome_utc) == (CANCELLED_TARGET, at(WINTER, 10, 40))
     assert attempt.ended_utc == at(WINTER, 10, 40)
+    # The resume control knows this end: the cancellation is the event that authorises the next search.
+    assert expected_end(attempt, None) == (at(WINTER, 10, 40), CANCELLED_TARGET)
 
 
 def test_e3_expires_after_nine_trigger_candles_without_retest(tmp_path: Path) -> None:
