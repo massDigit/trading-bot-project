@@ -361,3 +361,14 @@
   2. Niveau atteint et portion exécutée distincts ; conservation des quantités ; scénarios d'interruption explicites pour le solde ; LATE reproduite exactement ; risque initial total inchangé.
   3. Exécution autonome sur 2015-2021 jusqu'au bilan ; lecture exploratoire, critère d'une erreur type comme indicateur seulement ; positions conservées au-delà de l'échéance rapportées à part.
 - **Portée** : exploration seulement (`docs/experiments/DAY02_PARTIAL_EXITS_CAMPAIGN.md`). Aucun autre niveau testé (pas de TP3 = E + 1,5 I), aucun réglage guidé par les résultats, aucune lecture de 2022-2025, aucun ordre ; limites IG (clôture partielle, modification et distance minimale du stop garanti) explicites ; une amélioration simulée ne vaut pas exécutabilité réelle. Références et résultats antérieurs conservés.
+
+### ADR-039 : Lot de recherche DAY_02 « fréquence » : confirmations des guides, trois configurations nouvelles, GBP/USD et SMT (2015-2021)
+- **Date** : 2026-11-17
+- **Statut** : `ACCEPTED` (décision de l'opérateur)
+- **Source** : message de l'opérateur du 2026-11-17 après le criblage des guides FX Replay (G1a, G5b, E3 prometteurs ; SMT non testable faute de GBP/USD).
+- **Décision** :
+  1. Objectif de recherche : environ 4 à 5 transactions par séance pour DAY_02 seule, avec espérance nette positive et risque maîtrisé ; cible, pas quota ; une position clôturée en plusieurs portions compte pour une transaction.
+  2. Lot complet autorisé sans validation intermédiaire : analyse, acquisition et préparation GBP/USD 2015-2021, hypothèses, implémentation, tests synthétiques, passages 2015-2021, bilan ; PR de revue possibles, aucune fusion.
+  3. Volets : confirmation de G1a, G5b, E3 et G1a + G5b ; au plus trois configurations nouvelles motivées par le diagnostic ; SMT GBP/USD comme filtre et comme déclencheur ; DAY_02 sur GBP/USD seule et conjointe à capital partagé si spécifications et coûts explicites.
+  4. Définitions et lecture enregistrées avant résultats (`docs/experiments/DAY02_FREQUENCY_CAMPAIGN.md`) ; causalité stricte ; LATE reproduite.
+- **Portée** : exploration seulement ; risque initial par transaction inchangé (0,25 %), aucun levier supplémentaire ; toute évolution des règles d'exposition est présentée séparément ; pas de généralisation des prises partielles ou du break-even ; 2022-2025 en réserve ; aucun ordre ; LATE et les campagnes antérieures inchangées.
