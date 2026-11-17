@@ -51,13 +51,13 @@ from forex_bot.backtest.day02 import (
     Day02Params,
     Search,
     Trigger,
-    ceil_m15,
+    ceil_unit,
     configuration_from,
     liquidation_utc,
     session_day,
 )
 from forex_bot.backtest.day02_engine import Day02Backtest
-from forex_bot.backtest.day02_variants import REFERENCE, VARIANTS, needs_h4, variant_params
+from forex_bot.backtest.day02_variants import ALL_VARIANTS, REFERENCE, needs_h4, needs_m15_atr, variant_params
 from forex_bot.backtest.engine import ResearchConfig
 from forex_bot.backtest.explore import RESEARCH_COSTS
 from forex_bot.backtest.feed import Silence, classify_silence
@@ -336,12 +336,12 @@ def bound_errors(
     m15: Mapping[datetime, Mapping[str, Any]] | None = None,
     params: Mapping[Trigger, Day02Params] = PARAMS,
 ) -> list[str]:
-    """Bounds of valid configurations; an event that ends one (e.g. a 7th M15) is an outcome, not an error.
+    """Bounds of valid configurations; an event that ends one (e.g. a 7th unit) is an outcome, not an error.
     Formation and exit bounds apply only when F or D exist."""
     errors = []
     for path in paths:
         p, day = params[path.trigger], path.day
-        step = p.trigger_step
+        step, u = p.trigger_step, p.unit
         for line in path.searches:
             c = line.configuration
             if c is None:
@@ -352,14 +352,15 @@ def bound_errors(
             def err(text: str, where: str = where) -> None:
                 errors.append(f"{where} : {text}")
 
-            if t.minute % 15 or t.second or t.microsecond:
-                err("t_j hors de la grille M15")
-            if not london(day, time(8)) <= t <= london(day, p.last_recognition):
-                err("t_j hors de [08:00, 14:15]")
-            if t < ceil_m15(line.resume_utc) + p.window * M15:
+            if (t - london(day, time(0))) % u:
+                err("t_j hors de la grille de l'unité")
+            if not london(day, p.impulse_start) + p.window * u <= t <= london(day, p.last_recognition):
+                err("t_j hors de [07:00 + fenêtre, 14:15]")
+            first_j = ceil_unit(line.resume_utc, u)  # RSC: the last candle j starts at the resume or after
+            if t < (first_j + u if p.overlap_resume else first_j + p.window * u):
                 err("fenêtre commencée avant la reprise")
             # o < p = j, read again on the window candles (the configuration keeps only the last peak).
-            window = [m15.get(t - (p.window - k) * M15) for k in range(p.window)] if m15 is not None else []
+            window = [m15.get(t - (p.window - k) * u) for k in range(p.window)] if m15 is not None else []
             if window and all(w is not None for w in window):
                 long = c.side is Side.LONG
                 tops = [w["bid_high"] if long else w["bid_low"] for w in window if w is not None]
@@ -370,23 +371,23 @@ def bound_errors(
                 err("F antérieur à la reconnaissance")
             if c.ended_utc is not None and c.ended_utc < t:
                 err("fin antérieure à la reconnaissance")
-            if not t - p.window * M15 <= c.origin_start < t - M15:
+            if not t - p.window * u <= c.origin_start < t - u:
                 err("o < p non respecté ou origine hors de la fenêtre")
             if [s for s in c.extensions if s < t] or c.extensions != sorted(c.extensions):
                 err("extensions non ordonnées ou antérieures à la reconnaissance")
             if c.extensions and c.peak_start != c.extensions[-1]:
                 err("dernier sommet différent de la dernière extension")
-            length = (c.peak_start - c.origin_start) / M15 + 1
+            length = (c.peak_start - c.origin_start) / u + 1
             if c.outcome == PROLONGED:
-                # The first extension that takes the impulse beyond 6 M15 ends it, at its close; the
-                # impulse may then exceed 7 M15 (pauses between extensions count in its length).
-                before = c.extensions[-2] if len(c.extensions) > 1 else t - M15
-                if not c.extensions or (before - c.origin_start) / M15 + 1 > p.max_impulse:
-                    err("abandon après une impulsion déjà au-delà de 6 M15")
-                if length <= p.max_impulse or c.ended_utc != c.peak_start + M15:
+                # The first extension that takes the impulse beyond 6 units ends it, at its close; the
+                # impulse may then exceed 7 units (pauses between extensions count in its length).
+                before = c.extensions[-2] if len(c.extensions) > 1 else t - u
+                if not c.extensions or (before - c.origin_start) / u + 1 > p.max_impulse:
+                    err("abandon après une impulsion déjà au-delà de 6 unités")
+                if length <= p.max_impulse or c.ended_utc != c.peak_start + u:
                     err("impulsion prolongée sans dépassement, ou abandon hors de la clôture de l'extension")
             elif length > p.max_impulse:
-                err("impulsion de plus de 6 M15 sans fin « prolongée »")
+                err("impulsion de plus de 6 unités sans fin « prolongée »")
             if got(c.ended_utc) > london(day, p.last_decision):
                 err("fin après 15:00")
             if c.flag_utc is None:
@@ -394,10 +395,10 @@ def bound_errors(
                     err("fin de fenêtre avant F hors de 14:45")
                 continue
             # Formation exists.
-            deadline = min(c.peak_start + M15 + p.max_pause, london(day, p.last_decision))
-            if c.pause_starts != [c.peak_start + i * M15 for i in range(1, p.min_pause + 1)]:
-                err("pauses différentes des deux M15 suivant le dernier sommet")
-            if c.flag_utc != max(t, c.peak_start + (p.min_pause + 1) * M15) or c.flag_utc > london(day, p.last_flag):
+            deadline = min(c.peak_start + u + p.max_pause, london(day, p.last_decision))
+            if c.pause_starts != [c.peak_start + i * u for i in range(1, p.min_pause + 1)]:
+                err("pauses différentes des deux unités suivant le dernier sommet")
+            if c.flag_utc != max(t, c.peak_start + (p.min_pause + 1) * u) or c.flag_utc > london(day, p.last_flag):
                 err("F mal daté ou après 14:45")
             if c.deadline_utc != deadline:
                 err("Δ différent de min(fin(p) + 90 min, 15:00)")
@@ -416,15 +417,17 @@ def bound_errors(
 
 
 def configuration_m15(c: Configuration, trigger: Trigger, p: Day02Params) -> set[datetime]:
-    """M15 a configuration uses: impulse window, formation reads, and exit M15 in the comparison."""
+    """Candles of the configuration unit it uses: impulse window, formation reads, and exit M15 in the
+    comparison (M15 for the reference, M5 for M5S)."""
+    u = p.unit
     t = c.recognised_utc
-    used = {t - (p.window - i) * M15 for i in range(p.window)}
-    last = (got(c.flag_utc) - M15) if c.flag_utc is not None else c.last_examined_start
+    used = {t - (p.window - i) * u for i in range(p.window)}
+    last = (got(c.flag_utc) - u) if c.flag_utc is not None else c.last_examined_start
     cursor = t
     while last is not None and cursor <= last:
         used.add(cursor)
-        cursor += M15
-    if trigger is Trigger.M15 and c.flag_utc is not None and c.last_examined_start is not None:
+        cursor += u
+    if trigger is Trigger.M15 and u == M15 and c.flag_utc is not None and c.last_examined_start is not None:
         cursor = c.flag_utc
         while cursor <= c.last_examined_start:
             used.add(cursor)
@@ -440,7 +443,15 @@ def reuse_errors(paths: list[SessionPath], params: Mapping[Trigger, Day02Params]
             c = line.configuration
             if c is None:
                 continue
-            used = configuration_m15(c, path.trigger, params[path.trigger])
+            p = params[path.trigger]
+            if p.overlap_resume:
+                # RSC: earlier candles may serve again; the last window candle starts at the resume or after.
+                if c.recognised_utc - p.unit < ceil_unit(line.resume_utc, p.unit):
+                    errors.append(
+                        f"{path.day} {path.trigger.value} : dernière bougie avant la reprise {line.resume_utc}"
+                    )
+                continue
+            used = configuration_m15(c, path.trigger, p)
             if any(s < line.resume_utc for s in used):
                 errors.append(f"{path.day} {path.trigger.value} : M15 commencée avant la reprise {line.resume_utc}")
             for s in sorted(used):
@@ -468,17 +479,23 @@ def independent_first(
     Exploratory variants (`params`, written again here from their definitions, not from day02):
     H1 lets the peak be any candle after the origin (amplitude and strong close still on the last
     close), the later candles being pauses that respect the depth; H2 reads the depth on the bid close; H3 keeps
-    an impulse only if `context` (shared, as the ATR) gives its direction."""
+    an impulse only if `context` (shared, as the ATR) gives its direction.
+    Frequency lot: RSC lets the window hold candles started before `resume`, its last candle starting at
+    the first unit boundary at or after it; M5S counts every duration in units of `params.unit` (5 min)."""
     deferred = params is not None and params.deferred_recognition
     on_close = params is not None and params.depth_on_close
     with_context = params is not None and params.context is not Context.NONE
+    unit = M15 if params is None else params.unit
     window, first, last = 4, london(day, time(7)), london(day, time(14, 15))
+    opening = first
     if resume is not None and resume > first:
-        late = (resume - first) % M15  # 07:00 London lies on the UTC quarter-hour grid
-        first = resume + (M15 - late if late else timedelta(0))
-    t = first + window * M15
+        late = (resume - first) % unit  # 07:00 London lies on the UTC 5 and 15 minute grids
+        first = resume + (unit - late if late else timedelta(0))
+    t = first + window * unit
+    if params is not None and params.overlap_resume and first > opening:
+        t = max(first + unit, opening + window * unit)
     while t <= last:
-        rows = [m15.get(t - (window - k) * M15) for k in range(window)]
+        rows = [m15.get(t - (window - k) * unit) for k in range(window)]
         bars = [r for r in rows if r is not None and r["complete_at_close"]]
         a = atr(t - window * M15, t) if len(bars) == window else None
         if a is not None and a > 0:
@@ -500,17 +517,14 @@ def independent_first(
                     found.append((Side.SHORT, max(highs), min(lows), o, q))
             if len(found) == 1:
                 side, origin, peak, o, q = found[0]
-                sign = None if not with_context or context is None else context(t - window * M15, t)
+                sign = None if not with_context or context is None else context(t - window * unit, t)
                 if not with_context or sign == (1 if side is Side.LONG else -1):
-                    o_start = t - (window - o) * M15
-                    return {
-                        "t_j": t,
-                        "side": side.value,
-                        "O": origin,
-                        "o": o_start,
-                        **_independent_flag(day, m15, side, origin, o_start, peak, t - (window - q) * M15, t, on_close),
-                    }
-        t += M15
+                    o_start = t - (window - o) * unit
+                    flag = _independent_flag(
+                        day, m15, side, origin, o_start, peak, t - (window - q) * unit, t, on_close, unit
+                    )
+                    return {"t_j": t, "side": side.value, "O": origin, "o": o_start, **flag}
+        t += unit
     return None
 
 
@@ -524,14 +538,15 @@ def _independent_flag(
     p: datetime,
     t: datetime | None = None,
     on_close: bool = False,
+    unit: timedelta = M15,
 ) -> dict[str, Any]:
     long = side is Side.LONG
-    start = p + M15 if t is None else t  # H1: candles of the window after p are already pauses
-    pauses, cursor = (start - (p + M15)) // M15, start
+    start = p + unit if t is None else t  # H1: candles of the window after p are already pauses
+    pauses, cursor = (start - (p + unit)) // unit, start
     if pauses >= 2:
         return {"F": start, "fin": None, "instant": None, "E_final": peak, "p_final": p}
     while True:
-        end = cursor + M15
+        end = cursor + unit
         if end > london(day, time(14, 45)):
             return {"F": None, "fin": WINDOW_END, "instant": london(day, time(14, 45))}
         bar = m15.get(cursor)
@@ -543,7 +558,7 @@ def _independent_flag(
             return {"F": None, "fin": TOO_DEEP, "instant": end}
         if (long and bar["bid_high"] > peak) or (not long and bar["bid_low"] < peak):
             peak, p, pauses = (bar["bid_high"] if long else bar["bid_low"]), cursor, 0
-            if (p - o_start) / M15 + 1 > 6:
+            if (p - o_start) / unit + 1 > 6:
                 return {"F": None, "fin": PROLONGED, "instant": end}
         else:
             pauses += 1
@@ -616,13 +631,13 @@ def c7_errors(m5: list[SessionPath], m15: list[SessionPath]) -> list[str]:
 def c8_errors(paths: list[SessionPath], p: Mapping[Trigger, Day02Params] = PARAMS) -> list[str]:
     errors = []
     for path in paths:
-        window = p[path.trigger].window
+        window, unit = p[path.trigger].window, p[path.trigger].unit
         for line in path.searches:
             c = line.configuration
             if c is None:
                 continue
             read = line.atr_reads.get(c.recognised_utc)
-            start = c.recognised_utc - window * M15
+            start = c.recognised_utc - window * unit
             if read is None:
                 errors.append(f"{path.day} {c.recognised_utc} : ATR non lu à t_j")
                 continue
@@ -930,12 +945,15 @@ def availability(
         c1.append(f"calendrier {found} ≠ ancrage {CALENDAR_ANCHOR}")
     paths: dict[Trigger, list[SessionPath]] = {}
     engines: dict[Trigger, Day02Backtest] = {}
+    # M5S (frequency lot): the M5 candles carry the impulse and the flag, the M15 candles the ATR.
+    m5s = needs_m15_atr(variant)
+    unit_bars, atr_bars = (bars[Grid.M5], bars[Grid.M15]) if m5s else (bars[Grid.M15], h1)
     for trigger in TRIGGERS:
         paths[trigger], engines[trigger] = run_trajectory(
-            trigger, bars[Grid.M5], bars[Grid.M15], h1, gaps, config, days, params[trigger], h4
+            trigger, bars[Grid.M5], unit_bars, atr_bars, gaps, config, days, params[trigger], h4
         )
     every = [p for t in TRIGGERS for p in paths[t]]
-    m15_rows = {b["start_utc"]: b for b in bars[Grid.M15]}  # separate dictionary for the recomputation
+    m15_rows = {b["start_utc"]: b for b in unit_bars}  # separate dictionary for the recomputation
     params_diff = {k for k, v in vars(params[Trigger.M5]).items() if vars(params[Trigger.M15])[k] != v}
     checks = {
         "C1": check(c1, calendrier=found, ancrage=CALENDAR_ANCHOR if official else None),
@@ -1009,7 +1027,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--end", type=_date, default=_date("2022-01-01"))
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--details-out", type=Path, required=True)
-    parser.add_argument("--variant", choices=list(VARIANTS), default=REFERENCE, help="campagne exploratoire H1-H3")
+    parser.add_argument(
+        "--variant", choices=ALL_VARIANTS, default=REFERENCE, help="configurations exploratoires enregistrées"
+    )
     args = parser.parse_args(argv)
     require_development_window(args.start, args.end)
     directory = args.data_dir / "bars" / SOURCE / INSTRUMENT

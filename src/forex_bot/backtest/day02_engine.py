@@ -41,13 +41,16 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from forex_bot.backtest.bar_state import BarState, bar_state
 from forex_bot.backtest.day01 import LONDON, M15, london
 from forex_bot.backtest.day02 import (
     CANCELLED_INTERRUPTION,
+    CANCELLED_TARGET,
     ENTRY_DECIDED,
     EXECUTED,
+    EXHAUSTION,
     EXIT,
     EXPIRED,
     MARKET_CLOSED,
@@ -62,6 +65,7 @@ from forex_bot.backtest.day02 import (
     STOP_INADMISSIBLE,
     TARGET_AT_EXECUTION,
     TARGET_PASSED,
+    TIME_BLOCK,
     TIME_EXIT,
     UNPLANNED_NIGHT,
     Attempt,
@@ -71,7 +75,9 @@ from forex_bot.backtest.day02 import (
     Day02Params,
     Trigger,
     ceil_m15,
+    ceil_unit,
     configuration_from,
+    is_nowick,
     liquidation_utc,
     session_day,
 )
@@ -169,6 +175,9 @@ class Day02Backtest(S1Backtest):
         self.m5 = {b["start_utc"]: b for b in m5}
         self.m15 = {b["start_utc"]: b for b in m15}
         self.trigger_bars = self.m5 if params.trigger is Trigger.M5 else self.m15
+        if params.trigger is Trigger.M15 and params.unit != M15:
+            # M5S compared on M15: the `h1` argument carries the M15 candles (ATR source), read as triggers.
+            self.trigger_bars = {b["start_utc"]: b for b in self.h1}
         self.attempts: list[Attempt] = []
         self.closings: list[Closing] = []
         self.skipped_days: list[tuple[date, str]] = []
@@ -185,6 +194,9 @@ class Day02Backtest(S1Backtest):
         self.plans: list[Plan] = []
         self.observe_counterfactual = observe_counterfactual
         self._shadows: list[_Shadow] = []
+        # Frequency lot, E3: limit order (level E, target) while pending; quote used to size it at D.
+        self._retest: tuple[Decimal, Decimal] | None = None
+        self._estimate_quote: tuple[Decimal, Decimal] | None = None
 
     # ------------------------------------------------------------------ public
 
@@ -302,14 +314,15 @@ class Day02Backtest(S1Backtest):
         """Replay until no position nor pending entry remains: the close instant, or None if it does not
         happen before the last recognition of session `day` (the ticks are replayed later anyway)."""
         last = london(day, self.day02.last_recognition)
-        cursor = ceil_m15(since)
+        unit = self.day02.unit
+        cursor = ceil_m15(since) if unit == M15 else ceil_unit(since, unit)
         while self.position is not None or self.pending_entry is not None:
             if cursor <= since:
-                cursor += M15
+                cursor += unit
             if cursor > last:
                 return None
             self._advance(cursor, inclusive=False)
-            cursor += M15
+            cursor += unit
         return self.trades[-1].exit_utc if self.trades else since
 
     # ------------------------------------------------------------------ decision and pending entry
@@ -364,12 +377,28 @@ class Day02Backtest(S1Backtest):
         if (long and target <= entry) or (not long and target >= entry):
             refuse(TARGET_PASSED, f"cible {target}, P_D {entry}")
             return
-        self._size(decision, EntrySignal(side, stop, a, config.peak, config.origin), record)
+        if p.exhaustion_filter and is_nowick(self.m15[config.peak_start], long):
+            refuse(EXHAUSTION, f"bougie de sommet {config.peak_start.isoformat()}")
+            return
+        if p.time_block_ny is not None:
+            opened = (decision - p.trigger_step).astimezone(NEW_YORK).time()
+            if p.time_block_ny[0] <= opened < p.time_block_ny[1]:
+                refuse(TIME_BLOCK, f"bougie de sortie ouverte à {opened.isoformat()} New York")
+                return
+        if p.retest_entry:
+            # E3: the loss at the stop is estimated from the limit level E, the spread of D kept.
+            spread = last.ask - last.bid
+            self._estimate_quote = (config.peak - spread, config.peak) if long else (config.peak, config.peak + spread)
+        try:
+            self._size(decision, EntrySignal(side, stop, a, config.peak, config.origin), record)
+        finally:
+            self._estimate_quote = None
         if self.pending_entry is None:
             refuse(SIZE_REFUSED, record.reasons[-1] if record.reasons else None)
             return
         attempt.at_d = ENTRY_DECIDED
-        deadline = decision + p.entry_validity
+        deadline = decision + (p.retest_validity * p.trigger_step if p.retest_entry else p.entry_validity)
+        self._retest = (config.peak, target) if p.retest_entry else None
         attempt.decision = {
             "d_utc": decision,
             "side": side.value,
@@ -378,6 +407,7 @@ class Day02Backtest(S1Backtest):
             "target": target,
             "size": self.pending_entry.size,
             "deadline_utc": deadline,
+            **({"limit": config.peak} if p.retest_entry else {}),
         }
         self._pending_target, self._pending_attempt = target, attempt
         self._advance(deadline, inclusive=True)  # executions in ]D, D + 5 min]
@@ -393,8 +423,10 @@ class Day02Backtest(S1Backtest):
                     f"d'ouverture prévue après {known.isoformat()}, avant l'échéance",
                 )
             else:
-                self._end_pending(EXPIRED, deadline, "aucun tick admissible dans ]D, D + 5 min]")
-        if attempt.entry_outcome in (EXPIRED, CANCELLED_INTERRUPTION, REJECTED_AT_EXECUTION):
+                window = "]D, D + 5 min]" if not p.retest_entry else f"]D, D + {p.retest_validity} bougies]"
+                self._end_pending(EXPIRED, deadline, f"aucun tick admissible dans {window}")
+        self._retest = None
+        if attempt.entry_outcome in (EXPIRED, CANCELLED_INTERRUPTION, REJECTED_AT_EXECUTION, CANCELLED_TARGET):
             attempt.ended_utc, attempt.ended_by = attempt.entry_outcome_utc, attempt.entry_outcome
             return
         # The close of the position ends the attempt (`_close`), even after the search has stopped.
@@ -414,8 +446,10 @@ class Day02Backtest(S1Backtest):
         self._log(utc, outcome, detail)
 
     def _loss_estimate(self, side: Side, stop: Decimal, tick: Tick) -> LossEstimate:
-        """Intraday holding: no night is provisioned (sheet §7)."""
+        """Intraday holding: no night is provisioned (sheet §7). E3: estimated from the limit level."""
         config = self.config
+        if self._estimate_quote is not None:
+            tick = Tick(tick.ts_utc, *self._estimate_quote)
         return estimate_loss_per_contract(
             side=side,
             stop_price=stop,
@@ -475,7 +509,15 @@ class Day02Backtest(S1Backtest):
                         f"{self.day02.interruption_threshold} d'ouverture prévue, révélé au plus tard par ce tick",
                     )
                 elif tick.ts_utc > self.pending_entry.decided_utc:
-                    self._open(tick)
+                    if self._retest is None:
+                        self._open(tick)
+                    else:
+                        level, target = self._retest
+                        long = self.pending_entry.signal.side is Side.LONG
+                        if (long and tick.bid >= target) or (not long and tick.ask <= target):
+                            self._end_pending(CANCELLED_TARGET, tick.ts_utc, "cible atteinte avant l'exécution")
+                        elif (long and tick.ask <= level) or (not long and tick.bid >= level):
+                            self._open(tick)
             self._last_tick = tick
             self._observe(tick)
 
@@ -874,6 +916,9 @@ class _Shadow:
             "difference": self.net - actual,  # > 0: continuation cut short; < 0: loss avoided
         }
         return True
+
+
+NEW_YORK = ZoneInfo("America/New_York")
 
 
 def _london_days(start: datetime, end: datetime) -> list[date]:

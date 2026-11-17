@@ -19,13 +19,21 @@ Partial exits campaign (docs/experiments/DAY02_PARTIAL_EXITS_CAMPAIGN.md), on to
 - PROT: single exit at TP2, stop of the position protected (entry price at P, TP1 level at TP2);
 - PART: TP1 / TP2 / TP3 portions, initial stop never moved;
 - FULL: TP1 / TP2 / TP3 portions and the protection of the remaining quantity.
+Frequency lot (docs/experiments/DAY02_FREQUENCY_CAMPAIGN.md, ADR-039), each one LATE plus one change:
+- G1A: refusal at D when the peak candle is a NoWick in the direction; G5B: refusal at D when the exit
+  candle opens in [07:30, 09:30) New York (a time filter, no news calendar); G1A5B: both;
+- E3: limit order at E, valid 9 trigger candles, cancelled when the target is reached first;
+- F2R: a Failed 2 trigger candle in the direction also confirms the exit of the flag;
+- RSC: after a resume, windows may hold earlier candles, the last one starting at the resume or after;
+- M5S: impulse and flag on M5, A on the M15 ATR, exit on the M5 close, 30 min of pause at most.
 Research only: nothing here sends an order.
 """
 
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import time
+from datetime import time, timedelta
+from typing import Any
 
 from forex_bot.backtest.day02 import Context, Day02Params, Trigger
 
@@ -46,9 +54,24 @@ VARIANTS: dict[str, tuple[bool, bool, bool, bool, bool, bool]] = {
 }
 REFERENCE = "REF"
 
+_LATE_EXITS: dict[str, Any] = {"time_exit": None, "liquidation": time(22, 55), "liquidation_zone": "Europe/Paris"}
+# Frequency lot: name -> parameters changed from the frozen values (LATE exits always included).
+FREQUENCY: dict[str, dict[str, Any]] = {
+    "G1A": {"exhaustion_filter": True},
+    "G5B": {"time_block_ny": (time(7, 30), time(9, 30))},
+    "G1A5B": {"exhaustion_filter": True, "time_block_ny": (time(7, 30), time(9, 30))},
+    "E3": {"retest_entry": True},
+    "F2R": {"failed2_trigger": True},
+    "RSC": {"overlap_resume": True},
+    "M5S": {"unit": timedelta(minutes=5), "max_pause": timedelta(minutes=30)},
+}
+ALL_VARIANTS: list[str] = [*VARIANTS, *FREQUENCY]
+
 
 def variant_params(name: str, trigger: Trigger = Trigger.M5) -> Day02Params:
     """Parameters of a variant: the frozen reference values, plus the switches of its hypotheses."""
+    if name in FREQUENCY:
+        return replace(Day02Params(trigger=trigger), **_LATE_EXITS, **FREQUENCY[name])
     if name not in VARIANTS:
         raise ValueError(f"variante inconnue : {name}")
     h1, h2, h3, late, partial, protection = VARIANTS[name]
@@ -65,10 +88,15 @@ def variant_params(name: str, trigger: Trigger = Trigger.M5) -> Day02Params:
 
 def variant_of(params: Day02Params) -> str:
     """Name of the variant whose switches `params` carries (the trigger aside)."""
-    for name in VARIANTS:
+    for name in ALL_VARIANTS:
         if variant_params(name, params.trigger) == params:
             return name
     raise ValueError("paramètres hors des variantes enregistrées")
+
+
+def needs_m15_atr(name: str) -> bool:
+    """M5S: A is read on the M15 ATR (the M15 candles take the place of the H1)."""
+    return variant_params(name).unit == timedelta(minutes=5)
 
 
 def needs_h4(name: str) -> bool:

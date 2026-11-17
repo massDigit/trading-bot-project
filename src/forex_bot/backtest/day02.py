@@ -77,6 +77,14 @@ class Day02Params:
     # Partial exits campaign (DAY02_PARTIAL_EXITS_CAMPAIGN.md), off in the reference and in LATE:
     partial_exits: bool = False  # TP1 / TP2 / TP3 portions (backtest/day02_partials.py)
     protection: bool = False  # stop of the remaining quantity moved closer (never further)
+    # Frequency lot (DAY02_FREQUENCY_CAMPAIGN.md, ADR-039), all off in the reference and in LATE:
+    exhaustion_filter: bool = False  # G1A: refusal at D when the peak candle p is a NoWick in the direction
+    time_block_ny: tuple[time, time] | None = None  # G5B: refusal at D when the exit candle starts in [a, b) New York
+    retest_entry: bool = False  # E3: limit order at E instead of a market order, valid `retest_validity` candles
+    retest_validity: int = 9  # E3: trigger candles after D
+    failed2_trigger: bool = False  # F2R: a Failed 2 trigger candle in the direction also confirms the exit
+    overlap_resume: bool = False  # RSC: windows may hold candles started before the resume (j starts after it)
+    unit: timedelta = timedelta(minutes=15)  # unit of the impulse and of the flag (M5S: 5 min, ATR on M15)
 
     @property
     def trigger_step(self) -> timedelta:
@@ -126,6 +134,8 @@ NO_QUOTE = "absence de cotation à D"
 STOP_INADMISSIBLE = "stop non admissible"
 TARGET_PASSED = "cible déjà dépassée à D"
 SIZE_REFUSED = "taille minimale supérieure au budget"
+EXHAUSTION = "impulsion terminale NoWick (G1A)"  # frequency lot only
+TIME_BLOCK = "créneau 07:30-09:30 New York (G5B)"  # frequency lot only
 ENTRY_DECIDED = "ENTRÉE_DÉCIDÉE"
 
 # Outcome of a decided entry (sheet §9).
@@ -135,6 +145,8 @@ TARGET_AT_EXECUTION = "CIBLE_ATTEINTE_À_L'EXÉCUTION"
 REJECTED_AT_EXECUTION = "ENTRÉE_REJETÉE"  # only under StopAtExecution.REJECT (variant)
 EXPIRED = "ENTRÉE_EXPIRÉE"
 CANCELLED_INTERRUPTION = "ENTRÉE_ANNULÉE_INTERRUPTION"
+CANCELLED_TARGET = "ENTRÉE_ANNULÉE_CIBLE"  # E3: the target was reached before the limit order filled
+FAILED2_EXIT = "Failed 2"  # detail of a confirmed exit by the F2R trigger
 
 # Closing orders (sheet §6.3): the first deadline reached; equality gives LIQUIDATION_17H.
 TIME_EXIT = "SORTIE_TEMPORELLE"
@@ -157,8 +169,37 @@ def session_day(day: date) -> bool:
 
 def ceil_m15(moment: datetime) -> datetime:
     """First M15 boundary at or after `moment` (UTC grid; London offsets are whole hours)."""
-    floor = moment.replace(minute=moment.minute - moment.minute % 15, second=0, microsecond=0)
-    return floor if floor == moment else floor + M15
+    return ceil_unit(moment, M15)
+
+
+def ceil_unit(moment: datetime, unit: timedelta) -> datetime:
+    """First boundary of the `unit` grid (5 or 15 min, UTC) at or after `moment`."""
+    minutes = int(unit / timedelta(minutes=1))
+    floor = moment.replace(minute=moment.minute - moment.minute % minutes, second=0, microsecond=0)
+    return floor if floor == moment else floor + unit
+
+
+def is_nowick(bar: Mapping[str, Any], long: bool) -> bool:
+    """G1A: candle opened at its extreme against the direction and closed in the direction (bid series)."""
+    if long:
+        return bool(bar["bid_open"] == bar["bid_low"] and bar["bid_close"] > bar["bid_open"])
+    return bool(bar["bid_open"] == bar["bid_high"] and bar["bid_close"] < bar["bid_open"])
+
+
+def is_failed2(bar: Mapping[str, Any], previous: Mapping[str, Any], long: bool) -> bool:
+    """F2R: `bar` wicks past the previous candle against the direction, fails to close past it and does
+    not sweep the other side (long: below the previous low; short: above the previous high)."""
+    if long:
+        return bool(
+            bar["bid_low"] < previous["bid_low"]
+            and bar["bid_close"] >= previous["bid_low"]
+            and bar["bid_high"] <= previous["bid_high"]
+        )
+    return bool(
+        bar["bid_high"] > previous["bid_high"]
+        and bar["bid_close"] <= previous["bid_high"]
+        and bar["bid_low"] >= previous["bid_low"]
+    )
 
 
 @dataclass(frozen=True)
@@ -279,33 +320,37 @@ def configuration_from(
     window: a candle never serves two configurations. Every event is dated by the close of the
     candle that reveals it (or by the deadline), from candles ended by then only.
     """
-    p = params
+    p, unit = params, params.unit
     search = Search(resume_utc)
-    first_start = max(ceil_m15(resume_utc), london(day, p.impulse_start))
-    t = first_start + p.window * M15
+    opening = london(day, p.impulse_start)
+    first_start = max(ceil_unit(resume_utc, unit), opening)
+    t = first_start + p.window * unit
+    if p.overlap_resume:
+        # RSC: earlier candles may enter the window, the last one (j = p) starts at the resume or after.
+        t = max(ceil_unit(resume_utc, unit) + unit, opening + p.window * unit)
     last = london(day, p.last_recognition)
     while t <= last:
-        starts = [t - (p.window - i) * M15 for i in range(p.window)]
+        starts = [t - (p.window - i) * unit for i in range(p.window)]
         bars = [m15.get(s) for s in starts]
         window = [b for b in bars if bar_ok(b) and b is not None]
         if len(window) != p.window:
             search.examined.append(Examined(t, WINDOW_DATA))
-            t += M15
+            t += unit
             continue
         a = atr_of(starts[0], t)
         if a is None or a <= 0:
             search.examined.append(Examined(t, ATR_UNAVAILABLE))
-            t += M15
+            t += unit
             continue
         long_cause, long_found = _side_cause(Side.LONG, window, a, p)
         short_cause, short_found = _side_cause(Side.SHORT, window, a, p)
         if long_found is not None and short_found is not None:
             search.examined.append(Examined(t, AMBIGUOUS))
-            t += M15
+            t += unit
             continue
         if long_found is None and short_found is None:
             search.examined.append(Examined(t, f"hausse : {long_cause} ; baisse : {short_cause}"))
-            t += M15
+            t += unit
             continue
         side = Side.LONG if long_found is not None else Side.SHORT
         origin, o, peak, k = long_found if long_found is not None else short_found
@@ -314,11 +359,11 @@ def configuration_from(
             sign = None if context_of is None else context_of(starts[0], t)
             if sign is None:
                 search.examined.append(Examined(t, CONTEXT_UNAVAILABLE))
-                t += M15
+                t += unit
                 continue
             if sign != (1 if side is Side.LONG else -1):
                 search.examined.append(Examined(t, CONTEXT_AGAINST))
-                t += M15
+                t += unit
                 continue
         config = Configuration(side, t, a, origin, starts[o], peak, starts[k])
         search.configuration = config
@@ -329,7 +374,7 @@ def configuration_from(
 
 def _deadline(config: Configuration, day: date, p: Day02Params) -> tuple[datetime, str]:
     """Δ = min(end(p) + 90 min, 15:00) and the cause of an expiry at Δ (window end when they coincide)."""
-    by_pause, cap = config.peak_start + M15 + p.max_pause, london(day, p.last_decision)
+    by_pause, cap = config.peak_start + p.unit + p.max_pause, london(day, p.last_decision)
     return (by_pause, TOO_LONG) if by_pause < cap else (cap, WINDOW_END)
 
 
@@ -350,6 +395,7 @@ def _follow(
     `initial_pauses` (H1 only): pause candles after p already closed at t_j. They count, but nothing is
     dated before t_j: with two of them the flag is formed at F = t_j, the instant they are all known."""
     long = config.side is Side.LONG
+    unit_label = "M15" if p.unit == M15 else "M5"
     last_flag = london(day, p.last_flag)
     pauses: list[Mapping[str, Any]] = list(initial_pauses)
     start = config.recognised_utc
@@ -357,7 +403,7 @@ def _follow(
         config.flag_utc = config.recognised_utc  # = end of the second pause candle, never earlier than t_j
     # Formation: the first rule that applies alone, values known before the candle.
     while config.flag_utc is None:
-        end = start + M15
+        end = start + p.unit
         deadline, cause = _deadline(config, day, p)
         if end > deadline:
             _end(config, cause, deadline)
@@ -368,18 +414,18 @@ def _follow(
         bar = m15.get(start)
         config.last_examined_start = start
         if not bar_ok(bar) or bar is None:
-            _end(config, FLAG_DATA, end, f"M15 {start.isoformat()}, prix non lus")
+            _end(config, FLAG_DATA, end, f"{unit_label} {start.isoformat()}, prix non lus")
             return
         limit = config.depth_limit  # old E and old I: priority of the invalidation over the extension
         if breaches_depth(bar, long, limit, p.depth_on_close):
-            _end(config, TOO_DEEP, end, f"M15 {start.isoformat()}")
+            _end(config, TOO_DEEP, end, f"{unit_label} {start.isoformat()}")
             return
         if (long and bar["bid_high"] > config.peak) or (not long and bar["bid_low"] < config.peak):
             config.peak = bar["bid_high"] if long else bar["bid_low"]
             config.peak_start = start
             config.extensions.append(start)
             pauses = []  # an extension candle is not a pause; only pauses after the last peak count
-            if (config.peak_start - config.origin_start) / M15 + 1 > p.max_impulse:
+            if (config.peak_start - config.origin_start) / p.unit + 1 > p.max_impulse:
                 _end(config, PROLONGED, end)
                 return
         else:
@@ -397,7 +443,9 @@ def _follow(
     # Exit on the trigger unit, E, I and the deadline frozen at F; same rules on M5 and M15.
     step = p.trigger_step
     level = config.peak + p.exit_margin * config.atr if long else config.peak - p.exit_margin * config.atr
-    start = config.flag_utc
+    # First trigger candle at F; M5S compared on M15: the first M15 boundary at or after F.
+    start = ceil_unit(config.flag_utc, step)
+    previous = trigger_bars.get(start - step)  # F2R: the trigger candle ending at F
     while True:
         end = start + step
         if end > config.deadline_utc:  # included bound: a close exactly at Δ can confirm
@@ -420,6 +468,15 @@ def _follow(
             config.target = config.peak + amplitude if long else config.peak - amplitude
             _end(config, EXIT, end)
             return
+        if p.failed2_trigger and previous is not None and bar_ok(previous) and is_failed2(bar, previous, long):
+            config.flag_extreme = extreme  # the Failed 2 candle included
+            margin = p.stop_margin * config.atr
+            config.stop = extreme - margin if long else extreme + margin
+            amplitude = config.amplitude
+            config.target = config.peak + amplitude if long else config.peak - amplitude
+            _end(config, EXIT, end, FAILED2_EXIT)
+            return
+        previous = bar
         start = end
 
 

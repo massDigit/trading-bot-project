@@ -46,8 +46,10 @@ from forex_bot.backtest.day01_availability import CANDLES_SHA256, clocks, jsonab
 from forex_bot.backtest.day01_explore import entry_measures, ratios
 from forex_bot.backtest.day02 import (
     CANCELLED_INTERRUPTION,
+    CANCELLED_TARGET,
     ENTRY_DECIDED,
     EXECUTED,
+    EXHAUSTION,
     EXIT,
     EXPIRED,
     LATE_LIQUIDATION,
@@ -63,6 +65,7 @@ from forex_bot.backtest.day02 import (
     STOP_INADMISSIBLE,
     TARGET_AT_EXECUTION,
     TARGET_PASSED,
+    TIME_BLOCK,
     TIME_EXIT,
     UNPLANNED_NIGHT,
     Attempt,
@@ -91,7 +94,14 @@ from forex_bot.backtest.day02_availability import (
 )
 from forex_bot.backtest.day02_engine import Day02Backtest, Day02Result
 from forex_bot.backtest.day02_partials import plan_errors, plan_measures, plan_view
-from forex_bot.backtest.day02_variants import REFERENCE, VARIANTS, needs_h4, variant_of, variant_params
+from forex_bot.backtest.day02_variants import (
+    ALL_VARIANTS,
+    REFERENCE,
+    needs_h4,
+    needs_m15_atr,
+    variant_of,
+    variant_params,
+)
 from forex_bot.backtest.engine import DecisionRecord, ResearchConfig, StopAtExecution, StopType, Trade
 from forex_bot.backtest.explore import RESEARCH_COSTS, _peak_rss_mib, _trade, _trade_totals
 from forex_bot.backtest.feed import Silence, Tick
@@ -117,8 +127,11 @@ PIP = Decimal("0.0001")
 # At D: one refusal of the engine, or a decided entry (sheet §5.6). POSITION_OPEN cannot happen: the
 # search is suspended while an entry is pending or a position is open; it is an anomaly if seen.
 REFUSALS_AT_D = (MARKET_CLOSED, NO_QUOTE, STOP_INADMISSIBLE, TARGET_PASSED, SIZE_REFUSED)
+# Frequency lot (ADR-039): reported only when they occur, so the LATE report keeps its exact shape.
+LOT_REFUSALS_AT_D = (EXHAUSTION, TIME_BLOCK)
 EXECUTED_OUTCOMES = (EXECUTED, STOP_AT_EXECUTION, TARGET_AT_EXECUTION)  # an entry filled, even if exited at once
 NOT_EXECUTED_OUTCOMES = (REJECTED_AT_EXECUTION, EXPIRED, CANCELLED_INTERRUPTION)
+LOT_NOT_EXECUTED = (CANCELLED_TARGET,)  # E3 only
 NO_CONFIGURATION = "sans configuration jusqu'à la fin de fenêtre"  # normal end of a search: nothing to end
 
 # Exclusive outcome of an executed entry, from the engine's closing reason, which is kept as is.
@@ -538,9 +551,9 @@ def funnel(
         "formed_flags_conserved": formed == sum(after_f.values()) and set(after_f) <= set(EXIT_ENDS),
         "no_decision_without_confirmed_exit": not stray,
         "every_confirmation_classified_once": sum(at_d.values()) == confirmed
-        and all(k == ENTRY_DECIDED or k in REFUSALS_AT_D for k in at_d),
+        and all(k == ENTRY_DECIDED or k in REFUSALS_AT_D or k in LOT_REFUSALS_AT_D for k in at_d),
         "decided_equals_sum_of_entry_outcomes": sum(entries.values()) == len(decided)
-        and all(k in EXECUTED_OUTCOMES or k in NOT_EXECUTED_OUTCOMES for k in entries),
+        and all(k in EXECUTED_OUTCOMES or k in NOT_EXECUTED_OUTCOMES or k in LOT_NOT_EXECUTED for k in entries),
         "one_trade_per_executed_entry": all(per_entry[d] == 1 for d in executed),
         "no_trade_for_an_unexecuted_entry": all(per_entry[d] == 0 for d in unexecuted),
         "every_trade_from_an_executed_entry": set(per_entry) <= set(executed),
@@ -559,7 +572,8 @@ def funnel(
         "at_d": {**{k: at_d.get(k, 0) for k in (*REFUSALS_AT_D, ENTRY_DECIDED)}, **{k: v for k, v in at_d.items()
                  if k not in (*REFUSALS_AT_D, ENTRY_DECIDED)}},
         "entries_decided": len(decided),
-        "entry_outcomes": {k: entries.get(k, 0) for k in (*EXECUTED_OUTCOMES, *NOT_EXECUTED_OUTCOMES)},
+        "entry_outcomes": {k: entries.get(k, 0) for k in (*EXECUTED_OUTCOMES, *NOT_EXECUTED_OUTCOMES)}
+        | {k: entries[k] for k in LOT_NOT_EXECUTED if entries.get(k)},
         "entries_executed": len(executed),
         "entries_not_executed": len(unexecuted),
         "executed_outcomes": {k: outcomes.get(k, 0) for k in outcomes_of},
@@ -1272,7 +1286,9 @@ def main(argv: list[str] | None = None) -> int:
         parser.add_argument(f"--{name}-reference", type=Path, help=f"rapport {name.upper()} de référence")
     parser.add_argument("--out", type=Path, required=True, help="rapport JSON (hors Git, sous data/)")
     parser.add_argument("--sessions-out", type=Path, required=True, help="détail JSONL par séance (hors Git)")
-    parser.add_argument("--variant", choices=list(VARIANTS), default=REFERENCE, help="campagne exploratoire H1-H3")
+    parser.add_argument(
+        "--variant", choices=ALL_VARIANTS, default=REFERENCE, help="configurations exploratoires enregistrées"
+    )
     args = parser.parse_args(argv)
     if not args.init_start <= args.start < args.end:
         parser.error("dates attendues : init-start <= start < end")
@@ -1309,8 +1325,10 @@ def main(argv: list[str] | None = None) -> int:
         costs=RESEARCH_COSTS, stop_type=StopType.GUARANTEED, stop_at_execution=StopAtExecution[args.stop_at_execution]
     )  # 2 000 EUR, 0.25 %, minimum and increment 0.1: the references S1 to DAY_01
     seen = [0]
+    # M5S: the M5 candles carry the impulse and the flag, the M15 candles the ATR (frequency lot).
+    unit_bars, atr_bars = (bars[Grid.M5], bars[Grid.M15]) if needs_m15_atr(args.variant) else (bars[Grid.M15], h1)
     engine = Day02Run(
-        bars[Grid.M5], bars[Grid.M15], h1, _counting(stream_ticks(files, args.start, args.end), seen), gaps, params,
+        bars[Grid.M5], unit_bars, atr_bars, _counting(stream_ticks(files, args.start, args.end), seen), gaps, params,
         config, scenario=SCENARIOS[args.scenario], start_utc=args.start, end_utc=args.end, h4=h4,
     )  # fmt: skip
     result = engine.run()
