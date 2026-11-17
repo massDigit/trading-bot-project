@@ -85,6 +85,11 @@ class Day02Params:
     failed2_trigger: bool = False  # F2R: a Failed 2 trigger candle in the direction also confirms the exit
     overlap_resume: bool = False  # RSC: windows may hold candles started before the resume (j starts after it)
     unit: timedelta = timedelta(minutes=15)  # unit of the impulse and of the flag (M5S: 5 min, ATR on M15)
+    # Volet C (GBP/USD bid candles on the same UTC grid), off in the reference and in LATE:
+    smt_filter: bool = False  # SMTF: refusal at D when GBP/USD does not confirm the new EUR/USD extreme
+    smt_trigger: bool = (
+        False  # SMTT: a flag candle where EUR/USD sweeps the flag and GBP/USD does not confirms the exit
+    )
 
     @property
     def trigger_step(self) -> timedelta:
@@ -147,6 +152,9 @@ EXPIRED = "ENTRÉE_EXPIRÉE"
 CANCELLED_INTERRUPTION = "ENTRÉE_ANNULÉE_INTERRUPTION"
 CANCELLED_TARGET = "ENTRÉE_ANNULÉE_CIBLE"  # E3: the target was reached before the limit order filled
 FAILED2_EXIT = "Failed 2"  # detail of a confirmed exit by the F2R trigger
+SMT_EXIT = "SMT"  # detail of a confirmed exit by the SMTT trigger
+SMT_DIVERGENCE = "GBP/USD ne confirme pas le nouvel extrême (SMTF)"  # refusal at D, frequency lot only
+SMT_UNDETERMINED = "SMT indéterminé : bougie GBP/USD absente ou non OK"  # event only, no decision depends on it
 
 # Closing orders (sheet §6.3): the first deadline reached; equality gives LIQUIDATION_17H.
 TIME_EXIT = "SORTIE_TEMPORELLE"
@@ -203,6 +211,43 @@ def is_failed2(bar: Mapping[str, Any], previous: Mapping[str, Any], long: bool) 
 
 
 @dataclass(frozen=True)
+class SmtBars:
+    """GBP/USD bid candles of the SMT (volet C), by start on the UTC grid of EUR/USD; each is known at its end."""
+
+    m15: Mapping[datetime, Mapping[str, Any]]  # impulse and pause unit
+    trigger: Mapping[datetime, Mapping[str, Any]]  # trigger unit (M5)
+
+
+def _gbp_extreme(bars: Mapping[datetime, Mapping[str, Any]], starts: Sequence[datetime], high: bool) -> Decimal | None:
+    """Highest bid high (or lowest bid low) of the GBP/USD candles starting at `starts`; None when one is
+    absent or not OK (the SMT is then undetermined) or when there is no candle."""
+    rows = [bars.get(s) for s in starts]
+    usable = [b for b in rows if bar_ok(b) and b is not None]
+    if not rows or len(usable) != len(rows):
+        return None
+    values: list[Decimal] = [b["bid_high"] if high else b["bid_low"] for b in usable]
+    return max(values) if high else min(values)
+
+
+def smt_refuses(config: Configuration, smt: SmtBars, p: Day02Params) -> bool | None:
+    """SMTF at D: True when GBP/USD does not confirm. Long: the highest GBP/USD M5 high from F to D does
+    not exceed the highest GBP/USD M15 high from o to p (EUR/USD has a new high, GBP/USD not); short:
+    symmetric on the lows. None when a compared GBP/USD candle is absent or not OK."""
+    if config.flag_utc is None or config.ended_utc is None:
+        raise ValueError("SMTF lu sans F ni D")
+    long, step = config.side is Side.LONG, p.trigger_step
+    impulse = [
+        config.origin_start + i * p.unit for i in range(int((config.peak_start - config.origin_start) / p.unit) + 1)
+    ]
+    first = ceil_unit(config.flag_utc, step)
+    flag = [first + i * step for i in range(int((config.ended_utc - first) / step))]
+    before, after = _gbp_extreme(smt.m15, impulse, long), _gbp_extreme(smt.trigger, flag, long)
+    if before is None or after is None:
+        return None
+    return after <= before if long else after >= before
+
+
+@dataclass(frozen=True)
 class Examined:
     """One M15 close examined for an impulse that did not open a configuration."""
 
@@ -233,6 +278,7 @@ class Configuration:
     target: Decimal | None = None  # T, for an exit
     slope: Decimal | None = None  # (close of the last pause M15 - close of the first) / A
     last_examined_start: datetime | None = None  # start of the last candle read
+    smt_undetermined: int = 0  # SMTT: trigger candles where the SMT could not be read (GBP/USD candle missing)
 
     @property
     def amplitude(self) -> Decimal:
@@ -313,6 +359,7 @@ def configuration_from(
     atr_of: AtrOf,
     params: Day02Params,
     context_of: ContextOf | None = None,
+    smt: SmtBars | None = None,
 ) -> Search:
     """Path from a resume state at `resume_utc` (no configuration, entry or position) on session `day`.
 
@@ -367,7 +414,7 @@ def configuration_from(
                 continue
         config = Configuration(side, t, a, origin, starts[o], peak, starts[k])
         search.configuration = config
-        _follow(config, day, m15, trigger_bars, p, window[k + 1 :])
+        _follow(config, day, m15, trigger_bars, p, window[k + 1 :], smt)
         return search
     return search
 
@@ -389,11 +436,19 @@ def _follow(
     trigger_bars: Mapping[datetime, Mapping[str, Any]],
     p: Day02Params,
     initial_pauses: Sequence[Mapping[str, Any]] = (),
+    smt: SmtBars | None = None,
 ) -> None:
     """Flag formation on M15 (§5.3), then exit on the trigger unit (§5.4), deadlines (§5.5).
 
     `initial_pauses` (H1 only): pause candles after p already closed at t_j. They count, but nothing is
-    dated before t_j: with two of them the flag is formed at F = t_j, the instant they are all known."""
+    dated before t_j: with two of them the flag is formed at F = t_j, the instant they are all known.
+
+    SMTT: after the depth and the breakout, a trigger candle k whose EUR/USD bid low (long) is below every
+    bid low of the pauses and of the earlier trigger candles, while the GBP/USD bid low of k is not below
+    the GBP/USD bid lows of the same candles, confirms the exit at the end of k; short symmetric on the
+    highs. A GBP/USD candle absent or not OK on the compared intervals: no SMT on k (counted)."""
+    if p.smt_trigger and smt is None:
+        raise ValueError("SMTT demandé sans bougies GBP/USD")
     long = config.side is Side.LONG
     unit_label = "M15" if p.unit == M15 else "M5"
     last_flag = london(day, p.last_flag)
@@ -446,6 +501,10 @@ def _follow(
     # First trigger candle at F; M5S compared on M15: the first M15 boundary at or after F.
     start = ceil_unit(config.flag_utc, step)
     previous = trigger_bars.get(start - step)  # F2R: the trigger candle ending at F
+    # SMTT: EUR/USD bid extreme of the flag so far (pauses, then trigger candles) and the GBP/USD starts read.
+    eur_flag = min(b["bid_low"] for b in pauses) if long else max(b["bid_high"] for b in pauses)
+    gbp_pause_starts = [b["start_utc"] for b in pauses]
+    gbp_trigger_starts: list[datetime] = []
     while True:
         end = start + step
         if end > config.deadline_utc:  # included bound: a close exactly at Δ can confirm
@@ -476,6 +535,26 @@ def _follow(
             config.target = config.peak + amplitude if long else config.peak - amplitude
             _end(config, EXIT, end, FAILED2_EXIT)
             return
+        if p.smt_trigger and smt is not None:
+            eur_new = bar["bid_low"] < eur_flag if long else bar["bid_high"] > eur_flag
+            if eur_new:
+                pause_x = _gbp_extreme(smt.m15, gbp_pause_starts, not long)
+                trig_x = _gbp_extreme(smt.trigger, gbp_trigger_starts, not long) if gbp_trigger_starts else pause_x
+                gbp_k = _gbp_extreme(smt.trigger, [start], not long)
+                if pause_x is None or trig_x is None or gbp_k is None:
+                    config.smt_undetermined += 1
+                else:
+                    reference = min(pause_x, trig_x) if long else max(pause_x, trig_x)
+                    if (long and gbp_k >= reference) or (not long and gbp_k <= reference):
+                        config.flag_extreme = extreme  # the SMT candle included
+                        margin = p.stop_margin * config.atr
+                        config.stop = extreme - margin if long else extreme + margin
+                        amplitude = config.amplitude
+                        config.target = config.peak + amplitude if long else config.peak - amplitude
+                        _end(config, EXIT, end, SMT_EXIT)
+                        return
+            eur_flag = min(eur_flag, bar["bid_low"]) if long else max(eur_flag, bar["bid_high"])
+            gbp_trigger_starts.append(start)
         previous = bar
         start = end
 

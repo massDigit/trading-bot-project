@@ -26,6 +26,8 @@ Frequency lot (docs/experiments/DAY02_FREQUENCY_CAMPAIGN.md, ADR-039), each one 
 - F2R: a Failed 2 trigger candle in the direction also confirms the exit of the flag;
 - RSC: after a resume, windows may hold earlier candles, the last one starting at the resume or after;
 - M5S: impulse and flag on M5, A on the M15 ATR, exit on the M5 close, 30 min of pause at most.
+- SMTF: refusal at D when GBP/USD does not confirm the new EUR/USD extreme (volet C, GBP/USD candles);
+- SMTT: a trigger candle where EUR/USD sweeps the flag and GBP/USD does not also confirms the exit.
 Research only: nothing here sends an order.
 """
 
@@ -64,6 +66,8 @@ FREQUENCY: dict[str, dict[str, Any]] = {
     "F2R": {"failed2_trigger": True},
     "RSC": {"overlap_resume": True},
     "M5S": {"unit": timedelta(minutes=5), "max_pause": timedelta(minutes=30)},
+    "SMTF": {"smt_filter": True},
+    "SMTT": {"smt_trigger": True},
 }
 ALL_VARIANTS: list[str] = [*VARIANTS, *FREQUENCY]
 
@@ -97,6 +101,12 @@ def variant_of(params: Day02Params) -> str:
 def needs_m15_atr(name: str) -> bool:
     """M5S: A is read on the M15 ATR (the M15 candles take the place of the H1)."""
     return variant_params(name).unit == timedelta(minutes=5)
+
+
+def needs_smt(name: str) -> bool:
+    """SMTF and SMTT read the GBP/USD candles."""
+    params = variant_params(name)
+    return params.smt_filter or params.smt_trigger
 
 
 def needs_h4(name: str) -> bool:

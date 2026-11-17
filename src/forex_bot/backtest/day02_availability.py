@@ -50,6 +50,7 @@ from forex_bot.backtest.day02 import (
     ContextOf,
     Day02Params,
     Search,
+    SmtBars,
     Trigger,
     ceil_unit,
     configuration_from,
@@ -57,7 +58,14 @@ from forex_bot.backtest.day02 import (
     session_day,
 )
 from forex_bot.backtest.day02_engine import Day02Backtest
-from forex_bot.backtest.day02_variants import ALL_VARIANTS, REFERENCE, needs_h4, needs_m15_atr, variant_params
+from forex_bot.backtest.day02_variants import (
+    ALL_VARIANTS,
+    REFERENCE,
+    needs_h4,
+    needs_m15_atr,
+    needs_smt,
+    variant_params,
+)
 from forex_bot.backtest.engine import ResearchConfig
 from forex_bot.backtest.explore import RESEARCH_COSTS
 from forex_bot.backtest.feed import Silence, classify_silence
@@ -71,6 +79,7 @@ from forex_bot.risk import Side
 SOURCE, INSTRUMENT = "dukascopy", "EURUSD"
 TOOL = "forex-day02-availability"
 LOT = "intraday_2015_2021_day01_5min"  # audited 5 min lot, convention extended to DAY_02 (ADR-026)
+SMT_INSTRUMENT = "GBPUSD"  # volet C (ADR-039): same source, lot and convention, 2015-2021 only
 # Full H1 hash recorded before and after both intraday audits (data/reports/intraday_dukascopy_EURUSD_
 # 2015_2021.json, commit 36daea1, clean tree; and its 5 min run, commit c0272cc): existing_bars_sha256.
 H1_SHA256 = "a7c7f8b82ac55828bbbc25b8fd87c64cac99efb5a977187c47b381480802c585"
@@ -213,8 +222,9 @@ def no_position_path(day: date, engine: Day02Backtest, params: Day02Params) -> S
     while True:
         line = SearchLine(resume, after, Search(resume))
         line.search = configuration_from(
-            resume, day, engine.m15, engine.trigger_bars, _atr_recorder(engine, line), params, engine.context_at
-        )
+            resume, day, engine.m15, engine.trigger_bars, _atr_recorder(engine, line), params, engine.context_at,
+            engine.smt,
+        )  # fmt: skip
         path.searches.append(line)
         config = line.configuration
         if config is None or config.ended_utc is None or config.outcome is None:
@@ -232,9 +242,10 @@ def run_trajectory(
     days: Iterable[date],
     params: Day02Params | None = None,
     h4: Sequence[dict[str, Any]] = (),
+    smt: SmtBars | None = None,
 ) -> tuple[list[SessionPath], Day02Backtest]:
     params = PARAMS[trigger] if params is None else params
-    engine = Day02Backtest(m5, m15, h1, [], gaps, params, config, h4=h4)  # no tick: H1 ATR (and H4 context)
+    engine = Day02Backtest(m5, m15, h1, [], gaps, params, config, h4=h4, smt=smt)  # no tick: H1 ATR (H4, GBP/USD)
     return [no_position_path(day, engine, params) for day in days], engine
 
 
@@ -933,6 +944,7 @@ def availability(
     official: bool,
     variant: str = REFERENCE,
     h4: Sequence[dict[str, Any]] = (),
+    smt: SmtBars | None = None,
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     params = {t: variant_params(variant, t) for t in TRIGGERS}
     weekdays, excluded = calendar_days(start, end)
@@ -950,7 +962,7 @@ def availability(
     unit_bars, atr_bars = (bars[Grid.M5], bars[Grid.M15]) if m5s else (bars[Grid.M15], h1)
     for trigger in TRIGGERS:
         paths[trigger], engines[trigger] = run_trajectory(
-            trigger, bars[Grid.M5], unit_bars, atr_bars, gaps, config, days, params[trigger], h4
+            trigger, bars[Grid.M5], unit_bars, atr_bars, gaps, config, days, params[trigger], h4, smt
         )
     every = [p for t in TRIGGERS for p in paths[t]]
     m15_rows = {b["start_utc"]: b for b in unit_bars}  # separate dictionary for the recomputation
@@ -992,6 +1004,19 @@ def availability(
     if variant != REFERENCE:
         report["variant"] = variant
     return report, detail_lines(every, variant)
+
+
+def smt_paths(data_dir: Path) -> dict[Grid, Path]:
+    """GBP/USD M5 and M15 candles of the SMT, built like the EUR/USD lot."""
+    directory = data_dir / "bars" / SOURCE / SMT_INSTRUMENT / LOT
+    return {g: directory / f"{g.value}.parquet" for g in Grid}
+
+
+def load_smt(paths: Mapping[Grid, Path], end: datetime) -> tuple[SmtBars, int]:
+    """GBP/USD candles ending by `end` only, by start (and their count)."""
+    rows = {g: read_candles(path, end)[0] for g, path in paths.items()}
+    by_start = {g: {b["start_utc"]: b for b in rows[g]} for g in Grid}
+    return SmtBars(by_start[Grid.M15], by_start[Grid.M5]), sum(len(r) for r in rows.values())
 
 
 def withhold(report: dict[str, Any]) -> dict[str, Any]:
@@ -1038,7 +1063,8 @@ def main(argv: list[str] | None = None) -> int:
     h4_path = directory / f"{Timeframe.H4.value}.parquet"
     quality = args.data_dir / "reports" / QUALITY_REPORT
     with_h4 = needs_h4(args.variant)
-    inputs = (*candles.values(), h1_path, quality, *((h4_path,) if with_h4 else ()))
+    gbp = smt_paths(args.data_dir) if needs_smt(args.variant) else {}
+    inputs = (*candles.values(), h1_path, quality, *((h4_path,) if with_h4 else ()), *gbp.values())
     before = {path.as_posix(): sha256_file(path) for path in inputs}
     wrong = [g.value for g, path in candles.items() if before[path.as_posix()] != CANDLES_SHA256[g]]
     if before[h1_path.as_posix()] != H1_SHA256:
@@ -1055,7 +1081,7 @@ def main(argv: list[str] | None = None) -> int:
     official = (args.start, args.end) == OFFICIAL_WINDOW
     report, details = availability(
         bars, h1, gaps, ResearchConfig(costs=RESEARCH_COSTS), args.start, args.end, official=official,
-        variant=args.variant, h4=h4,
+        variant=args.variant, h4=h4, smt=load_smt(gbp, args.end)[0] if gbp else None,
     )  # fmt: skip
     after = {path.as_posix(): sha256_file(path) for path in inputs}
     late = [b["end_utc"] for g in Grid for b in bars[g] if b["end_utc"] > args.end]

@@ -111,6 +111,16 @@ SMT **indéterminé** : aucune décision n'en dépend, cas compté à part.
   drapeau (sous tous les plus bas des pauses et M5 précédentes) alors que GBP/USD **ne fait pas** de
   nouveau plus bas sur les mêmes intervalles → sortie confirmée « SMT » à la fin de `k` (après
   profondeur et cassure) ; vente symétrique.
+- **Précisions d'implémentation (2026-11-18, avant tout résultat SMT et avant l'import des données
+  GBP/USD)** : extrêmes lus sur les séries bid des deux paires ; « dépasser » et « nouveau plus bas »
+  sont stricts (une égalité GBP/USD ne confirme pas, n'est pas un nouvel extrême) ; SMTF lit les M15
+  GBP/USD de `o` à `p` inclus et les M5 GBP/USD commencées dans `[F, D)`, rien après `D` ; SMTF
+  indéterminé : entrée maintenue, événement noté ; SMTT est testé après la profondeur, la cassure (et
+  rien d'autre), dans cet ordre, stop au-delà de l'extrême du drapeau bougie SMT comprise (`FL − 0,25 A`),
+  cible `E + I` ; SMTT indéterminé sur `k` : pas de SMT sur `k`, compté par configuration ; sur la
+  comparaison M15, les M15 GBP/USD servent de bougies de déclenchement. GBP/USD : mêmes source,
+  importeur, lot M5/M15 et convention de qualité que EUR/USD, empreintes enregistrées au passage (pas de
+  référence historique). Chacune est LATE plus son seul interrupteur (`smt_filter`, `smt_trigger`).
 - Les formulations SMT de Matt's Wicks et de Quarterly Theory décrivent la même divergence : une seule
   famille, jamais comptée comme deux confirmations.
 - **DAY_02 sur GBP/USD** : seulement avec des spécifications de contrat et de coûts GBP/USD explicites

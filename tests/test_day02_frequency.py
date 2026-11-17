@@ -41,7 +41,7 @@ M5 = timedelta(minutes=5)
 
 def test_each_frequency_configuration_is_late_plus_its_own_change_only() -> None:
     assert list(VARIANTS)[-4:] == ["LATE", "PROT", "PART", "FULL"]  # earlier campaigns untouched
-    assert ALL_VARIANTS[len(VARIANTS) :] == ["G1A", "G5B", "G1A5B", "E3", "F2R", "RSC", "M5S"]
+    assert ALL_VARIANTS[len(VARIANTS) :] == ["G1A", "G5B", "G1A5B", "E3", "F2R", "RSC", "M5S", "SMTF", "SMTT"]
     expected = {
         "G1A": {"exhaustion_filter"},
         "G5B": {"time_block_ny"},
@@ -50,6 +50,8 @@ def test_each_frequency_configuration_is_late_plus_its_own_change_only() -> None
         "F2R": {"failed2_trigger"},
         "RSC": {"overlap_resume"},
         "M5S": {"unit", "max_pause"},
+        "SMTF": {"smt_filter"},
+        "SMTT": {"smt_trigger"},
     }
     for name, changed in expected.items():
         params = variant_params(name)

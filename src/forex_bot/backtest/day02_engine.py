@@ -61,6 +61,8 @@ from forex_bot.backtest.day02 import (
     REJECTED_AT_EXECUTION,
     SESSION_START,
     SIZE_REFUSED,
+    SMT_DIVERGENCE,
+    SMT_UNDETERMINED,
     STOP_AT_EXECUTION,
     STOP_INADMISSIBLE,
     TARGET_AT_EXECUTION,
@@ -73,6 +75,7 @@ from forex_bot.backtest.day02 import (
     Configuration,
     Context,
     Day02Params,
+    SmtBars,
     Trigger,
     ceil_m15,
     ceil_unit,
@@ -80,6 +83,7 @@ from forex_bot.backtest.day02 import (
     is_nowick,
     liquidation_utc,
     session_day,
+    smt_refuses,
 )
 from forex_bot.backtest.day02_partials import (
     FINAL,
@@ -154,6 +158,7 @@ class Day02Backtest(S1Backtest):
         end_utc: datetime | None = None,
         h4: Sequence[dict[str, Any]] = (),
         observe_counterfactual: bool = True,
+        smt: SmtBars | None = None,
     ) -> None:
         # No D1; H4 only for the H3 context of the exploratory campaign (unused by the reference).
         # S1 rules are never evaluated; the S1 parameters only carry the ATR period.
@@ -172,6 +177,10 @@ class Day02Backtest(S1Backtest):
             raise ValueError("bougies H4 attendues dans l'ordre chronologique")
         if params.context is not Context.NONE and not self.context_h4:
             raise ValueError("contexte H4 demandé sans bougies H4")
+        if (params.smt_filter or params.smt_trigger) and smt is None:
+            raise ValueError("SMT demandé sans bougies GBP/USD")
+        # Volet C: GBP/USD candles, read only by SMTF / SMTT; on the M15 trigger, the M15 are the triggers.
+        self.smt = smt if smt is None or params.trigger is Trigger.M5 else SmtBars(smt.m15, smt.m15)
         self.m5 = {b["start_utc"]: b for b in m5}
         self.m15 = {b["start_utc"]: b for b in m15}
         self.trigger_bars = self.m5 if params.trigger is Trigger.M5 else self.m15
@@ -295,7 +304,9 @@ class Day02Backtest(S1Backtest):
             resume, after = max(start, closed), POSITION_CLOSED
         decided: datetime | None = None
         while True:
-            search = configuration_from(resume, day, self.m15, self.trigger_bars, self.atr_at, p, self.context_at)
+            search = configuration_from(
+                resume, day, self.m15, self.trigger_bars, self.atr_at, p, self.context_at, self.smt
+            )
             attempt = Attempt(day, resume, after, search)
             self.attempts.append(attempt)
             config = search.configuration
@@ -384,6 +395,13 @@ class Day02Backtest(S1Backtest):
             opened = (decision - p.trigger_step).astimezone(NEW_YORK).time()
             if p.time_block_ny[0] <= opened < p.time_block_ny[1]:
                 refuse(TIME_BLOCK, f"bougie de sortie ouverte à {opened.isoformat()} New York")
+                return
+        if p.smt_filter and self.smt is not None:
+            verdict = smt_refuses(config, self.smt, p)
+            if verdict is None:
+                attempt.events.append(SMT_UNDETERMINED)  # no decision depends on it: the entry goes on
+            elif verdict:
+                refuse(SMT_DIVERGENCE, f"de F {config.flag_utc} à D {decision.isoformat()}")
                 return
         if p.retest_entry:
             # E3: the loss at the stop is estimated from the limit level E, the spread of D kept.

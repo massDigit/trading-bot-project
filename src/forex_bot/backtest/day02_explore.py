@@ -61,6 +61,7 @@ from forex_bot.backtest.day02 import (
     REJECTED_AT_EXECUTION,
     SESSION_START,
     SIZE_REFUSED,
+    SMT_DIVERGENCE,
     STOP_AT_EXECUTION,
     STOP_INADMISSIBLE,
     TARGET_AT_EXECUTION,
@@ -89,7 +90,9 @@ from forex_bot.backtest.day02_availability import (
     bound_errors,
     first_configuration_view,
     independent_first,
+    load_smt,
     reuse_errors,
+    smt_paths,
     study_days,
 )
 from forex_bot.backtest.day02_engine import Day02Backtest, Day02Result
@@ -99,6 +102,7 @@ from forex_bot.backtest.day02_variants import (
     REFERENCE,
     needs_h4,
     needs_m15_atr,
+    needs_smt,
     variant_of,
     variant_params,
 )
@@ -128,7 +132,7 @@ PIP = Decimal("0.0001")
 # search is suspended while an entry is pending or a position is open; it is an anomaly if seen.
 REFUSALS_AT_D = (MARKET_CLOSED, NO_QUOTE, STOP_INADMISSIBLE, TARGET_PASSED, SIZE_REFUSED)
 # Frequency lot (ADR-039): reported only when they occur, so the LATE report keeps its exact shape.
-LOT_REFUSALS_AT_D = (EXHAUSTION, TIME_BLOCK)
+LOT_REFUSALS_AT_D = (EXHAUSTION, TIME_BLOCK, SMT_DIVERGENCE)
 EXECUTED_OUTCOMES = (EXECUTED, STOP_AT_EXECUTION, TARGET_AT_EXECUTION)  # an entry filled, even if exited at once
 NOT_EXECUTED_OUTCOMES = (REJECTED_AT_EXECUTION, EXPIRED, CANCELLED_INTERRUPTION)
 LOT_NOT_EXECUTED = (CANCELLED_TARGET,)  # E3 only
@@ -245,8 +249,9 @@ def recompute_errors(result: Day02Result, engine: Day02Backtest) -> list[str]:
     errors = []
     for a in result.attempts:
         again = configuration_from(
-            a.resume_utc, a.day, engine.m15, engine.trigger_bars, engine.atr_at, result.day02_params, engine.context_at
-        )
+            a.resume_utc, a.day, engine.m15, engine.trigger_bars, engine.atr_at, result.day02_params, engine.context_at,
+            engine.smt,
+        )  # fmt: skip
         if again != a.search:
             errors.append(f"{a.day} reprise {a.resume_utc.isoformat()} : recherche différente du recalcul")
     return errors
@@ -1308,7 +1313,8 @@ def main(argv: list[str] | None = None) -> int:
     h4_path = directory / f"{Timeframe.H4.value}.parquet"
     quality = args.data_dir / "reports" / QUALITY_REPORT
     with_h4 = needs_h4(args.variant)
-    inputs = (*candles.values(), h1_path, quality, *((h4_path,) if with_h4 else ()))
+    gbp = smt_paths(args.data_dir) if needs_smt(args.variant) else {}
+    inputs = (*candles.values(), h1_path, quality, *((h4_path,) if with_h4 else ()), *gbp.values())
     before = {path.as_posix(): sha256_file(path) for path in inputs}
     wrong = [g.value for g, path in candles.items() if before[path.as_posix()] != CANDLES_SHA256[g]]
     wrong += ["1h"] if before[h1_path.as_posix()] != H1_SHA256 else []
@@ -1322,6 +1328,7 @@ def main(argv: list[str] | None = None) -> int:
     bars = {g: read_candles(path, args.end)[0] for g, path in candles.items()}
     h1 = load_bars(args.data_dir, SOURCE, INSTRUMENT, Timeframe.H1, args.init_start, args.end)
     h4 = load_bars(args.data_dir, SOURCE, INSTRUMENT, Timeframe.H4, args.init_start, args.end) if with_h4 else []
+    smt, smt_count = load_smt(gbp, args.end) if gbp else (None, 0)
     gaps = load_gaps(quality, args.end)
     files = tick_files(HistoryStore(args.data_dir).tick_files(SOURCE, INSTRUMENT), args.start, args.end)
     config = ResearchConfig(
@@ -1332,7 +1339,7 @@ def main(argv: list[str] | None = None) -> int:
     unit_bars, atr_bars = (bars[Grid.M5], bars[Grid.M15]) if needs_m15_atr(args.variant) else (bars[Grid.M15], h1)
     engine = Day02Run(
         bars[Grid.M5], unit_bars, atr_bars, _counting(stream_ticks(files, args.start, args.end), seen), gaps, params,
-        config, scenario=SCENARIOS[args.scenario], start_utc=args.start, end_utc=args.end, h4=h4,
+        config, scenario=SCENARIOS[args.scenario], start_utc=args.start, end_utc=args.end, h4=h4, smt=smt,
     )  # fmt: skip
     result = engine.run()
     days = study_days(args.start, args.end)
@@ -1364,6 +1371,7 @@ def main(argv: list[str] | None = None) -> int:
         "15m": CANDLES_SHA256[Grid.M15],
         "1h": H1_SHA256,
         **({"4h": H4_SHA256} if with_h4 else {}),
+        **({"GBP/USD": "aucune référence historique : empreintes enregistrées au passage"} if gbp else {}),
         QUALITY_REPORT: "aucune référence historique : empreinte enregistrée au passage ; ancrage par les trous",
         "étude": STUDY_SHA256
         if official and reference
@@ -1415,8 +1423,8 @@ def main(argv: list[str] | None = None) -> int:
                 "daily_weekly_limits": "non appliquées (ADR-027), franchissements non décrits ; 6 % : seuil de revue",
             },
             "inputs": {"m5": len(bars[Grid.M5]), "m15": len(bars[Grid.M15]), "h1": len(h1), "h4": len(h4),
-                       "gaps": len(gaps), "tick_files": len(files), "ticks": seen[0], "sessions": len(days),
-                       "availability": str(args.availability)},
+                       "gbpusd": smt_count, "gaps": len(gaps), "tick_files": len(files), "ticks": seen[0],
+                       "sessions": len(days), "availability": str(args.availability)},
             **body,
             "sessions_file": sessions_file,
             "seconds": round(time.perf_counter() - began, 1),
