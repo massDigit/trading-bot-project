@@ -14,6 +14,9 @@
 | **CALC** | Calcul de cohérence entre valeurs observées | Ne prouve pas la signification d'un champ |
 | **HYP** | Hypothèse ou ambiguïté non levée | Le code bloque ce qui en dépend |
 | **DÉCL** | Communication officielle IG relayée par l'opérateur, non vérifiée par l'agent | Celle indiquée par l'opérateur |
+| **OBS-R** | Valeur lue par l'agent dans la plateforme web du compte CFD **réel**, en lecture seule (aucun ordre saisi ni validé) | Réel, cet instrument, à l'instant indiqué ; **ni règle générale ni valeur historique** |
+| **PUB** | Texte publié sur le site public d'IG France, consulté à la date indiquée | Celle du texte ; date de publication non indiquée sauf mention contraire ; non contractuel |
+| **SUP** | Question posée au support IG, réponse attendue | Aucune valeur retenue tant que la réponse n'est pas reçue |
 
 Une documentation officielle explicite et applicable à notre compte suffit à confirmer une
 convention ; une réponse du support n'est nécessaire que pour les ambiguïtés restantes.
@@ -149,8 +152,9 @@ l'agent).
 Conséquences pour le projet :
 - Pour le compte réel cible, tout dimensionnement doit utiliser les contraintes du **stop
   garanti** : distance minimale `minControlledRiskStopDistance` et prime `limitedRiskPremium`
-  **du compte réel**, aujourd'hui non observées (seules les valeurs démo sont connues : 5.0 et
-  1.2 POINTS, non transposables).
+  **du compte réel**. Au 2026-10-27, seules les valeurs démo étaient connues (5.0 et 1.2 POINTS,
+  non transposables) ; des relevés du compte réel des 2026-11-08 et 2026-11-09 figurent au §6,
+  avec leurs limites.
 - Un stop technique plus proche que le minimum garanti applicable entraîne le **refus du
   signal** ; le stop n'est jamais élargi ni déplacé silencieusement.
 - La règle « rapprocher sans éloigner » est compatible avec le cahier des charges (§7 : pas
@@ -158,6 +162,166 @@ Conséquences pour le projet :
 - **La démo n'est pas présumée soumise aux mêmes restrictions** : elle est observée séparément.
 - Le code actuel accepte `guaranteed_stop` comme paramètre ; le rendre obligatoire pour le
   compte réel est une tâche distincte, non réalisée (aucun contrôle d'exécution modifié).
+
+## 6. Compte RÉEL : relevés de novembre 2026 (EUR/USD standard et Mini)
+
+Relevés faits **en lecture seule** : aucun ordre saisi, validé ou modifié, aucun paramètre du
+compte changé. Le numéro de compte, les jetons, les requêtes brutes et les conversations avec le
+support ne sont pas conservés dans le dépôt. Aucune de ces valeurs n'entre dans `BrokerConventions`,
+dans les paramètres de recherche ou dans les coûts simulés : leur usage relève d'une décision
+distincte (décision sur les conditions IG, ouverte).
+
+### 6.1 Observé dans la plateforme
+
+| Réf. | Date et heure | Environnement | Source | Relevé par |
+|---|---|---|---|---|
+| R1 | 2026-11-08, **heure et fuseau non enregistrés** | Compte CFD réel, plateforme web | Fiche de marché EUR/USD Mini, marché fermé (dimanche) | Opérateur (DÉCL) |
+| R2 | 2026-11-09, 09:24:46 à 09:25:05 UTC | Compte CFD réel, plateforme web | Onglet « Info » de la fiche EUR/USD, marché ouvert | Agent (OBS-R) |
+| R3 | 2026-11-09, 09:27:23 UTC | idem | Onglet « Info » de la fiche EUR/USD Mini, marché ouvert | Agent (OBS-R) |
+| R4 | 2026-11-09, 09:27:39 UTC | idem | Onglet « Ordre » (ticket) de la fiche EUR/USD Mini, affiché sans saisie | Agent (OBS-R) |
+| R5 | 2026-11-09, entre 09:24 et 09:27 UTC | idem | EPIC lus dans les adresses des requêtes de la page ouvrant chaque fiche (aucune requête brute conservée) | Agent (OBS-R) |
+
+Heures de R2 à R5 : horodatage UTC des instantanés locaux de la page, pris au moment de chaque
+lecture (soit 10:24 à 10:27 à Paris, UTC+1). L'heure de R1 n'a pas été enregistrée ; elle
+n'est pas reconstituée.
+
+| Information | EUR/USD standard | EUR/USD Mini | Réf. |
+|---|---|---|---|
+| EPIC | `CS.D.EURUSD.CEF.IP` | `CS.D.EURUSD.CEFM.IP` | R5 |
+| Valeur du contrat | EUR 100 000 | EUR 10 000 | R2, R3 |
+| « Un point représente » | 0.0001 USD/EUR | 0.0001 USD/EUR | R2, R3 |
+| Valeur d'un point | USD 10 | USD 1 ; ticket : « 1 contrat = 1,00 $US par point » | R2, R3, R4 |
+| Quantité minimum | 0.01 | 0.01 ; ticket : « min : 0.01 » contrats | R2, R3, R4 |
+| Distance minimum du stop (normal) | 2 | 2 | R2, R3 |
+| Distance minimum du stop garanti | 5 | 5 ; ticket : « min : 5 », champ « distance en pts » | R2, R3, R4 |
+| Type de stop proposé par défaut sur le ticket | non relevé | « Garanti » | R4 |
+| Facteur de slippage | 50.0 % (sens non documenté) | 50.0 % (sens non documenté) | R2, R3 |
+| Couverture | 3,33 % sur les paliers 1 à 3, 6 % au-delà de 462,4 (colonne « Valeur de la position (Contracts - USD) », unité ambiguë) | non relevé | R2 |
+| Spread affiché | non relevé | 1,3 à l'instant de R4 (valeur instantanée) | R4 |
+| Swap indicatif | 0 / -0, « pas mis à jour en temps réel » | non relevé | R2 |
+| Relevé du dimanche (marché fermé) | non relevé | Quantité minimum 0,01 ; stop garanti minimum **5 % du cours** ; stop normal minimum 10 points ; prime 1,2 | R1 |
+
+**Limites.**
+- Les fiches R2 et R3 n'affichent pas d'unité pour les distances. Seul le ticket Mini (R4)
+  indique « distance en pts » pour le stop garanti. L'unité du stop normal et celle de la fiche
+  standard ne sont pas affichées.
+- Le dimanche (R1) et le lundi (R2 à R4) donnent 5 % puis 5 points pour le stop garanti, et 10
+  puis 2 points pour le stop normal. Deux relevés **ne suffisent pas à établir la règle** de
+  changement de valeur ou d'unité, ni ses conditions (fermeture, week-end, volatilité) : la
+  question est posée au support (§6.3).
+- Un minimum de 5 points **ne démontre pas l'absence de blocage** pour nos stratégies. Certains
+  stops techniques peuvent être plus proches que ce minimum, et le prix depuis lequel IG mesure
+  la distance reste à confirmer (§2, ambiguïté « Référence des distances minimales »).
+- La quantité minimum de 0,01 Mini (réel) diffère de `minDealSize` = 0,1 observé en démo le
+  2026-10-27 (O1). Elle **ne confirme ni le pas de taille** au-delà du minimum, **ni la cause
+  de l'écart** avec la démo (compte, date, réglage ou autre).
+- La correspondance EPIC / fiche est établie par les requêtes émises à l'ouverture de chaque
+  fiche, et par le nom « EUR/USD Mini » affiché sur la seconde. Elle n'est pas confirmée par un
+  champ de la fiche.
+- Chaque valeur vaut pour l'instant du relevé. Aucune n'est transposée à la démo, à une autre
+  date ou à 2015-2021.
+
+### 6.2 Publié par IG (site public, consulté le 2026-11-08 entre 11:04 et 11:05 UTC)
+
+Ces textes sont généraux et non contractuels ; ils ne remplacent pas S4 ou S5.
+
+**Dates affichées.** Complément du 2026-11-09, de 12:14:58 à 12:15:13 UTC, nouvelle lecture des
+cinq pages :
+- **P2, P3, P4, P5** affichent « 20 septembre 2026 » (élément de date placé sous le titre de
+  l'article). La même date figurait déjà dans les instantanés de la consultation initiale du
+  2026-11-08. Elle n'est **pas assimilée** à une date de publication, de mise à jour ou d'entrée
+  en vigueur : la page ne dit pas ce qu'elle représente.
+- **P1** n'affiche pas de date propre. Elle cite une période pour ses spreads moyens (12
+  semaines jusqu'au 29 mai 2020) et la date d'entrée en vigueur de MiFID II (3 janvier 2018) ;
+  aucune des deux ne date les frais publiés.
+
+| Réf. | Page |
+|---|---|
+| P1 | « Frais et commissions » — https://www.ig.com/fr/frais-et-commissions |
+| P2 | « Pourquoi dois-je ajouter un stop garanti à chacune de mes positions ? » — https://www.ig.com/fr/portail-d-aide/articles/839593-pourquoi-dois-je-ajouter-un-stop-garanti-a-chacune-de-mes-positions |
+| P3 | « Combien coûte un stop garanti ? » — https://www.ig.com/fr/portail-d-aide/articles/839598-combien-coute-un-stop-garanti |
+| P4 | « Pourquoi ma position a-t-elle été clôturée ? » — https://www.ig.com/fr/portail-d-aide/articles/839588-pourquoi-ma-position-a-t-elle-ete-cloturee |
+| P5 | « Comment sont calculés les coûts associés à l'ouverture d'un contrat sur forex ? » — https://www.ig.com/fr/portail-d-aide/articles/839581-comment-sont-calcules-les-couts-associes-a-l-ouverture-d-un-contrat-sur-forex |
+
+| Sujet | Contenu publié | Réf. |
+|---|---|---|
+| Compte à risque limité | « Par défaut, tout nouveau client IG dispose d'un compte risque limité », chaque position « devant obligatoirement disposer d'un stop garanti » | P2 |
+| Prime du stop garanti | Débitée « que si votre stop est déclenché » ; coût affiché sur le ticket ; « susceptible d'évoluer, particulièrement à l'approche du weekend et lorsque les conditions de marché sont volatiles » | P3, P1 |
+| Exécution des stops | Stop normal : ordre au marché, slippage négatif possible ; stop garanti : clôture au niveau du stop | P4 |
+| Conversion | Instantanée par défaut, ou quotidienne, hebdomadaire ou mensuelle au choix ; « Le coût de conversion standard est de 0,8% » ; le résultat est converti après prise en compte des frais de financement, commissions et dividendes | P1 |
+| Financement forex | « nombre de nuits x (taux tom-next + frais administratifs annuels) x taille de l'ordre » ; frais administratifs « actuellement » de 1 % ; facturé après la fermeture de session, « ordinairement 23h00 heure de Paris » | P1 |
+| Financement forex (aide) | « Taille x (taux tom-next + charge administrative) », taille = nombre de lots × valeur d'un lot ; charge administrative « ne dépasse pas 0,0022% par jour » ; « trois jours les mercredis » | P5 |
+
+P1 (1 % par an) et P5 (au plus 0,0022 % par jour, soit environ 0,80 % sur 365 jours) ne donnent
+pas la même valeur : l'écart n'est pas tranché (question au §6.3).
+
+### 6.3 En attente du support (SUP)
+
+Questions envoyées par le chat le 2026-11-09 vers 09:28 UTC, transmises à un conseiller ; aucune
+réponse reçue à la rédaction. Le 2026-11-08, l'agent automatique du chat a seulement estimé que
+les 5 % reflétaient « probablement » le marché fermé, et indiqué que ses sources ne précisaient ni
+le pas de taille ni le côté de déclenchement : ce n'est pas une confirmation.
+
+| Question | État |
+|---|---|
+| Pas de taille au-delà de 0,01 contrat (Mini et standard), identique ou non en réel et en démo | SUP |
+| Règle du minimum du stop garanti : valeur, unité (points ou %), conditions de passage en % | SUP |
+| Côté de déclenchement des stops (bid / ask) sur le compte réel | SUP ; documenté par S4/S5 sous réserve de l'entité (§4) |
+| Prix depuis lequel les distances minimales sont mesurées | SUP |
+| Minimums et prime applicables entre 2015 et 2021 | SUP |
+| Taux de conversion appliqué (cours, côté) et assiette exacte des 0,8 % | Non encore posée |
+| Frais administratifs du financement forex : 1 % par an (P1) ou au plus 0,0022 % par jour (P5), base de calcul (jours par an) et unités du tom-next, de la taille et des frais | Non encore posée |
+| Heure effective du financement pendant les semaines où les changements d'heure européen et américain ne coïncident pas (« ordinairement 23h00 heure de Paris », P1) | Non encore posée |
+
+### 6.4 Supposé pour 2015-2021
+
+Aucune valeur de ce paragraphe n'a été observée ni publiée pour 2015-2021. Les études
+historiques restent fondées sur les hypothèses du projet : taille minimale et incrément de 0,1
+(ASSUMP-004/005), aucune distance minimale de stop du courtier appliquée en backtest, coûts du
+scénario `RESEARCH_COSTS` (ASSUMP-006), déclenchement selon ASSUMP-008. Une valeur relevée ou
+publiée en 2026 **n'est pas appliquée rétroactivement** à 2015-2021 sans décision explicite.
+
+## 7. Rapprochement des coûts simulés avec les sources IG (aucun paramètre modifié)
+
+Scénario simulé : `RESEARCH_COSTS` (`backtest/explore.py`), appliqué à la clôture par
+`_settle` (`backtest/engine.py`). Sources IG : P1 et P5 (§6.2), consultées le 2026-11-08 et
+relues le 2026-11-09 (P1 sans date propre ; P5 affiche « 20 septembre 2026 », non assimilée à
+une date de publication ou d'entrée en vigueur).
+
+### 7.1 Conversion
+
+| Élément | Simulé | Publié par IG | Écart ou inconnue |
+|---|---|---|---|
+| Taux | 0,5 % (ASSUMED) | « coût de conversion standard » 0,8 % | Écart de 0,3 point |
+| Assiette | Valeur absolue du résultat net de la transaction en EUR, après glissement, commission, financement et prime | Résultat de l'opération, converti après prise en compte du financement, des commissions et des dividendes | Proche ; nature exacte des 0,8 % (pourcentage du montant ou majoration du cours) non précisée |
+| Sens | Gains et pertes | Non précisé | À confirmer |
+| Cours | 1/bid pour un résultat négatif, 1/ask pour un résultat positif (convention défavorable du projet) | Non précisé | À confirmer |
+| Moment | À chaque clôture | Instantané par défaut ; quotidien, hebdomadaire ou mensuel au choix | Cohérent avec le réglage par défaut |
+
+### 7.2 Financement overnight
+
+| Élément | Simulé | Publié par IG | Écart ou inconnue |
+|---|---|---|---|
+| Formule | 1 USD × contrats Mini × nuits, toujours un coût (ASSUMED) | Transcription des sources, **pas encore une formule implémentable** : « nombre de nuits x (taux tom-next + frais administratifs annuels) x taille de l'ordre » (P1) ; « Taille x (taux tom-next + charge administrative) » (P5) | Les unités du tom-next (points, taux ou montant), de la taille et des frais administratifs (annuels ou journaliers) doivent être rendues compatibles avant tout calcul ; non confirmées |
+| Taux | Forfait de 1 USD par contrat Mini et par nuit | Tom-next (selon le marché, crédit ou débit selon le sens) + frais administratifs de 1 % par an (P1) ou au plus 0,0022 % par jour (P5) | Différence certaine : forfait fixe simulé contre taux variables ; tom-next 2015-2021 inconnu |
+| Dépendance à la taille | Proportionnel au nombre de contrats | Proportionnel à la « taille » (P5 : nombre de lots × valeur d'un lot) | Les deux calculs dépendent de la taille de position ; la conversion exacte entre contrats, valeur d'un lot et devise du montant reste à confirmer |
+| Sens | Toujours débité | Tom-next : débit ou crédit selon le sens ; frais administratifs : débit | Le crédit n'est pas simulé |
+| Heure | Changement de journée de négociation à 17:00 New York (`trading_day`) | Après la fermeture de session, « ordinairement 23h00 heure de Paris » | Calcul des fuseaux : 17:00 New York correspond à 23:00 Paris, et à 22:00 Paris pendant les semaines où les changements d'heure européen et américain ne coïncident pas. « Ordinairement » ne suffit pas à établir la règle effective d'IG pendant ces semaines (question au §6.3) |
+| Jours | Une nuit par journée de négociation franchie ; un passage du vendredi au lundi compte 3 nuits | Une nuit par jour, **triple le mercredi** | Calendriers différents, notamment pour une position présente le mercredi soir ou détenue pendant le week-end. Au mieux, pour une position constante sur une semaine ordinaire, les deux conventions peuvent couvrir le même nombre de jours de financement, selon le calendrier applicable (jours fériés compris) ; cela ne démontre **aucune égalité des montants**, le forfait simulé restant différent du tom-next et des frais administratifs |
+
+**Ordre de grandeur, à titre indicatif (CALC, non appliqué).** Calcul illustratif qui suppose,
+sans confirmation d'IG, que la « taille » est la valeur notionnelle en USD et que le taux annuel
+se répartit sur une **base de 365 jours** (choix de l'illustration, pas une convention IG
+confirmée). Pour 1 contrat Mini à un cours de 1,12 (notionnel d'environ 11 200 USD), les frais
+administratifs seuls représentent alors environ 0,31 USD par nuit à 1 % par an (11 200 × 1 % /
+365), et au plus 0,25 USD à 0,0022 % par jour. S'y ajoute le tom-next, de signe et de montant
+inconnus pour 2015-2021. Ce calcul ne dit donc pas si le forfait de 1 USD majore ou minore le coût
+réel.
+
+**Portée.** Le rapprochement décrit des formules ; il ne modifie ni le moteur, ni les paramètres,
+ni les coûts. Les valeurs publiées en 2026 ne sont pas appliquées à 2015-2021 sans décision
+explicite. Le choix des hypothèses de l'étude attend la réponse du support et la décision sur les
+conditions IG.
 
 ## Propositions de levée de blocage (non activées)
 
