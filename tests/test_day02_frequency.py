@@ -290,3 +290,22 @@ def test_candles_after_an_instant_change_nothing_known_at_it(name: str, cut: tup
         if got(a.ended_utc) <= x:
             assert (b.outcome, b.ended_utc, b.stop) == (a.outcome, a.ended_utc, a.stop)
     assert MIN == timedelta(minutes=1)
+
+
+def test_m5s_reads_the_atr_at_the_start_of_the_m5_window_in_both_computations() -> None:
+    m5 = m5s_bars()
+    engine_calls: list[tuple[datetime, datetime]] = []
+    recompute_calls: list[tuple[datetime, datetime]] = []
+
+    def recorder(calls: list[tuple[datetime, datetime]]) -> Any:
+        def atr(cutoff: datetime, known: datetime) -> D:
+            calls.append((cutoff, known))
+            return D("0.00100")
+
+        return atr
+
+    params = variant_params("M5S")
+    search(WINTER, m5, m5, params=params, atr=recorder(engine_calls))
+    independent_first(WINTER, m5, recorder(recompute_calls), params=params)
+    assert engine_calls == recompute_calls
+    assert all(known - cutoff == 4 * M5 for cutoff, known in engine_calls)

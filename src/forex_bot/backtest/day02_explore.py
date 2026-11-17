@@ -698,8 +698,8 @@ def closings(result: Day02Result) -> dict[str, Any]:
 
 
 def bounds(result: Day02Result) -> dict[str, Any]:
-    """D at 15:00 at the latest; execution in ]D, D + 5 min] and not after 15:05 London; one position at
-    a time."""
+    """D at 15:00 at the latest; execution in ]D, D + 5 min] and not after 15:05 London (E3: its own
+    validity, 9 trigger candles); one position at a time."""
     p, errors = result.day02_params, []
     by_decision = {t.decided_utc: t for t in all_trades(result)}
     for a in result.attempts:
@@ -710,10 +710,13 @@ def bounds(result: Day02Result) -> dict[str, Any]:
             errors.append(f"{a.day} : D {d.isoformat()} après 15:00")
         trade = trade_of(a, by_decision)
         if trade is not None:
-            if not d < trade.entry_utc <= d + p.entry_validity:
-                errors.append(f"{a.day} : exécution {trade.entry_utc.isoformat()} hors de ]D, D + 5 min]")
-            if trade.entry_utc > london(a.day, EXECUTION_LIMIT):
-                errors.append(f"{a.day} : exécution {trade.entry_utc.isoformat()} après 15:05 Londres")
+            # E3 (frequency lot): a limit order valid `retest_validity` trigger candles, no 15:05 cap.
+            validity = p.retest_validity * p.trigger_step if p.retest_entry else p.entry_validity
+            if not d < trade.entry_utc <= d + validity:
+                errors.append(f"{a.day} : exécution {trade.entry_utc.isoformat()} hors de ]D, D + {validity}]")
+            limit = london(a.day, p.last_decision) + validity if p.retest_entry else london(a.day, EXECUTION_LIMIT)
+            if trade.entry_utc > limit:
+                errors.append(f"{a.day} : exécution {trade.entry_utc.isoformat()} après {limit.isoformat()}")
     ordered = sorted(all_trades(result), key=lambda t: t.entry_utc)
     for before, after in itertools.pairwise(ordered):
         if before.exit_utc is None or after.entry_utc < before.exit_utc:

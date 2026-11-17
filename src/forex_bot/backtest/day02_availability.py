@@ -497,7 +497,7 @@ def independent_first(
     while t <= last:
         rows = [m15.get(t - (window - k) * unit) for k in range(window)]
         bars = [r for r in rows if r is not None and r["complete_at_close"]]
-        a = atr(t - window * M15, t) if len(bars) == window else None
+        a = atr(t - window * unit, t) if len(bars) == window else None
         if a is not None and a > 0:
             lows, highs = [r["bid_low"] for r in bars], [r["bid_high"] for r in bars]
             span = max(highs) - min(lows)
