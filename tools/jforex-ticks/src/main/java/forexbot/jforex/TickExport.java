@@ -53,10 +53,14 @@ import java.util.concurrent.TimeUnit;
 public final class TickExport {
 
     static final String DEMO_JNLP = "https://platform.dukascopy.com/demo/jforex.jnlp";
-    static final Instrument INSTRUMENT = Instrument.EURUSD;
+    // Instrument chosen by --instrument (EURUSD by default, unchanged behaviour); only these are allowed.
+    static Instrument INSTRUMENT = Instrument.EURUSD;
+    static final Map<String, Instrument> INSTRUMENTS = Map.of("EURUSD", Instrument.EURUSD, "GBPUSD", Instrument.GBPUSD);
     // Development and validation partitions only; the final test (2024-2025) is refused.
     static final LocalDate ALLOWED_FROM = LocalDate.of(2015, 1, 1);
     static final LocalDate ALLOWED_TO = LocalDate.of(2024, 1, 1);
+    // GBPUSD (ADR-039): development partition 2015-2021 only; 2022-2025 stay out of reach.
+    static final LocalDate GBPUSD_ALLOWED_TO = LocalDate.of(2022, 1, 1);
     static final long HOUR_MS = 3_600_000L;
     static final String FORMAT = "jforex-sdk-ticks-csv-v1";
     static final String HEADER = "time_ms,ask,bid,ask_volume,bid_volume";
@@ -80,15 +84,21 @@ public final class TickExport {
 
     public static void main(String[] argv) throws Exception {
         Map<String, String> args = parseArgs(argv);
+        String symbol = args.getOrDefault("instrument", "EURUSD");
+        if (!INSTRUMENTS.containsKey(symbol)) {
+            fail("instrument refusé : " + symbol + " (autorisés : " + INSTRUMENTS.keySet() + ")");
+        }
+        INSTRUMENT = INSTRUMENTS.get(symbol);
+        LocalDate allowedTo = INSTRUMENT == Instrument.GBPUSD ? GBPUSD_ALLOWED_TO : ALLOWED_TO;
         Path envFile = Path.of(require(args, "env-file"));
-        Path outDir = Path.of(require(args, "out")).resolve(INSTRUMENT.name().replace("/", ""));
+        Path outDir = Path.of(require(args, "out")).resolve(symbolOf(INSTRUMENT));
         Path cacheDir = Path.of(require(args, "cache"));
         LocalDate from = LocalDate.parse(require(args, "from"));
         LocalDate to = LocalDate.parse(require(args, "to")); // exclusive
         long pauseMs = Long.parseLong(args.getOrDefault("pause-ms", "250"));
-        if (!from.isBefore(to) || from.isBefore(ALLOWED_FROM) || to.isAfter(ALLOWED_TO)) {
+        if (!from.isBefore(to) || from.isBefore(ALLOWED_FROM) || to.isAfter(allowedTo)) {
             fail("période refusée : [" + from + ", " + to + ") doit être non vide et dans ["
-                    + ALLOWED_FROM + ", " + ALLOWED_TO + ") (test final 2024-2025 exclu)");
+                    + ALLOWED_FROM + ", " + allowedTo + ") pour " + symbol + " (années réservées exclues)");
         }
 
         Map<String, String> env = readEnv(envFile, Set.of("DUKASCOPY_USERNAME", "DUKASCOPY_PASSWORD"));
@@ -203,7 +213,7 @@ public final class TickExport {
                 Thread.sleep(RETRY_BASE_MS << (attempt - 1));
             }
             if (inWindow.isEmpty() && expectedOpen(start)) {
-                if (ACCEPTED_EMPTY_HOURS.contains(String.format("%sT%02d", day, hour))) {
+                if (INSTRUMENT == Instrument.EURUSD && ACCEPTED_EMPTY_HOURS.contains(String.format("%sT%02d", day, hour))) {
                     acceptedEmptyHours.add(hour);
                 } else {
                     emptyOpenHours.add(hour);
@@ -247,7 +257,7 @@ public final class TickExport {
         }
         String sidecar = "{\n"
                 + "  \"format\": \"" + FORMAT + "\",\n"
-                + "  \"instrument\": \"EURUSD\",\n"
+                + "  \"instrument\": \"" + symbolOf(INSTRUMENT) + "\",\n"
                 + "  \"server\": \"demo\",\n"
                 + "  \"period_start_utc\": \"" + Instant.ofEpochMilli(dayStart) + "\",\n"
                 + "  \"period_end_utc\": \"" + Instant.ofEpochMilli(dayStart + 24 * HOUR_MS) + "\",\n"
@@ -299,12 +309,16 @@ public final class TickExport {
      */
     static void dropEmptyCacheFile(Path cacheDir, long hourStartMs) throws IOException {
         ZonedDateTime t = Instant.ofEpochMilli(hourStartMs).atZone(ZoneOffset.UTC);
-        Path file = cacheDir.resolve("EURUSD").resolve(String.format("%04d", t.getYear()))
+        Path file = cacheDir.resolve(symbolOf(INSTRUMENT)).resolve(String.format("%04d", t.getYear()))
                 .resolve(String.format("%02d", t.getMonthValue() - 1)).resolve(String.format("%02d", t.getDayOfMonth()))
                 .resolve(String.format("%02dh_ticks.bi5", t.getHour()));
         if (Files.isRegularFile(file) && Files.size(file) == 0) {
             Files.delete(file);
         }
+    }
+
+    static String symbolOf(Instrument instrument) {
+        return instrument.name().replace("/", "");
     }
 
     static Path dayCsv(Path outDir, LocalDate day) {

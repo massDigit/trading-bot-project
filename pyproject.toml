@@ -41,6 +41,8 @@ forex-day01-availability = "forex_bot.backtest.day01_availability:main"
 forex-day01-backtest = "forex_bot.backtest.day01_explore:main"
 forex-day01-compare = "forex_bot.backtest.day01_explore:compare_main"
 forex-day02-availability = "forex_bot.backtest.day02_availability:main"
+forex-day02-backtest = "forex_bot.backtest.day02_explore:main"
+forex-day02-compare = "forex_bot.backtest.day02_explore:compare_main"
 
 [tool.ruff]
 line-length = 120

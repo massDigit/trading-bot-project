@@ -16,15 +16,23 @@ priority (depth first). Research only: nothing here sends an order.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
-from datetime import date, datetime, time, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
 from enum import StrEnum
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from forex_bot.backtest.day01 import M5, M15, bar_ok, london
 from forex_bot.risk import Side
+
+
+class Context(StrEnum):
+    """Directional context of the exploratory campaign H3 (DAY02_IMPROVEMENT_CAMPAIGN.md); none in the reference."""
+
+    NONE = "aucun"  # reference: the impulse alone gives the direction (sheet §3.1)
+    H4_SMA_SLOPE = "pente de la moyenne simple H4"  # H3: sign of SMA(n) H4 minus its previous value
 
 
 class Trigger(StrEnum):
@@ -52,17 +60,55 @@ class Day02Params:
     exit_margin: Decimal = Decimal("0.1")  # x A beyond E
     stop_margin: Decimal = Decimal("0.25")  # x A beyond the flag extreme
     entry_validity: timedelta = timedelta(minutes=5)  # ]D, D + 5 min]
-    time_exit: timedelta = timedelta(hours=2)  # after the execution
+    time_exit: timedelta | None = timedelta(hours=2)  # after the execution; None: no time exit (LATE)
     liquidation: time = time(17)
+    # Zone of the liquidation wall-clock time on the session date; the reference reads London.
+    liquidation_zone: str = "Europe/London"
     # ADR-021 extended by ADR-026: interruption = silence strictly longer than 5 min of expected-open
     # time, for pending entries and open positions. The H1 ATR keeps the H1 convention (ResearchConfig).
     interruption_threshold: timedelta = timedelta(minutes=5)
     atr_period: int = 14
     trigger: Trigger = Trigger.M5
+    # Exploratory campaign (DAY02_IMPROVEMENT_CAMPAIGN.md), all off in the frozen reference:
+    deferred_recognition: bool = False  # H1: an impulse may be recognised after its peak candle (p < j)
+    depth_on_close: bool = False  # H2: the 50 % depth invalidates on the bid close, not on the extreme
+    context: Context = Context.NONE  # H3: impulse admitted only in the direction of the H4 context
+    context_period: int = 20  # H3: SMA of the last 20 H4 bid closes
+    # Partial exits campaign (DAY02_PARTIAL_EXITS_CAMPAIGN.md), off in the reference and in LATE:
+    partial_exits: bool = False  # TP1 / TP2 / TP3 portions (backtest/day02_partials.py)
+    protection: bool = False  # stop of the remaining quantity moved closer (never further)
+    # Frequency lot (DAY02_FREQUENCY_CAMPAIGN.md, ADR-039), all off in the reference and in LATE:
+    exhaustion_filter: bool = False  # G1A: refusal at D when the peak candle p is a NoWick in the direction
+    time_block_ny: tuple[time, time] | None = None  # G5B: refusal at D when the exit candle starts in [a, b) New York
+    retest_entry: bool = False  # E3: limit order at E instead of a market order, valid `retest_validity` candles
+    retest_validity: int = 9  # E3: trigger candles after D
+    failed2_trigger: bool = False  # F2R: a Failed 2 trigger candle in the direction also confirms the exit
+    overlap_resume: bool = False  # RSC: windows may hold candles started before the resume (j starts after it)
+    unit: timedelta = timedelta(minutes=15)  # unit of the impulse and of the flag (M5S: 5 min, ATR on M15)
+    # Volet C (GBP/USD bid candles on the same UTC grid), off in the reference and in LATE:
+    smt_filter: bool = False  # SMTF: refusal at D when GBP/USD does not confirm the new EUR/USD extreme
+    smt_trigger: bool = (
+        False  # SMTT: a flag candle where EUR/USD sweeps the flag and GBP/USD does not confirms the exit
+    )
 
     @property
     def trigger_step(self) -> timedelta:
         return M5 if self.trigger is Trigger.M5 else M15
+
+    @property
+    def liquidation_reason(self) -> str:
+        """Label of the liquidation order: LIQUIDATION_17H for the reference, its own label otherwise."""
+        if (self.liquidation, self.liquidation_zone) == (time(17), "Europe/London"):
+            return LIQUIDATION
+        return LATE_LIQUIDATION
+
+
+def liquidation_utc(day: date, p: Day02Params) -> datetime:
+    """UTC instant of the liquidation of session `day`: its wall-clock time in its zone on the session
+    date (London date), daylight saving changes included; 17:00 London for the reference."""
+    if p.liquidation_zone == "Europe/London":
+        return london(day, p.liquidation)
+    return datetime.combine(day, p.liquidation, tzinfo=ZoneInfo(p.liquidation_zone)).astimezone(UTC)
 
 
 # Reasons an examined M15 does not recognise an impulse (the search goes on), sheet §9.
@@ -73,6 +119,10 @@ PEAK_BEFORE_END = "sommet antérieur à la dernière bougie (p < j)"
 AMPLITUDE = "amplitude insuffisante"
 WEAK_CLOSE = "clôture non forte"
 AMBIGUOUS = "cas ambigu : hausse et baisse à la fois"
+# Exploratory campaign only (never produced by the reference parameters).
+DEEP_BEFORE_RECOGNITION = "repli trop profond avant la reconnaissance"  # H1: a closed candle after p
+CONTEXT_AGAINST = "contexte H4 contraire ou neutre"  # H3
+CONTEXT_UNAVAILABLE = "contexte H4 non calculable"  # H3
 
 # End of a configuration, one cause, the first that occurs (sheet §9).
 FLAG_DATA = "données inutilisables pendant le drapeau"
@@ -89,6 +139,8 @@ NO_QUOTE = "absence de cotation à D"
 STOP_INADMISSIBLE = "stop non admissible"
 TARGET_PASSED = "cible déjà dépassée à D"
 SIZE_REFUSED = "taille minimale supérieure au budget"
+EXHAUSTION = "impulsion terminale NoWick (G1A)"  # frequency lot only
+TIME_BLOCK = "créneau 07:30-09:30 New York (G5B)"  # frequency lot only
 ENTRY_DECIDED = "ENTRÉE_DÉCIDÉE"
 
 # Outcome of a decided entry (sheet §9).
@@ -98,10 +150,17 @@ TARGET_AT_EXECUTION = "CIBLE_ATTEINTE_À_L'EXÉCUTION"
 REJECTED_AT_EXECUTION = "ENTRÉE_REJETÉE"  # only under StopAtExecution.REJECT (variant)
 EXPIRED = "ENTRÉE_EXPIRÉE"
 CANCELLED_INTERRUPTION = "ENTRÉE_ANNULÉE_INTERRUPTION"
+CANCELLED_TARGET = "ENTRÉE_ANNULÉE_CIBLE"  # E3: the target was reached before the limit order filled
+FAILED2_EXIT = "Failed 2"  # detail of a confirmed exit by the F2R trigger
+SMT_EXIT = "SMT"  # detail of a confirmed exit by the SMTT trigger
+SMT_DIVERGENCE = "GBP/USD ne confirme pas le nouvel extrême (SMTF)"  # refusal at D, frequency lot only
+SMT_UNDETERMINED = "SMT indéterminé : bougie GBP/USD absente ou non OK"  # event only, no decision depends on it
 
 # Closing orders (sheet §6.3): the first deadline reached; equality gives LIQUIDATION_17H.
 TIME_EXIT = "SORTIE_TEMPORELLE"
 LIQUIDATION = "LIQUIDATION_17H"
+# Exploratory exit campaign (DAY02_LATE_EXIT_CAMPAIGN.md): liquidation at 22:55 Europe/Paris.
+LATE_LIQUIDATION = "LIQUIDATION_22H55_PARIS"
 # Annotation: the position closed on a later trading day than its entry, whatever the closing reason.
 UNPLANNED_NIGHT = "NUIT_NON_PRÉVUE"
 
@@ -118,8 +177,74 @@ def session_day(day: date) -> bool:
 
 def ceil_m15(moment: datetime) -> datetime:
     """First M15 boundary at or after `moment` (UTC grid; London offsets are whole hours)."""
-    floor = moment.replace(minute=moment.minute - moment.minute % 15, second=0, microsecond=0)
-    return floor if floor == moment else floor + M15
+    return ceil_unit(moment, M15)
+
+
+def ceil_unit(moment: datetime, unit: timedelta) -> datetime:
+    """First boundary of the `unit` grid (5 or 15 min, UTC) at or after `moment`."""
+    minutes = int(unit / timedelta(minutes=1))
+    floor = moment.replace(minute=moment.minute - moment.minute % minutes, second=0, microsecond=0)
+    return floor if floor == moment else floor + unit
+
+
+def is_nowick(bar: Mapping[str, Any], long: bool) -> bool:
+    """G1A: candle opened at its extreme against the direction and closed in the direction (bid series)."""
+    if long:
+        return bool(bar["bid_open"] == bar["bid_low"] and bar["bid_close"] > bar["bid_open"])
+    return bool(bar["bid_open"] == bar["bid_high"] and bar["bid_close"] < bar["bid_open"])
+
+
+def is_failed2(bar: Mapping[str, Any], previous: Mapping[str, Any], long: bool) -> bool:
+    """F2R: `bar` wicks past the previous candle against the direction, fails to close past it and does
+    not sweep the other side (long: below the previous low; short: above the previous high)."""
+    if long:
+        return bool(
+            bar["bid_low"] < previous["bid_low"]
+            and bar["bid_close"] >= previous["bid_low"]
+            and bar["bid_high"] <= previous["bid_high"]
+        )
+    return bool(
+        bar["bid_high"] > previous["bid_high"]
+        and bar["bid_close"] <= previous["bid_high"]
+        and bar["bid_low"] >= previous["bid_low"]
+    )
+
+
+@dataclass(frozen=True)
+class SmtBars:
+    """GBP/USD bid candles of the SMT (volet C), by start on the UTC grid of EUR/USD; each is known at its end."""
+
+    m15: Mapping[datetime, Mapping[str, Any]]  # impulse and pause unit
+    trigger: Mapping[datetime, Mapping[str, Any]]  # trigger unit (M5)
+
+
+def _gbp_extreme(bars: Mapping[datetime, Mapping[str, Any]], starts: Sequence[datetime], high: bool) -> Decimal | None:
+    """Highest bid high (or lowest bid low) of the GBP/USD candles starting at `starts`; None when one is
+    absent or not OK (the SMT is then undetermined) or when there is no candle."""
+    rows = [bars.get(s) for s in starts]
+    usable = [b for b in rows if bar_ok(b) and b is not None]
+    if not rows or len(usable) != len(rows):
+        return None
+    values: list[Decimal] = [b["bid_high"] if high else b["bid_low"] for b in usable]
+    return max(values) if high else min(values)
+
+
+def smt_refuses(config: Configuration, smt: SmtBars, p: Day02Params) -> bool | None:
+    """SMTF at D: True when GBP/USD does not confirm. Long: the highest GBP/USD M5 high from F to D does
+    not exceed the highest GBP/USD M15 high from o to p (EUR/USD has a new high, GBP/USD not); short:
+    symmetric on the lows. None when a compared GBP/USD candle is absent or not OK."""
+    if config.flag_utc is None or config.ended_utc is None:
+        raise ValueError("SMTF lu sans F ni D")
+    long, step = config.side is Side.LONG, p.trigger_step
+    impulse = [
+        config.origin_start + i * p.unit for i in range(int((config.peak_start - config.origin_start) / p.unit) + 1)
+    ]
+    first = ceil_unit(config.flag_utc, step)
+    flag = [first + i * step for i in range(int((config.ended_utc - first) / step))]
+    before, after = _gbp_extreme(smt.m15, impulse, long), _gbp_extreme(smt.trigger, flag, long)
+    if before is None or after is None:
+        return None
+    return after <= before if long else after >= before
 
 
 @dataclass(frozen=True)
@@ -153,6 +278,7 @@ class Configuration:
     target: Decimal | None = None  # T, for an exit
     slope: Decimal | None = None  # (close of the last pause M15 - close of the first) / A
     last_examined_start: datetime | None = None  # start of the last candle read
+    smt_undetermined: int = 0  # SMTT: trigger candles where the SMT could not be read (GBP/USD candle missing)
 
     @property
     def amplitude(self) -> Decimal:
@@ -181,6 +307,15 @@ class Search:
 
 # ATR H1 on the last H1 ended by `cutoff`, candle states as knowable at `known_at`.
 AtrOf = Callable[[datetime, datetime], Decimal | None]
+# H3: sign of the H4 context (+1 up, -1 down, 0 flat) on the last H4 ended by `cutoff`, or None.
+ContextOf = Callable[[datetime, datetime], int | None]
+
+
+def breaches_depth(bar: Mapping[str, Any], long: bool, limit: Decimal, on_close: bool) -> bool:
+    """Depth invalidation: the extreme beyond the limit (reference), or the bid close (H2)."""
+    if on_close:
+        return bool(bar["bid_close"] < limit if long else bar["bid_close"] > limit)
+    return bool(bar["bid_low"] < limit if long else bar["bid_high"] > limit)
 
 
 def _side_cause(side: Side, window: list[Mapping[str, Any]], a: Decimal, p: Day02Params) -> tuple[str | None, Any]:
@@ -197,8 +332,10 @@ def _side_cause(side: Side, window: list[Mapping[str, Any]], a: Decimal, p: Day0
         k = len(lows) - 1 - lows[::-1].index(peak)
     if not o < k:
         return ORDER, None
-    if k != len(window) - 1:
+    if k != len(window) - 1 and not p.deferred_recognition:
         return PEAK_BEFORE_END, None  # restriction chosen for the reference (p = j), not implied by o < p
+    # Amplitude and strong close on the close of j, the last candle closed at t_j: p = j in the reference;
+    # under H1 they are not moved to p, they state that at t_j the price still holds the impulse.
     close, amplitude = window[-1]["bid_close"], abs(peak - origin)
     move = close - origin if long else origin - close
     if move < p.min_amplitude * a:
@@ -206,7 +343,12 @@ def _side_cause(side: Side, window: list[Mapping[str, Any]], a: Decimal, p: Day0
     strong = close >= peak - p.strong_close * amplitude if long else close <= peak + p.strong_close * amplitude
     if not strong:
         return WEAK_CLOSE, None
-    return None, (origin, o, peak)
+    # H1: the candles after p, already closed at t_j, are pause candles (none reaches E: p is the last
+    # one that does); each must respect the depth, with the E and I of the window, as in §5.3.
+    limit = peak - (amplitude / 2) if long else peak + (amplitude / 2)
+    if any(breaches_depth(b, long, limit, p.depth_on_close) for b in window[k + 1 :]):
+        return DEEP_BEFORE_RECOGNITION, None
+    return None, (origin, o, peak, k)
 
 
 def configuration_from(
@@ -216,6 +358,8 @@ def configuration_from(
     trigger_bars: Mapping[datetime, Mapping[str, Any]],
     atr_of: AtrOf,
     params: Day02Params,
+    context_of: ContextOf | None = None,
+    smt: SmtBars | None = None,
 ) -> Search:
     """Path from a resume state at `resume_utc` (no configuration, entry or position) on session `day`.
 
@@ -223,46 +367,61 @@ def configuration_from(
     window: a candle never serves two configurations. Every event is dated by the close of the
     candle that reveals it (or by the deadline), from candles ended by then only.
     """
-    p = params
+    p, unit = params, params.unit
     search = Search(resume_utc)
-    first_start = max(ceil_m15(resume_utc), london(day, p.impulse_start))
-    t = first_start + p.window * M15
+    opening = london(day, p.impulse_start)
+    first_start = max(ceil_unit(resume_utc, unit), opening)
+    t = first_start + p.window * unit
+    if p.overlap_resume:
+        # RSC: earlier candles may enter the window, the last one (j = p) starts at the resume or after.
+        t = max(ceil_unit(resume_utc, unit) + unit, opening + p.window * unit)
     last = london(day, p.last_recognition)
     while t <= last:
-        starts = [t - (p.window - i) * M15 for i in range(p.window)]
+        starts = [t - (p.window - i) * unit for i in range(p.window)]
         bars = [m15.get(s) for s in starts]
         window = [b for b in bars if bar_ok(b) and b is not None]
         if len(window) != p.window:
             search.examined.append(Examined(t, WINDOW_DATA))
-            t += M15
+            t += unit
             continue
         a = atr_of(starts[0], t)
         if a is None or a <= 0:
             search.examined.append(Examined(t, ATR_UNAVAILABLE))
-            t += M15
+            t += unit
             continue
         long_cause, long_found = _side_cause(Side.LONG, window, a, p)
         short_cause, short_found = _side_cause(Side.SHORT, window, a, p)
         if long_found is not None and short_found is not None:
             search.examined.append(Examined(t, AMBIGUOUS))
-            t += M15
+            t += unit
             continue
         if long_found is None and short_found is None:
             search.examined.append(Examined(t, f"hausse : {long_cause} ; baisse : {short_cause}"))
-            t += M15
+            t += unit
             continue
         side = Side.LONG if long_found is not None else Side.SHORT
-        origin, o, peak = long_found if long_found is not None else short_found
-        config = Configuration(side, t, a, origin, starts[o], peak, starts[-1])
+        origin, o, peak, k = long_found if long_found is not None else short_found
+        if p.context is not Context.NONE:
+            # H3, read only once an impulse is found: last H4 ended by the start of the window (as A).
+            sign = None if context_of is None else context_of(starts[0], t)
+            if sign is None:
+                search.examined.append(Examined(t, CONTEXT_UNAVAILABLE))
+                t += unit
+                continue
+            if sign != (1 if side is Side.LONG else -1):
+                search.examined.append(Examined(t, CONTEXT_AGAINST))
+                t += unit
+                continue
+        config = Configuration(side, t, a, origin, starts[o], peak, starts[k])
         search.configuration = config
-        _follow(config, day, m15, trigger_bars, p)
+        _follow(config, day, m15, trigger_bars, p, window[k + 1 :], smt)
         return search
     return search
 
 
 def _deadline(config: Configuration, day: date, p: Day02Params) -> tuple[datetime, str]:
     """Δ = min(end(p) + 90 min, 15:00) and the cause of an expiry at Δ (window end when they coincide)."""
-    by_pause, cap = config.peak_start + M15 + p.max_pause, london(day, p.last_decision)
+    by_pause, cap = config.peak_start + p.unit + p.max_pause, london(day, p.last_decision)
     return (by_pause, TOO_LONG) if by_pause < cap else (cap, WINDOW_END)
 
 
@@ -276,15 +435,30 @@ def _follow(
     m15: Mapping[datetime, Mapping[str, Any]],
     trigger_bars: Mapping[datetime, Mapping[str, Any]],
     p: Day02Params,
+    initial_pauses: Sequence[Mapping[str, Any]] = (),
+    smt: SmtBars | None = None,
 ) -> None:
-    """Flag formation on M15 (§5.3), then exit on the trigger unit (§5.4), deadlines (§5.5)."""
+    """Flag formation on M15 (§5.3), then exit on the trigger unit (§5.4), deadlines (§5.5).
+
+    `initial_pauses` (H1 only): pause candles after p already closed at t_j. They count, but nothing is
+    dated before t_j: with two of them the flag is formed at F = t_j, the instant they are all known.
+
+    SMTT: after the depth and the breakout, a trigger candle k whose EUR/USD bid low (long) is below every
+    bid low of the pauses and of the earlier trigger candles, while the GBP/USD bid low of k is not below
+    the GBP/USD bid lows of the same candles, confirms the exit at the end of k; short symmetric on the
+    highs. A GBP/USD candle absent or not OK on the compared intervals: no SMT on k (counted)."""
+    if p.smt_trigger and smt is None:
+        raise ValueError("SMTT demandé sans bougies GBP/USD")
     long = config.side is Side.LONG
+    unit_label = "M15" if p.unit == M15 else "M5"
     last_flag = london(day, p.last_flag)
-    pauses: list[Mapping[str, Any]] = []
+    pauses: list[Mapping[str, Any]] = list(initial_pauses)
     start = config.recognised_utc
+    if len(pauses) >= p.min_pause:
+        config.flag_utc = config.recognised_utc  # = end of the second pause candle, never earlier than t_j
     # Formation: the first rule that applies alone, values known before the candle.
-    while True:
-        end = start + M15
+    while config.flag_utc is None:
+        end = start + p.unit
         deadline, cause = _deadline(config, day, p)
         if end > deadline:
             _end(config, cause, deadline)
@@ -295,18 +469,18 @@ def _follow(
         bar = m15.get(start)
         config.last_examined_start = start
         if not bar_ok(bar) or bar is None:
-            _end(config, FLAG_DATA, end, f"M15 {start.isoformat()}, prix non lus")
+            _end(config, FLAG_DATA, end, f"{unit_label} {start.isoformat()}, prix non lus")
             return
         limit = config.depth_limit  # old E and old I: priority of the invalidation over the extension
-        if (long and bar["bid_low"] < limit) or (not long and bar["bid_high"] > limit):
-            _end(config, TOO_DEEP, end, f"M15 {start.isoformat()}")
+        if breaches_depth(bar, long, limit, p.depth_on_close):
+            _end(config, TOO_DEEP, end, f"{unit_label} {start.isoformat()}")
             return
         if (long and bar["bid_high"] > config.peak) or (not long and bar["bid_low"] < config.peak):
             config.peak = bar["bid_high"] if long else bar["bid_low"]
             config.peak_start = start
             config.extensions.append(start)
             pauses = []  # an extension candle is not a pause; only pauses after the last peak count
-            if (config.peak_start - config.origin_start) / M15 + 1 > p.max_impulse:
+            if (config.peak_start - config.origin_start) / p.unit + 1 > p.max_impulse:
                 _end(config, PROLONGED, end)
                 return
         else:
@@ -315,6 +489,8 @@ def _follow(
                 config.flag_utc = end
                 break
         start = end
+    if config.flag_utc is None:
+        raise RuntimeError("formation terminée sans F")
     config.pause_starts = [b["start_utc"] for b in pauses]
     config.deadline_utc, cause = _deadline(config, day, p)
     config.slope = (pauses[-1]["bid_close"] - pauses[0]["bid_close"]) / config.atr
@@ -322,7 +498,13 @@ def _follow(
     # Exit on the trigger unit, E, I and the deadline frozen at F; same rules on M5 and M15.
     step = p.trigger_step
     level = config.peak + p.exit_margin * config.atr if long else config.peak - p.exit_margin * config.atr
-    start = config.flag_utc
+    # First trigger candle at F; M5S compared on M15: the first M15 boundary at or after F.
+    start = ceil_unit(config.flag_utc, step)
+    previous = trigger_bars.get(start - step)  # F2R: the trigger candle ending at F
+    # SMTT: EUR/USD bid extreme of the flag so far (pauses, then trigger candles) and the GBP/USD starts read.
+    eur_flag = min(b["bid_low"] for b in pauses) if long else max(b["bid_high"] for b in pauses)
+    gbp_pause_starts = [b["start_utc"] for b in pauses]
+    gbp_trigger_starts: list[datetime] = []
     while True:
         end = start + step
         if end > config.deadline_utc:  # included bound: a close exactly at Δ can confirm
@@ -334,7 +516,7 @@ def _follow(
             _end(config, FLAG_DATA, end, f"{p.trigger.value} {start.isoformat()}, prix non lus")
             return
         extreme = min(extreme, bar["bid_low"]) if long else max(extreme, bar["ask_high"])
-        if (long and bar["bid_low"] < config.depth_limit) or (not long and bar["bid_high"] > config.depth_limit):
+        if breaches_depth(bar, long, config.depth_limit, p.depth_on_close):
             _end(config, TOO_DEEP, end, f"{p.trigger.value} {start.isoformat()}")  # before the exit (§5.4)
             return
         if (long and bar["bid_close"] > level) or (not long and bar["bid_close"] < level):
@@ -345,6 +527,35 @@ def _follow(
             config.target = config.peak + amplitude if long else config.peak - amplitude
             _end(config, EXIT, end)
             return
+        if p.failed2_trigger and previous is not None and bar_ok(previous) and is_failed2(bar, previous, long):
+            config.flag_extreme = extreme  # the Failed 2 candle included
+            margin = p.stop_margin * config.atr
+            config.stop = extreme - margin if long else extreme + margin
+            amplitude = config.amplitude
+            config.target = config.peak + amplitude if long else config.peak - amplitude
+            _end(config, EXIT, end, FAILED2_EXIT)
+            return
+        if p.smt_trigger and smt is not None:
+            eur_new = bar["bid_low"] < eur_flag if long else bar["bid_high"] > eur_flag
+            if eur_new:
+                pause_x = _gbp_extreme(smt.m15, gbp_pause_starts, not long)
+                trig_x = _gbp_extreme(smt.trigger, gbp_trigger_starts, not long) if gbp_trigger_starts else pause_x
+                gbp_k = _gbp_extreme(smt.trigger, [start], not long)
+                if pause_x is None or trig_x is None or gbp_k is None:
+                    config.smt_undetermined += 1
+                else:
+                    reference = min(pause_x, trig_x) if long else max(pause_x, trig_x)
+                    if (long and gbp_k >= reference) or (not long and gbp_k <= reference):
+                        config.flag_extreme = extreme  # the SMT candle included
+                        margin = p.stop_margin * config.atr
+                        config.stop = extreme - margin if long else extreme + margin
+                        amplitude = config.amplitude
+                        config.target = config.peak + amplitude if long else config.peak - amplitude
+                        _end(config, EXIT, end, SMT_EXIT)
+                        return
+            eur_flag = min(eur_flag, bar["bid_low"]) if long else max(eur_flag, bar["bid_high"])
+            gbp_trigger_starts.append(start)
+        previous = bar
         start = end
 
 

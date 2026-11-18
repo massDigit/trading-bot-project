@@ -305,3 +305,70 @@
   2. Script de reproduction renforcé (exactement une ligne M5 et une ligne M15 par date, doublons, totaux, partition, matrice 150 / 27 / 0 / 411, décalages de `D`) et exécuté sur le détail local existant, sans lecture de cotation : chiffres publiés retrouvés.
   3. Étude close, PR #25 fusionnée. Rédaction du protocole de performance DAY_02 autorisée en documentation seulement, à présenter avant l'outil ; aucune égalité globale avec les 307 et 272 sorties confirmées ne doit y être imposée.
 - **Portée** : aucun backtest de performance, aucun entraînement, aucun ordre, aucune lecture de 2022-2025.
+
+### ADR-034 : Protocole de performance DAY_02 approuvé dans sa base ; outil et tests synthétiques autorisés
+- **Date** : 2026-11-07
+- **Statut** : `ACCEPTED` (décision de l'opérateur)
+- **Source** : revue de l'opérateur du protocole `docs/experiments/DAY02_REFERENCE_2015_2021.md` (PR #26).
+- **Décision** :
+  1. *Reprises (§5.2)* : une recherche terminée sans configuration n'a ni `ended_utc` ni `ended_by` ; c'est une fin normale, ni position ouverte ni anomalie. L'égalité entre la fin d'une tentative et la reprise suivante vaut dans une même séance ; après une clôture la veille, la recherche repart à 07:00 ; une position tenue à 07:00 retarde la reprise à sa clôture effective, et une séance sans recherche doit être justifiée. `ENTRÉE_REJETÉE` autorise une reprise à l'instant enregistré du rejet. Ces situations et une reprise mal datée sont testées ; moteur inchangé.
+  2. *Entonnoir (§6)* : la fin pour données inutilisables après la formation du drapeau est une issue des drapeaux formés, conservée dans les comptes même si l'étude de disponibilité n'en compte aucune.
+  3. *Comparaisons entre scénarios (§8)* : B, C et le rejet sont déclenchés séparément pour M5 et M15 ; une comparaison n'est produite que si les deux passages existent ; un scénario requis d'un seul côté est rapporté sans lancer l'autre côté.
+  4. Retenus : franchissements journaliers et hebdomadaires non décrits dans ce premier passage (premier franchissement de 6 % rapporté) ; recalcul distinct C6 sur toutes les tentatives, portée explicite et ATR H1 partagé.
+  5. Outils `forex-day02-backtest` et `forex-day02-compare` et tests synthétiques autorisés ; moteurs et paramètres inchangés ; protocole figé au commit de l'outil, présenté pour revue.
+  6. *Revue de f705858* : l'écart entre l'indicateur approché et la distance au stop à `D` se calcule avec le côté de `P_D` (`(ask à D − clôture bid) / pip` à l'achat, `(clôture bid − bid à D) / pip` à la vente), vérifié à la main dans les deux sens ; chaque rapport enregistre l'empreinte de son détail par séance, et `forex-day02-compare` vérifie cette empreinte, le déclenchement, le scénario, la règle d'exécution (`A` distinct de `A_rejet`) et la fenêtre avant toute comparaison. Les annulations restent décrites par l'événement enregistré et les transactions indéterminées par les trous enregistrés, portée explicite au protocole. Nouveau gel présenté pour revue.
+- **Portée** : la décision sur les conditions IG reste ouverte (aucune option retenue, aucun contact). Aucun passage historique, aucun entraînement, aucun ordre, aucune lecture de 2022-2025. PR en brouillon.
+
+### ADR-035 : Premier passage DAY_02 sous les hypothèses de recherche figées (option b du protocole)
+- **Date** : 2026-11-09
+- **Statut** : `ACCEPTED` (décision de l'opérateur)
+- **Source** : décision de l'opérateur sur les conditions IG (protocole `docs/experiments/DAY02_REFERENCE_2015_2021.md`, §10), après les relevés en lecture seule du compte réel consignés dans `docs/CONFIRMATIONS.md` §6 et §7 (PR #27).
+- **Décision** :
+  1. L'option **(b)** du §10 est retenue : le premier passage de performance DAY_02 est une étude hors ligne sous les hypothèses de recherche **actuellement figées, conservées à l'identique** (`RESEARCH_COSTS`, paramètres et moteurs du gel `66557cd`).
+  2. Les limites connues de ces hypothèses sont conservées et seront rappelées dans le bilan : taille minimale et pas de 0,1 contrat Mini ; aucune distance minimale du courtier appliquée au stop garanti ; conversion à 0,5 % ; financement forfaitaire de 1 USD par contrat Mini et par nuit. Ces valeurs restent `ASSUMED` ; elles ne deviennent pas des conditions IG confirmées. Les relevés du compte réel (§6 de `CONFIRMATIONS.md` : quantité minimum 0,01, stop garanti minimum de 5 points, conversion publiée à 0,8 %, etc.) ne sont pas intégrés.
+  3. Le résultat mesurera DAY_02 **dans ce modèle**. Il ne démontrera ni sa rentabilité réelle chez IG ni l'admissibilité de toutes ses transactions.
+  4. La réponse du support IG n'est plus un préalable à ce premier passage. Les échanges avec IG restent documentaires (`CONFIRMATIONS.md`) et ne modifient pas ce protocole.
+  5. Toute évaluation ultérieure avec des conditions IG mieux documentées fera l'objet d'un **protocole distinct, fixé avant son lancement**, quel que soit le résultat du premier passage.
+- **Portée** : documentation seulement. Aucun changement de moteur, de paramètres ou de coûts ; le code reste celui de `66557cd`, et la décision est consignée dans un commit documentaire distinct. La revue du code de la PR #26 reste nécessaire ; **aucun passage historique n'est autorisé** par cette décision (autorisation explicite attendue après la revue). Aucune lecture de 2022-2025, aucun ordre.
+
+### ADR-036 : Campagne exploratoire DAY_02 H1-H3 sur 2015-2021 (M5), référence conservée
+- **Date** : 2026-11-09
+- **Statut** : `ACCEPTED` (décision de l'opérateur)
+- **Source** : messages de l'opérateur du 2026-11-09 après le premier passage DAY_02 (net négatif, M5 et M15, scénario A seul requis), l'audit des règles et le plan d'amélioration ; contrainte impérative de causalité.
+- **Décision** :
+  1. Campagne complète autorisée sur H1 (reconnaissance différée), H2 (profondeur sur clôture) et H3 (contexte directionnel), seules et combinées (7 variantes et la référence), déclenchement M5, 2015-2021 seulement ; exécution autonome (implémentation, tests, études, passages, scénarios conditionnels, relances techniques tracées).
+  2. Une définition par hypothèse, fixée et enregistrée avant la lecture des résultats des variantes (`docs/experiments/DAY02_IMPROVEMENT_CAMPAIGN.md` §3) ; une seule branche de recherche, configurations explicites (`--variant`).
+  3. Causalité impérative : aucune information postérieure à T dans une décision à T ; tests de troncature et d'altération après T ; reconnaissance tardive sans décision ni exécution antidatée.
+  4. Exploration seulement : le découpage 2015-2018 / 2019-2021 reste exploratoire ; aucune variante n'est validée pour le réel sur cette base.
+- **Portée** : la référence DAY_02 (ADR-028, ADR-034, ADR-035), ses règles et son résultat négatif restent inchangés et reproductibles. Coûts, capital et risque de l'ADR-035. Aucun accès à 2022-2025, aucun ordre réel ou démo, aucun modèle d'apprentissage, aucune fusion ni remplacement de la référence sans accord de l'opérateur.
+
+### ADR-037 : Campagne exploratoire DAY_02 « sorties tardives » (LATE) sur 2015-2021 (M5), référence conservée
+- **Date** : 2026-11-10
+- **Statut** : `ACCEPTED` (décision de l'opérateur)
+- **Source** : message de l'opérateur du 2026-11-10 après la campagne H1-H3 (ADR-036, lecture « abandonner »).
+- **Décision** :
+  1. Comparer la référence inchangée à une variante unique `LATE` : mêmes entrées, horaires de recherche, stop initial, cible et dimensionnement ; sortie temporelle de 2 h supprimée ; liquidation de 17:00 Londres remplacée par 22:55 `Europe/Paris` (changements d'heure compris) ; entre-temps cible et stop seulement, sans sortie partielle ni stop suiveur ; une position à la fois, reprises inchangées ; exécution à l'échéance au premier tick strictement postérieur, sans prix inventé.
+  2. Financement du modèle ADR-035 appliqué à chaque passage de 17:00 New York, même sur une position close le même jour civil ; 22:55 Paris est une borne de recherche, pas une garantie d'éviter le financement. Incertitudes IG signalées à part.
+  3. Exécution autonome sur 2015-2021 (préparation, tests, études, passages, scénarios conditionnels), couverture des horaires supplémentaires vérifiée, contrôles de causalité conservés ; définition, mesures et lecture fixées avant les résultats (`docs/experiments/DAY02_LATE_EXIT_CAMPAIGN.md`).
+- **Portée** : exploration seulement. Référence DAY_02 et résultats antérieurs inchangés et reproductibles ; coûts, capital et risque de l'ADR-035. Aucun accès à 2022-2025, aucun ordre réel ou démo, aucune modification de paramètre après lecture, aucune fusion ni remplacement de la référence sans accord de l'opérateur.
+
+### ADR-038 : Campagne exploratoire DAY_02 « prises partielles et protection » (PROT, PART, FULL) contre LATE, 2015-2021 (M5)
+- **Date** : 2026-11-13
+- **Statut** : `ACCEPTED` (décision de l'opérateur)
+- **Source** : cadrage présenté le 2026-11-13 et autorisation de l'opérateur avec ses précisions ; méthodes de sorties partielles décrites par Kathy Lien comme source d'hypothèses.
+- **Décision** :
+  1. Plan 2 × 2 contre LATE inchangée : PROT (sortie unique à TP2, stop protégé), PART (TP1 / TP2 / TP3, stop fixe), FULL (les deux). TP1 = entrée + min(R0, ⅔ (TP2 − entrée)), P = mi-chemin TP1 → TP2, TP2 = E + I, TP3 = E + 2 I ; tiers en pas de 0,1 au plus fort reste (TP1 > TP3 > TP2), 0,1 contrat en sortie unique à TP2 ; stop au prix d'entrée quand P est atteint, au niveau TP1 quand TP2 est atteint, jamais éloigné, effectif à la cotation suivante.
+  2. Niveau atteint et portion exécutée distincts ; conservation des quantités ; scénarios d'interruption explicites pour le solde ; LATE reproduite exactement ; risque initial total inchangé.
+  3. Exécution autonome sur 2015-2021 jusqu'au bilan ; lecture exploratoire, critère d'une erreur type comme indicateur seulement ; positions conservées au-delà de l'échéance rapportées à part.
+- **Portée** : exploration seulement (`docs/experiments/DAY02_PARTIAL_EXITS_CAMPAIGN.md`). Aucun autre niveau testé (pas de TP3 = E + 1,5 I), aucun réglage guidé par les résultats, aucune lecture de 2022-2025, aucun ordre ; limites IG (clôture partielle, modification et distance minimale du stop garanti) explicites ; une amélioration simulée ne vaut pas exécutabilité réelle. Références et résultats antérieurs conservés.
+
+### ADR-039 : Lot de recherche DAY_02 « fréquence » : confirmations des guides, trois configurations nouvelles, GBP/USD et SMT (2015-2021)
+- **Date** : 2026-11-17
+- **Statut** : `ACCEPTED` (décision de l'opérateur)
+- **Source** : message de l'opérateur du 2026-11-17 après le criblage des guides FX Replay (G1a, G5b, E3 prometteurs ; SMT non testable faute de GBP/USD).
+- **Décision** :
+  1. Objectif de recherche : environ 4 à 5 transactions par séance pour DAY_02 seule, avec espérance nette positive et risque maîtrisé ; cible, pas quota ; une position clôturée en plusieurs portions compte pour une transaction.
+  2. Lot complet autorisé sans validation intermédiaire : analyse, acquisition et préparation GBP/USD 2015-2021, hypothèses, implémentation, tests synthétiques, passages 2015-2021, bilan ; PR de revue possibles, aucune fusion.
+  3. Volets : confirmation de G1a, G5b, E3 et G1a + G5b ; au plus trois configurations nouvelles motivées par le diagnostic ; SMT GBP/USD comme filtre et comme déclencheur ; DAY_02 sur GBP/USD seule et conjointe à capital partagé si spécifications et coûts explicites.
+  4. Définitions et lecture enregistrées avant résultats (`docs/experiments/DAY02_FREQUENCY_CAMPAIGN.md`) ; causalité stricte ; LATE reproduite.
+- **Portée** : exploration seulement ; risque initial par transaction inchangé (0,25 %), aucun levier supplémentaire ; toute évolution des règles d'exposition est présentée séparément ; pas de généralisation des prises partielles ou du break-even ; 2022-2025 en réserve ; aucun ordre ; LATE et les campagnes antérieures inchangées.
