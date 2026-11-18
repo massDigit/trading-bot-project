@@ -1,0 +1,19 @@
+{
+ "filled": 206,
+ "late_filled": -80.62437078278407,
+ "e3_filled": 86.05037505921223,
+ "e3_at_late_size": 68.24805810231804,
+ "missed": 90,
+ "missed_outcomes": {
+  "ENTR\u00c9E_EXPIR\u00c9E": 79,
+  "ENTR\u00c9E_ANNUL\u00c9E_CIBLE": 11
+ },
+ "late_missed": 116.94090426800037,
+ "removed": 0,
+ "late_removed": 0,
+ "added": 1,
+ "added_filled": 1,
+ "e3_added": 3.2274073092050024,
+ "paired_mean": 0.16801973504728357,
+ "paired_se": 0.16401112702555226
+}

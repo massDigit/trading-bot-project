@@ -1,0 +1,32 @@
+{
+ "5m": {
+  "eur": 523566,
+  "gbp": 523270,
+  "grille_identique": false,
+  "gbp_seulement": 6,
+  "eur_seulement": 302,
+  "contenus_gbp": {
+   "VALID": 523161,
+   "EMPTY": 109
+  },
+  "ok_eur": 522805,
+  "ok_gbp": 522499,
+  "ok_eur_pas_gbp": 420,
+  "derniere_fin_gbp": "2021-12-31 22:00:00+00:00"
+ },
+ "15m": {
+  "eur": 174525,
+  "gbp": 174427,
+  "grille_identique": false,
+  "gbp_seulement": 1,
+  "eur_seulement": 99,
+  "contenus_gbp": {
+   "VALID": 174421,
+   "EMPTY": 6
+  },
+  "ok_eur": 174212,
+  "ok_gbp": 174113,
+  "ok_eur_pas_gbp": 186,
+  "derniere_fin_gbp": "2021-12-31 22:00:00+00:00"
+ }
+}

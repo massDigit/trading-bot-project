@@ -4,7 +4,8 @@
 paramètres, mesures et lecture ci-dessous sont **fixés et enregistrés au commit de lancement, avant
 tout résultat des configurations nouvelles**. LATE (ADR-037) reste la référence de comparaison,
 inchangée et reproduite. Les années 2015-2021 ont déjà été examinées : rien ici n'est une validation.
-Aucune donnée 2022-2025, aucun ordre, aucune fusion. Coûts, capital et risque de l'ADR-035 inchangés
+Aucune donnée 2022-2025, aucun ordre, aucune fusion. **Passages faits les 2026-11-17 et 2026-11-18 ;
+bilan au §8.** Coûts, capital et risque de l'ADR-035 inchangés
 (0,25 % par transaction, minimum et pas 0,1, 2 000 EUR, stop garanti simulé), une position à la fois.
 
 ## 1. Objectif et diagnostic
@@ -158,3 +159,109 @@ transaction) ; rapprochement avec LATE par (`D`, sens) : entrées communes, reti
 ## 7 bis. Registre des essais
 
 À compléter au fil des passages ; tous les essais conservés, y compris défavorables ou invalidés.
+
+Sorties sous `data/reports/backtests/day02_frequency/` (hors Git) ; scripts de lecture et bilan chiffré
+copiés dans `day02_research_annexes/frequency_lot/`, transactions sans prix dans
+`day02_research_annexes/trades/`. Passage M5, scénario A, 2015-2021, 1 816 séances.
+
+| # | Essai | Configurations | Commit | Résultat | Incident |
+|---|---|---|---|---|---|
+| 1 | disponibilité et performance (premier lancement) | LATE, G1A, G5B, G1A5B, E3, F2R, RSC, M5S | 380a4ef | disponibilité conforme ; rapports de performance **retenus** par le contrôle de provenance | arbre modifié pendant le passage (adaptateur JForex `--instrument`) : résultats non lus, conservés dans `withheld_dirty_tree/` |
+| 2 | performance, relance | les huit | 9473895 | contrôles conformes pour sept ; E3 retenu (contrôle des reprises : 11 écarts) | E3 : l'oracle du contrôle ignorait l'issue `ENTRÉE_ANNULÉE_CIBLE` ; moteur correct ; rapport conservé dans `withheld_resume_oracle/` |
+| 3 | performance E3 | E3 | 86aeb3e | contrôles conformes | correction de l'oracle et test de régression, aucun changement du moteur |
+| 4 | rejeux tronqués (→ 2015-04-01) | E3, F2R, RSC, M5S | 86aeb3e | transactions et tentatives antérieures identiques au passage complet (E3 5, F2R 25, RSC 11, M5S 37 transactions ; 149 à 363 tentatives, 0 écart) | — |
+| 5 | acquisition GBP/USD 2015-2021 | — | 9473895 | 22 jours incomplets au premier essai, 20 récupérés ; 2 heures vides comme EUR/USD (2016-09-02 18 h, 2019-05-26 21-23 h UTC) ; alignement : 302 M5 EUR/USD sans M5 GBP/USD, 420 M5 `OK` en EUR/USD et pas en GBP/USD | premier pipeline arrêté par sa garde « incomplet », relancé |
+| 6 | disponibilité, rejeux tronqués et performance | SMTF, SMTT | 062dfd5 | contrôles conformes ; rejeux tronqués identiques (7 et 14 transactions, 159 et 158 tentatives) ; SMT indéterminé : 1 cas SMTF, 0 SMTT | — |
+
+Aucun scénario B/C ni rejet requis, sauf **M5S** : une transaction indéterminée (2018-08-20, silence de
+6 min pendant la position) demande B et C, **non exécutés** ; une seule transaction au stop garanti ne
+peut pas changer la lecture de M5S (net −337,29 €). **DAY_02 sur GBP/USD** (volet C, dernier point) :
+**non exécuté** (spécifications de contrat et de coûts GBP/USD non réunies).
+
+## 8. Bilan (exploratoire)
+
+### 8.1 Tableau 2015-2021 (M5, scénario A, coûts et risque ADR-035)
+
+R = net / perte estimée au stop à la décision ; ± = erreur type ; DD = drawdown relatif au tick ;
+« coûts ×2 » = glissement et prime de stop garanti doublés, transaction par transaction.
+
+| | Trans. | /séance | Sem. actives | Max sans (j) | Brut € | Coûts € | **Net €** | R net | PF | DD | Net 15-18 | Net 19-21 | Coûts ×2 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| LATE | 296 | 0,163 | 59 % | 37 | 112,79 | 76,48 | **+36,32** | +0,029 ± 0,064 | 1,06 | 2,55 % | +5,29 | +31,03 | −33,44 |
+| G1A | 269 | 0,148 | 57 % | 37 | 150,89 | 68,52 | **+82,37** | +0,077 ± 0,067 | 1,16 | 2,53 % | +16,26 | +66,11 | +19,53 |
+| G5B | 246 | 0,135 | 53 % | 55 | 162,05 | 62,93 | **+99,12** | +0,095 ± 0,071 | 1,21 | 1,94 % | +40,64 | +58,48 | +42,06 |
+| G1A5B | 225 | 0,124 | 50 % | 55 | 183,82 | 56,75 | **+127,07** | +0,131 ± 0,074 | 1,30 | 1,87 % | +45,75 | +81,32 | +75,25 |
+| E3 | 207 | 0,114 | 44 % | 68 | 164,53 | 75,25 | **+89,28** | +0,091 ± 0,094 | 1,18 | 2,80 % | +48,94 | +40,33 | +20,16 |
+| F2R | 694 | 0,382 | 88 % | 27 | 348,55 | 432,41 | **−83,86** | −0,022 ± 0,068 | 0,96 | 7,06 % | −14,41 | −69,45 | −493,01 |
+| RSC | 351 | 0,193 | 63 % | 37 | 90,36 | 90,92 | **−0,56** | −0,014 ± 0,058 | 1,00 | 3,34 % | −4,64 | +4,07 | −82,92 |
+| M5S | 888 | 0,489 | 94 % | 17 | 23,89 | 361,19 | **−337,29** | −0,099 ± 0,035 | 0,83 | 18,92 % | −157,78 | −179,51 | −681,98 |
+| SMTF | 146 | 0,080 | 34 % | 83 | 91,24 | 36,95 | **+54,29** | +0,082 ± 0,094 | 1,19 | 2,10 % | +5,30 | +48,99 | +20,35 |
+| SMTT | 594 | 0,327 | 85 % | 23 | 148,48 | 411,09 | **−262,61** | −0,103 ± 0,074 | 0,85 | 15,69 % | −225,02 | −37,59 | −657,89 |
+
+### 8.2 Rapprochement avec LATE par (`D`, sens)
+
+| | Communes | Net LATE → config. sur communes € | Retirées (net LATE €) | Ajoutées (net €) |
+|---|---:|---:|---:|---:|
+| G1A | 268 | 79,06 → 77,55 | 28 (−42,74) | 1 (+4,82) |
+| G5B | 246 | 97,93 → 99,12 | 50 (−61,61) | 0 |
+| G1A5B | 224 | 118,71 → 122,25 | 72 (−82,39) | 1 (+4,82) |
+| E3 | 206 | −80,62 → +86,05 | 90 non exécutées (+116,94) | 1 (+3,23) |
+| F2R | 175 | 15,60 → 14,78 | 121 (+20,72) | 519 (−98,64) |
+| RSC | 284 | 33,97 → 54,58 | 12 (+2,35) | 67 (−55,15) |
+| M5S | 2 | −8,47 → −8,19 | 294 (+44,78) | 886 (−329,10) |
+| SMTF | 144 | 53,31 → 53,57 | 152 (−17,00) | 2 (+0,72) |
+| SMTT | 255 | −9,39 → +6,78 | 41 (+45,71) | 339 (−269,40) |
+
+- **E3** : les 90 entrées non exécutées (79 expirées, 11 annulées sur cible) sont les meilleures de LATE
+  (sélection adverse) ; sur les 206 exécutées, le meilleur prix rapporte +68,25 € à taille LATE ; écart
+  apparié +0,168 ± 0,164 R.
+- **SMTF** : 155 refus à `D` sur 303 sorties confirmées.
+- **SMTT** : 339 sorties « SMT » parmi les transactions (−269,40 €, R −0,171 ± 0,119, 85 % au stop) ;
+  255 sorties par cassure (+6,78 €, R −0,013). Sans position, 625 sorties confirmées (358 SMT).
+
+### 8.3 Transactions par séance, par année
+
+| | 2015 | 2016 | 2017 | 2018 | 2019 | 2020 | 2021 |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Séances | 259 | 260 | 259 | 259 | 259 | 260 | 260 |
+| LATE | 0,166 | 0,131 | 0,181 | 0,174 | 0,158 | 0,169 | 0,162 |
+| G1A | 0,147 | 0,119 | 0,170 | 0,158 | 0,143 | 0,158 | 0,142 |
+| G5B | 0,135 | 0,115 | 0,154 | 0,151 | 0,131 | 0,123 | 0,138 |
+| G1A5B | 0,124 | 0,108 | 0,143 | 0,135 | 0,120 | 0,112 | 0,127 |
+| E3 | 0,135 | 0,092 | 0,154 | 0,100 | 0,108 | 0,092 | 0,115 |
+| F2R | 0,409 | 0,338 | 0,402 | 0,402 | 0,359 | 0,388 | 0,377 |
+| RSC | 0,193 | 0,158 | 0,205 | 0,212 | 0,193 | 0,204 | 0,188 |
+| M5S | 0,498 | 0,488 | 0,490 | 0,498 | 0,459 | 0,515 | 0,473 |
+| SMTF | 0,081 | 0,042 | 0,073 | 0,100 | 0,073 | 0,096 | 0,096 |
+| SMTT | 0,317 | 0,312 | 0,386 | 0,336 | 0,301 | 0,312 | 0,327 |
+
+Distance à l'objectif de 4 à 5 transactions par séance : la plus fréquente (M5S, 0,49) en est à un
+facteur 8 à 10, avec une espérance nette négative.
+
+### 8.4 Lecture enregistrée (§7)
+
+- **Volet A** : G1A, G5B, G1A5B et E3 **confirmées en trajectoire** (net supérieur à LATE sur 2015-2021 et
+  dans chaque période).
+- **Volet B** : F2R, RSC et M5S **rejetées** (net ≤ 0 sur 2015-2021).
+- **Volet C** : SMTF lue comme le volet A, **confirmée de justesse** (2015-2018 : +5,30 € contre +5,29 €) ;
+  SMTT lue comme le volet B, **rejetée**. DAY_02 sur GBP/USD non exécuté.
+
+### 8.5 Limites
+
+- Toutes les configurations confirmées sont des **filtres** : elles réduisent la fréquence (0,08 à
+  0,15 par séance contre 0,163), à l'opposé de l'objectif. Toutes celles qui l'augmentent perdent :
+  les transactions ajoutées ont une espérance brute trop faible pour couvrir des coûts fixes par
+  transaction (glissement, prime de stop garanti) ; voir `day02_research_annexes/cost_wall/`.
+- Aucune espérance nette ne dépasse deux erreurs types (G1A5B : environ 1,8).
+- G1A, G5B et E3 viennent du criblage des guides (`day02_research_annexes/guides_screening/`) sur les
+  **mêmes années** : leur confirmation en trajectoire vérifie l'effet moteur, pas son existence hors
+  échantillon ; G1A5B cumule deux sélections.
+- G5B est un filtre horaire (aucun calendrier d'annonces) ; E3 suppose une exécution de l'ordre limite
+  au premier tick qui touche `E`, sans file d'attente.
+- Années 2015-2021 déjà examinées par de nombreux essais ; 2022-2025 non lues.
+
+### 8.6 Recommandation
+
+Aucune décision n'est prise par ce bilan. Si l'opérateur le souhaite : épreuve hors échantillon
+(2022-2023) d'une configuration figée, par exemple G1A5B, sous protocole distinct gelé avant lecture ;
+la fréquence visée de 4 à 5 par séance demanderait une autre construction que DAY_02 (lot ultérieur).

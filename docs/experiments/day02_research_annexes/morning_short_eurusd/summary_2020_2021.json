@@ -1,0 +1,52 @@
+{
+ "S20": {
+  "n": 520,
+  "jours_sans_transaction": 3,
+  "stop_%": 29.4,
+  "pips_moyens": 0.92,
+  "brut_eur": 84.91,
+  "net_eur": 1.32,
+  "couts_eur": 83.59,
+  "R_net": 0.0008,
+  "se": 0.0402,
+  "PF": 1.002,
+  "par_annee_R": {
+   "2020": -0.017,
+   "2021": 0.018
+  },
+  "par_annee_net": {
+   "2020": -15.05,
+   "2021": 16.37
+  },
+  "pire_serie_pertes": 10,
+  "dd_clos_%": 5.27,
+  "net_glissement_x2": -43.71,
+  "net_prime_x2": -30.55,
+  "taille_mediane": 0.2
+ },
+ "S30": {
+  "n": 520,
+  "jours_sans_transaction": 3,
+  "stop_%": 13.8,
+  "pips_moyens": 1.24,
+  "brut_eur": 56.63,
+  "net_eur": 23.08,
+  "couts_eur": 33.54,
+  "R_net": 0.0166,
+  "se": 0.0292,
+  "PF": 1.066,
+  "par_annee_R": {
+   "2020": -0.009,
+   "2021": 0.043
+  },
+  "par_annee_net": {
+   "2020": -5.95,
+   "2021": 29.03
+  },
+  "pire_serie_pertes": 10,
+  "dd_clos_%": 2.52,
+  "net_glissement_x2": 0.57,
+  "net_prime_x2": 15.54,
+  "taille_mediane": 0.1
+ }
+}

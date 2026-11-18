@@ -46,7 +46,16 @@ ASSUMP-029) rédigée en PR #23 ; base de rédaction et extension de la conventi
   `docs/experiments/DAY02_PARTIAL_EXITS_CAMPAIGN.md`, branche `research/day02-partial-exits`) :
   PROT +24,35 €, PART +0,82 €, FULL −31,28 € contre LATE +36,32 € ; effet apparié négatif dans les
   deux périodes ; **aucune retenue**, LATE reste la meilleure.
-- **Branches empilées, poussées, sans PR** : `docs/day02-reference-protocol` → `research/day02-h1-h3`
+- **Lot fréquence, guides et SMT** (ADR-039, `docs/experiments/DAY02_FREQUENCY_CAMPAIGN.md` §7 bis-§8,
+  branche `research/day02-frequency`, passages des 2026-11-17 et 18) : G1A +82,37 €, G5B +99,12 €,
+  G1A5B **+127,07 €** (+0,131 ± 0,074 R, 0,124 transaction par séance), E3 +89,28 €, SMTF +54,29 € :
+  confirmées en trajectoire (SMTF de justesse) ; F2R −83,86 €, RSC −0,56 €, M5S −337,29 €, SMTT
+  −262,61 € : rejetées. Les filtres réduisent la fréquence ; les configurations qui l'augmentent
+  perdent (coûts fixes). DAY_02 sur GBP/USD non exécuté. Synthèse de tous les essais :
+  `docs/experiments/DAY02_PROGRAM_BILAN.md` ; annexes versionnées (scripts, transactions sans prix,
+  criblage des guides, mur des coûts, atlas, ventes de matinée EUR/USD inconclusive et GBP/USD non
+  confirmée) : `docs/experiments/day02_research_annexes/`. Aucune décision prise sur ces résultats.
+- **Branches empilées** (PR de recherche en brouillon vers `main`, sans fusion) : `docs/day02-reference-protocol` → `research/day02-h1-h3`
   → `research/day02-late-exit` → `research/day02-partial-exits`. Aucune fusion ni remplacement de la
   référence sans accord de l'opérateur. Configurations explicites `--variant` (REF, H1…H1H2H3, LATE,
   PROT, PART, FULL) ; la référence et LATE se reproduisent à l'identique.

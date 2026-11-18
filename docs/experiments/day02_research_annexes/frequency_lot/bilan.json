@@ -1,0 +1,788 @@
+{
+ "LATE": {
+  "n": 296,
+  "net": 36.31653348521629,
+  "R": 0.029222971799130682,
+  "se": 0.06362138989358099,
+  "PF": 1.060794449780588,
+  "gross": 112.79191430891933,
+  "costs": 76.47538082370303,
+  "dd_eur": 52.08118703736919,
+  "dd_rel": 2.55,
+  "p1": {
+   "n": 169,
+   "net": 5.290048111052492,
+   "R": -0.0013085727545106443,
+   "se": 0.0867560838781094,
+   "PF": 1.015166128278759
+  },
+  "p2": {
+   "n": 127,
+   "net": 31.026485374163798,
+   "R": 0.0698515625831101,
+   "se": 0.09332844938812941,
+   "PF": 1.124825347658796
+  },
+  "freq": {
+   "per_session": 0.16299559471365638,
+   "per_year": {
+    "2015": 43,
+    "2016": 34,
+    "2017": 47,
+    "2018": 45,
+    "2019": 41,
+    "2020": 44,
+    "2021": 42
+   },
+   "active_weeks": 0.589041095890411,
+   "longest_gap_days": 37,
+   "active_sessions": 292
+  },
+  "slip2": 3.686838922132395,
+  "prem2": -0.8109832024601218,
+  "both2": -33.44067776554402,
+  "exits": {
+   "CIBLE": 110,
+   "LIQUIDATION_22H55_PARIS": 45,
+   "STOP_OBSERV\u00c9": 141
+  },
+  "vs_late": {
+   "common": 296,
+   "common_net_late": 36.31653348521629,
+   "common_net_here": 36.31653348521629,
+   "added": 0,
+   "added_net": 0,
+   "removed": 0,
+   "removed_net_late": 0
+  },
+  "funnel": {
+   "configurations": 2637,
+   "flags_formed": 982,
+   "confirmed_exits": 299,
+   "at_d": {
+    "march\u00e9 ferm\u00e9 \u00e0 D": 0,
+    "absence de cotation \u00e0 D": 0,
+    "stop non admissible": 0,
+    "cible d\u00e9j\u00e0 d\u00e9pass\u00e9e \u00e0 D": 1,
+    "taille minimale sup\u00e9rieure au budget": 2,
+    "ENTR\u00c9E_D\u00c9CID\u00c9E": 296
+   },
+   "entry_outcomes": {
+    "EX\u00c9CUT\u00c9E": 296,
+    "STOP_D\u00c9PASS\u00c9_\u00c0_L'EX\u00c9CUTION": 0,
+    "CIBLE_ATTEINTE_\u00c0_L'EX\u00c9CUTION": 0,
+    "ENTR\u00c9E_REJET\u00c9E": 0,
+    "ENTR\u00c9E_EXPIR\u00c9E": 0,
+    "ENTR\u00c9E_ANNUL\u00c9E_INTERRUPTION": 0
+   }
+  }
+ },
+ "G1A": {
+  "n": 269,
+  "net": 82.37102843976709,
+  "R": 0.07731893088988119,
+  "se": 0.06684025654871767,
+  "PF": 1.1576514852029722,
+  "gross": 150.8912569341979,
+  "costs": 68.52022849443084,
+  "dd_eur": 51.94124155078834,
+  "dd_rel": 2.53,
+  "p1": {
+   "n": 154,
+   "net": 16.258948259088513,
+   "R": 0.02980445984011852,
+   "se": 0.09151050405877312,
+   "PF": 1.0511207062673813
+  },
+  "p2": {
+   "n": 115,
+   "net": 66.11208018067857,
+   "R": 0.14094700516521558,
+   "se": 0.0972364709501016,
+   "PF": 1.3233845419527033
+  },
+  "freq": {
+   "per_session": 0.14812775330396477,
+   "per_year": {
+    "2015": 38,
+    "2016": 31,
+    "2017": 44,
+    "2018": 41,
+    "2019": 37,
+    "2020": 41,
+    "2021": 37
+   },
+   "active_weeks": 0.5671232876712329,
+   "longest_gap_days": 37,
+   "active_sessions": 265
+  },
+  "slip2": 52.260469499740935,
+  "prem2": 49.64322071940056,
+  "both2": 19.5326617793744,
+  "exits": {
+   "CIBLE": 104,
+   "LIQUIDATION_22H55_PARIS": 44,
+   "STOP_OBSERV\u00c9": 121
+  },
+  "vs_late": {
+   "common": 268,
+   "common_net_late": 79.05989761705672,
+   "common_net_here": 77.54682552578603,
+   "added": 1,
+   "added_net": 4.824202913981049,
+   "removed": 28,
+   "removed_net_late": -42.74336413184043
+  },
+  "funnel": {
+   "configurations": 2645,
+   "flags_formed": 985,
+   "confirmed_exits": 300,
+   "at_d": {
+    "march\u00e9 ferm\u00e9 \u00e0 D": 0,
+    "absence de cotation \u00e0 D": 0,
+    "stop non admissible": 0,
+    "cible d\u00e9j\u00e0 d\u00e9pass\u00e9e \u00e0 D": 1,
+    "taille minimale sup\u00e9rieure au budget": 2,
+    "ENTR\u00c9E_D\u00c9CID\u00c9E": 269,
+    "impulsion terminale NoWick (G1A)": 28
+   },
+   "entry_outcomes": {
+    "EX\u00c9CUT\u00c9E": 269,
+    "STOP_D\u00c9PASS\u00c9_\u00c0_L'EX\u00c9CUTION": 0,
+    "CIBLE_ATTEINTE_\u00c0_L'EX\u00c9CUTION": 0,
+    "ENTR\u00c9E_REJET\u00c9E": 0,
+    "ENTR\u00c9E_EXPIR\u00c9E": 0,
+    "ENTR\u00c9E_ANNUL\u00c9E_INTERRUPTION": 0
+   }
+  }
+ },
+ "G5B": {
+  "n": 246,
+  "net": 99.11765851998014,
+  "R": 0.09473952256682476,
+  "se": 0.07065320670627433,
+  "PF": 1.2086390456502483,
+  "gross": 162.0470913100293,
+  "costs": 62.929432790049155,
+  "dd_eur": 39.12399353864826,
+  "dd_rel": 1.94,
+  "p1": {
+   "n": 144,
+   "net": 40.635586682132335,
+   "R": 0.06633664828690934,
+   "se": 0.09600641953115537,
+   "PF": 1.1403006384396484
+  },
+  "p2": {
+   "n": 102,
+   "net": 58.482071837847805,
+   "R": 0.134837698020823,
+   "se": 0.10369738152528972,
+   "PF": 1.315377048986156
+  },
+  "freq": {
+   "per_session": 0.1354625550660793,
+   "per_year": {
+    "2015": 35,
+    "2016": 30,
+    "2017": 40,
+    "2018": 39,
+    "2019": 34,
+    "2020": 32,
+    "2021": 36
+   },
+   "active_weeks": 0.5342465753424658,
+   "longest_gap_days": 55,
+   "active_sessions": 244
+  },
+  "slip2": 71.5448899988144,
+  "prem2": 69.63492638266078,
+  "both2": 42.062157861495045,
+  "exits": {
+   "CIBLE": 97,
+   "LIQUIDATION_22H55_PARIS": 38,
+   "STOP_OBSERV\u00c9": 111
+  },
+  "vs_late": {
+   "common": 246,
+   "common_net_late": 97.93030201219655,
+   "common_net_here": 99.11765851998014,
+   "added": 0,
+   "added_net": 0,
+   "removed": 50,
+   "removed_net_late": -61.61376852698025
+  },
+  "funnel": {
+   "configurations": 2640,
+   "flags_formed": 982,
+   "confirmed_exits": 299,
+   "at_d": {
+    "march\u00e9 ferm\u00e9 \u00e0 D": 0,
+    "absence de cotation \u00e0 D": 0,
+    "stop non admissible": 0,
+    "cible d\u00e9j\u00e0 d\u00e9pass\u00e9e \u00e0 D": 1,
+    "taille minimale sup\u00e9rieure au budget": 1,
+    "ENTR\u00c9E_D\u00c9CID\u00c9E": 246,
+    "cr\u00e9neau 07:30-09:30 New York (G5B)": 51
+   },
+   "entry_outcomes": {
+    "EX\u00c9CUT\u00c9E": 246,
+    "STOP_D\u00c9PASS\u00c9_\u00c0_L'EX\u00c9CUTION": 0,
+    "CIBLE_ATTEINTE_\u00c0_L'EX\u00c9CUTION": 0,
+    "ENTR\u00c9E_REJET\u00c9E": 0,
+    "ENTR\u00c9E_EXPIR\u00c9E": 0,
+    "ENTR\u00c9E_ANNUL\u00c9E_INTERRUPTION": 0
+   }
+  }
+ },
+ "G1A5B": {
+  "n": 225,
+  "net": 127.07139590563699,
+  "R": 0.13083038013847068,
+  "se": 0.07389995542559165,
+  "PF": 1.3030819953316135,
+  "gross": 183.81687820983663,
+  "costs": 56.74548230419965,
+  "dd_eur": 38.03003282114163,
+  "dd_rel": 1.87,
+  "p1": {
+   "n": 132,
+   "net": 45.74784200708899,
+   "R": 0.08609057494558284,
+   "se": 0.1009464822985208,
+   "PF": 1.1728079604970936
+  },
+  "p2": {
+   "n": 93,
+   "net": 81.323553898548,
+   "R": 0.19433203912192437,
+   "se": 0.1072394753684624,
+   "PF": 1.5262576388503517
+  },
+  "freq": {
+   "per_session": 0.12389867841409692,
+   "per_year": {
+    "2015": 32,
+    "2016": 28,
+    "2017": 37,
+    "2018": 35,
+    "2019": 31,
+    "2020": 29,
+    "2021": 33
+   },
+   "active_weeks": 0.5041095890410959,
+   "longest_gap_days": 55,
+   "active_sessions": 223
+  },
+  "slip2": 101.4936064885522,
+  "prem2": 100.83275917759036,
+  "both2": 75.25496976050559,
+  "exits": {
+   "CIBLE": 91,
+   "LIQUIDATION_22H55_PARIS": 37,
+   "STOP_OBSERV\u00c9": 97
+  },
+  "vs_late": {
+   "common": 224,
+   "common_net_late": 118.70699762652849,
+   "common_net_here": 122.24719299165594,
+   "added": 1,
+   "added_net": 4.824202913981049,
+   "removed": 72,
+   "removed_net_late": -82.3904641413122
+  },
+  "funnel": {
+   "configurations": 2648,
+   "flags_formed": 985,
+   "confirmed_exits": 300,
+   "at_d": {
+    "march\u00e9 ferm\u00e9 \u00e0 D": 0,
+    "absence de cotation \u00e0 D": 0,
+    "stop non admissible": 0,
+    "cible d\u00e9j\u00e0 d\u00e9pass\u00e9e \u00e0 D": 1,
+    "taille minimale sup\u00e9rieure au budget": 1,
+    "ENTR\u00c9E_D\u00c9CID\u00c9E": 225,
+    "cr\u00e9neau 07:30-09:30 New York (G5B)": 45,
+    "impulsion terminale NoWick (G1A)": 28
+   },
+   "entry_outcomes": {
+    "EX\u00c9CUT\u00c9E": 225,
+    "STOP_D\u00c9PASS\u00c9_\u00c0_L'EX\u00c9CUTION": 0,
+    "CIBLE_ATTEINTE_\u00c0_L'EX\u00c9CUTION": 0,
+    "ENTR\u00c9E_REJET\u00c9E": 0,
+    "ENTR\u00c9E_EXPIR\u00c9E": 0,
+    "ENTR\u00c9E_ANNUL\u00c9E_INTERRUPTION": 0
+   }
+  }
+ },
+ "E3": {
+  "n": 207,
+  "net": 89.27778236841723,
+  "R": 0.09090987654533048,
+  "se": 0.09354886698739028,
+  "PF": 1.1773268664413334,
+  "gross": 164.52908705509859,
+  "costs": 75.25130468668135,
+  "dd_eur": 58.27119635586474,
+  "dd_rel": 2.8,
+  "p1": {
+   "n": 125,
+   "net": 48.943917622854876,
+   "R": 0.08005083600082838,
+   "se": 0.12347642654682332,
+   "PF": 1.163912473459189
+  },
+  "p2": {
+   "n": 82,
+   "net": 40.33386474556236,
+   "R": 0.10746329200951049,
+   "se": 0.14352424868340893,
+   "PF": 1.1968786577038502
+  },
+  "freq": {
+   "per_session": 0.11398678414096916,
+   "per_year": {
+    "2015": 35,
+    "2016": 24,
+    "2017": 40,
+    "2018": 26,
+    "2019": 28,
+    "2020": 24,
+    "2021": 30
+   },
+   "active_weeks": 0.4410958904109589,
+   "longest_gap_days": 68,
+   "active_sessions": 205
+  },
+  "slip2": 59.21093568183268,
+  "prem2": 50.22568575219247,
+  "both2": 20.158839065607907,
+  "exits": {
+   "CIBLE": 61,
+   "LIQUIDATION_22H55_PARIS": 31,
+   "STOP_OBSERV\u00c9": 115
+  },
+  "vs_late": {
+   "common": 206,
+   "common_net_late": -80.62437078278407,
+   "common_net_here": 86.05037505921223,
+   "added": 1,
+   "added_net": 3.2274073092050024,
+   "removed": 90,
+   "removed_net_late": 116.94090426800037
+  },
+  "funnel": {
+   "configurations": 2657,
+   "flags_formed": 987,
+   "confirmed_exits": 299,
+   "at_d": {
+    "march\u00e9 ferm\u00e9 \u00e0 D": 0,
+    "absence de cotation \u00e0 D": 0,
+    "stop non admissible": 0,
+    "cible d\u00e9j\u00e0 d\u00e9pass\u00e9e \u00e0 D": 1,
+    "taille minimale sup\u00e9rieure au budget": 1,
+    "ENTR\u00c9E_D\u00c9CID\u00c9E": 297
+   },
+   "entry_outcomes": {
+    "EX\u00c9CUT\u00c9E": 207,
+    "STOP_D\u00c9PASS\u00c9_\u00c0_L'EX\u00c9CUTION": 0,
+    "CIBLE_ATTEINTE_\u00c0_L'EX\u00c9CUTION": 0,
+    "ENTR\u00c9E_REJET\u00c9E": 0,
+    "ENTR\u00c9E_EXPIR\u00c9E": 79,
+    "ENTR\u00c9E_ANNUL\u00c9E_INTERRUPTION": 0,
+    "ENTR\u00c9E_ANNUL\u00c9E_CIBLE": 11
+   }
+  }
+ },
+ "F2R": {
+  "n": 694,
+  "net": -83.8594678339782,
+  "R": -0.02198896301004467,
+  "se": 0.06782664782325323,
+  "PF": 0.9605246105119456,
+  "gross": 348.5497494277981,
+  "costs": 432.4092172617763,
+  "dd_eur": 142.7813434933027,
+  "dd_rel": 7.06,
+  "p1": {
+   "n": 402,
+   "net": -14.407435473322208,
+   "R": 0.0011748496941461207,
+   "se": 0.09192449490698484,
+   "PF": 0.9882069503445754
+  },
+  "p2": {
+   "n": 292,
+   "net": -69.45203236065599,
+   "R": -0.05387886954115664,
+   "se": 0.10000846668328292,
+   "PF": 0.9230584273852755
+  },
+  "freq": {
+   "per_session": 0.38215859030837,
+   "per_year": {
+    "2015": 106,
+    "2016": 88,
+    "2017": 104,
+    "2018": 104,
+    "2019": 93,
+    "2020": 101,
+    "2021": 98
+   },
+   "active_weeks": 0.8821917808219178,
+   "longest_gap_days": 27,
+   "active_sessions": 652
+  },
+  "slip2": -230.65445655209697,
+  "prem2": -346.21141184414114,
+  "both2": -493.00640056225996,
+  "exits": {
+   "CIBLE": 130,
+   "LIQUIDATION_22H55_PARIS": 80,
+   "STOP_OBSERV\u00c9": 484
+  },
+  "vs_late": {
+   "common": 175,
+   "common_net_late": 15.597921809705278,
+   "common_net_here": 14.77735005516467,
+   "added": 519,
+   "added_net": -98.63681788914288,
+   "removed": 121,
+   "removed_net_late": 20.718611675511013
+  },
+  "funnel": {
+   "configurations": 2601,
+   "flags_formed": 968,
+   "confirmed_exits": 697,
+   "at_d": {
+    "march\u00e9 ferm\u00e9 \u00e0 D": 0,
+    "absence de cotation \u00e0 D": 0,
+    "stop non admissible": 0,
+    "cible d\u00e9j\u00e0 d\u00e9pass\u00e9e \u00e0 D": 1,
+    "taille minimale sup\u00e9rieure au budget": 2,
+    "ENTR\u00c9E_D\u00c9CID\u00c9E": 694
+   },
+   "entry_outcomes": {
+    "EX\u00c9CUT\u00c9E": 694,
+    "STOP_D\u00c9PASS\u00c9_\u00c0_L'EX\u00c9CUTION": 0,
+    "CIBLE_ATTEINTE_\u00c0_L'EX\u00c9CUTION": 0,
+    "ENTR\u00c9E_REJET\u00c9E": 0,
+    "ENTR\u00c9E_EXPIR\u00c9E": 0,
+    "ENTR\u00c9E_ANNUL\u00c9E_INTERRUPTION": 0
+   }
+  }
+ },
+ "RSC": {
+  "n": 351,
+  "net": -0.5636559257653835,
+  "R": -0.014136901596297376,
+  "se": 0.05806463852142019,
+  "PF": 0.9992066307463784,
+  "gross": 90.35735871151692,
+  "costs": 90.92101463728231,
+  "dd_eur": 67.02358144386963,
+  "dd_rel": 3.34,
+  "p1": {
+   "n": 199,
+   "net": -4.636784728933331,
+   "R": -0.025286580396811104,
+   "se": 0.07984314004835046,
+   "PF": 0.9885150857645202
+  },
+  "p2": {
+   "n": 152,
+   "net": 4.073128803167948,
+   "R": 0.000460375254375207,
+   "se": 0.08425835642815178,
+   "PF": 1.0132791902271816
+  },
+  "freq": {
+   "per_session": 0.1932819383259912,
+   "per_year": {
+    "2015": 50,
+    "2016": 41,
+    "2017": 53,
+    "2018": 55,
+    "2019": 50,
+    "2020": 53,
+    "2021": 49
+   },
+   "active_weeks": 0.6328767123287671,
+   "longest_gap_days": 37,
+   "active_sessions": 343
+  },
+  "slip2": -38.361973860381184,
+  "prem2": -45.11702770454125,
+  "both2": -82.91534563915707,
+  "exits": {
+   "CIBLE": 122,
+   "LIQUIDATION_22H55_PARIS": 56,
+   "STOP_OBSERV\u00c9": 173
+  },
+  "vs_late": {
+   "common": 284,
+   "common_net_late": 33.968783285585744,
+   "common_net_here": 54.584100028622345,
+   "added": 67,
+   "added_net": -55.14775595438773,
+   "removed": 12,
+   "removed_net_late": 2.347750199630549
+  },
+  "funnel": {
+   "configurations": 3122,
+   "flags_formed": 1192,
+   "confirmed_exits": 354,
+   "at_d": {
+    "march\u00e9 ferm\u00e9 \u00e0 D": 0,
+    "absence de cotation \u00e0 D": 0,
+    "stop non admissible": 0,
+    "cible d\u00e9j\u00e0 d\u00e9pass\u00e9e \u00e0 D": 1,
+    "taille minimale sup\u00e9rieure au budget": 2,
+    "ENTR\u00c9E_D\u00c9CID\u00c9E": 351
+   },
+   "entry_outcomes": {
+    "EX\u00c9CUT\u00c9E": 351,
+    "STOP_D\u00c9PASS\u00c9_\u00c0_L'EX\u00c9CUTION": 0,
+    "CIBLE_ATTEINTE_\u00c0_L'EX\u00c9CUTION": 0,
+    "ENTR\u00c9E_REJET\u00c9E": 0,
+    "ENTR\u00c9E_EXPIR\u00c9E": 0,
+    "ENTR\u00c9E_ANNUL\u00c9E_INTERRUPTION": 0
+   }
+  }
+ },
+ "M5S": {
+  "n": 888,
+  "net": -337.2926536951068,
+  "R": -0.09944396386278045,
+  "se": 0.03540973345709094,
+  "PF": 0.8297895085359993,
+  "gross": 23.893090438893744,
+  "costs": 361.1857441340006,
+  "dd_eur": 385.0519736423402,
+  "dd_rel": 18.92,
+  "p1": {
+   "n": 512,
+   "net": -157.78083816100394,
+   "R": -0.07806570322498763,
+   "se": 0.047971029383054344,
+   "PF": 0.8648406412923021
+  },
+  "p2": {
+   "n": 376,
+   "net": -179.51181553410288,
+   "R": -0.12855478685892388,
+   "se": 0.052252559410887474,
+   "PF": 0.779537731133669
+  },
+  "freq": {
+   "per_session": 0.4889867841409692,
+   "per_year": {
+    "2015": 129,
+    "2016": 127,
+    "2017": 127,
+    "2018": 129,
+    "2019": 119,
+    "2020": 134,
+    "2021": 123
+   },
+   "active_weeks": 0.936986301369863,
+   "longest_gap_days": 17,
+   "active_sessions": 783
+  },
+  "slip2": -485.2465580773451,
+  "prem2": -534.025979300341,
+  "both2": -681.9798836825793,
+  "exits": {
+   "CIBLE": 381,
+   "LIQUIDATION_22H55_PARIS": 13,
+   "STOP_OBSERV\u00c9": 494
+  },
+  "vs_late": {
+   "common": 2,
+   "common_net_late": -8.468439658843902,
+   "common_net_here": -8.190358598810445,
+   "added": 886,
+   "added_net": -329.10229509629636,
+   "removed": 294,
+   "removed_net_late": 44.784973144060196
+  },
+  "funnel": {
+   "configurations": 9140,
+   "flags_formed": 3227,
+   "confirmed_exits": 895,
+   "at_d": {
+    "march\u00e9 ferm\u00e9 \u00e0 D": 0,
+    "absence de cotation \u00e0 D": 0,
+    "stop non admissible": 0,
+    "cible d\u00e9j\u00e0 d\u00e9pass\u00e9e \u00e0 D": 4,
+    "taille minimale sup\u00e9rieure au budget": 3,
+    "ENTR\u00c9E_D\u00c9CID\u00c9E": 888
+   },
+   "entry_outcomes": {
+    "EX\u00c9CUT\u00c9E": 888,
+    "STOP_D\u00c9PASS\u00c9_\u00c0_L'EX\u00c9CUTION": 0,
+    "CIBLE_ATTEINTE_\u00c0_L'EX\u00c9CUTION": 0,
+    "ENTR\u00c9E_REJET\u00c9E": 0,
+    "ENTR\u00c9E_EXPIR\u00c9E": 0,
+    "ENTR\u00c9E_ANNUL\u00c9E_INTERRUPTION": 0
+   }
+  }
+ },
+ "SMTF": {
+  "n": 146,
+  "net": 54.289482177719705,
+  "R": 0.08191716423550445,
+  "se": 0.09362693833992808,
+  "PF": 1.186561658342769,
+  "gross": 91.24294626851125,
+  "costs": 36.95346409079155,
+  "dd_eur": 42.26238696542011,
+  "dd_rel": 2.1,
+  "p1": {
+   "n": 77,
+   "net": 5.295272244474369,
+   "R": -0.002012090299756406,
+   "se": 0.13185568952131657,
+   "PF": 1.0327776832214977
+  },
+  "p2": {
+   "n": 69,
+   "net": 48.99420993324533,
+   "R": 0.1755773468328245,
+   "se": 0.13275090786102042,
+   "PF": 1.3784825248209742
+  },
+  "freq": {
+   "per_session": 0.08039647577092511,
+   "per_year": {
+    "2015": 21,
+    "2016": 11,
+    "2017": 19,
+    "2018": 26,
+    "2019": 19,
+    "2020": 25,
+    "2021": 25
+   },
+   "active_weeks": 0.3424657534246575,
+   "longest_gap_days": 83,
+   "active_sessions": 146
+  },
+  "slip2": 38.30440506703208,
+  "prem2": 36.33512865159829,
+  "both2": 20.35005154091067,
+  "exits": {
+   "CIBLE": 60,
+   "LIQUIDATION_22H55_PARIS": 17,
+   "STOP_OBSERV\u00c9": 69
+  },
+  "vs_late": {
+   "common": 144,
+   "common_net_late": 53.31477743535867,
+   "common_net_here": 53.570379052897266,
+   "added": 2,
+   "added_net": 0.7191031248224347,
+   "removed": 152,
+   "removed_net_late": -16.99824395014238
+  },
+  "funnel": {
+   "configurations": 2684,
+   "flags_formed": 994,
+   "confirmed_exits": 303,
+   "at_d": {
+    "march\u00e9 ferm\u00e9 \u00e0 D": 0,
+    "absence de cotation \u00e0 D": 0,
+    "stop non admissible": 0,
+    "cible d\u00e9j\u00e0 d\u00e9pass\u00e9e \u00e0 D": 1,
+    "taille minimale sup\u00e9rieure au budget": 1,
+    "ENTR\u00c9E_D\u00c9CID\u00c9E": 146,
+    "GBP/USD ne confirme pas le nouvel extr\u00eame (SMTF)": 155
+   },
+   "entry_outcomes": {
+    "EX\u00c9CUT\u00c9E": 146,
+    "STOP_D\u00c9PASS\u00c9_\u00c0_L'EX\u00c9CUTION": 0,
+    "CIBLE_ATTEINTE_\u00c0_L'EX\u00c9CUTION": 0,
+    "ENTR\u00c9E_REJET\u00c9E": 0,
+    "ENTR\u00c9E_EXPIR\u00c9E": 0,
+    "ENTR\u00c9E_ANNUL\u00c9E_INTERRUPTION": 0
+   }
+  }
+ },
+ "SMTT": {
+  "n": 594,
+  "net": -262.6109323022009,
+  "R": -0.1028487059271394,
+  "se": 0.07410852464115249,
+  "PF": 0.8458709360932388,
+  "gross": 148.48240216445777,
+  "costs": 411.09333446665875,
+  "dd_eur": 316.3087960182489,
+  "dd_rel": 15.69,
+  "p1": {
+   "n": 350,
+   "net": -225.02387858644843,
+   "R": -0.14971007905094155,
+   "se": 0.09676302026321291,
+   "PF": 0.7835153308716918
+  },
+  "p2": {
+   "n": 244,
+   "net": -37.58705371575251,
+   "R": -0.03562952316758718,
+   "se": 0.11535368382025862,
+   "PF": 0.9434264734723152
+  },
+  "freq": {
+   "per_session": 0.32709251101321585,
+   "per_year": {
+    "2015": 82,
+    "2016": 81,
+    "2017": 100,
+    "2018": 87,
+    "2019": 78,
+    "2020": 81,
+    "2021": 85
+   },
+   "active_weeks": 0.8465753424657534,
+   "longest_gap_days": 23,
+   "active_sessions": 568
+  },
+  "slip2": -398.0705070932349,
+  "prem2": -522.4351124250511,
+  "both2": -657.894687216085,
+  "exits": {
+   "CIBLE": 121,
+   "LIQUIDATION_22H55_PARIS": 56,
+   "STOP_OBSERV\u00c9": 417
+  },
+  "vs_late": {
+   "common": 255,
+   "common_net_late": -9.390404919279222,
+   "common_net_here": 6.784610507854344,
+   "added": 339,
+   "added_net": -269.3955428100553,
+   "removed": 41,
+   "removed_net_late": 45.70693840449551
+  },
+  "funnel": {
+   "configurations": 2621,
+   "flags_formed": 974,
+   "confirmed_exits": 598,
+   "at_d": {
+    "march\u00e9 ferm\u00e9 \u00e0 D": 0,
+    "absence de cotation \u00e0 D": 0,
+    "stop non admissible": 0,
+    "cible d\u00e9j\u00e0 d\u00e9pass\u00e9e \u00e0 D": 1,
+    "taille minimale sup\u00e9rieure au budget": 3,
+    "ENTR\u00c9E_D\u00c9CID\u00c9E": 594
+   },
+   "entry_outcomes": {
+    "EX\u00c9CUT\u00c9E": 594,
+    "STOP_D\u00c9PASS\u00c9_\u00c0_L'EX\u00c9CUTION": 0,
+    "CIBLE_ATTEINTE_\u00c0_L'EX\u00c9CUTION": 0,
+    "ENTR\u00c9E_REJET\u00c9E": 0,
+    "ENTR\u00c9E_EXPIR\u00c9E": 0,
+    "ENTR\u00c9E_ANNUL\u00c9E_INTERRUPTION": 0
+   }
+  }
+ }
+}
